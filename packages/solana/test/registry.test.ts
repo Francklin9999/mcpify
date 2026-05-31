@@ -15,10 +15,9 @@ import {
   RECORD_SIZE,
   decodeServerRecord,
   encodeRegisterArgs,
-  encodeUpdateArgs,
 } from "../src/layout.js";
 
-// ── layout round-trip ─────────────────────────────────────────────────────────
+// layout round-trip
 
 describe("layout round-trip", () => {
   test("encodeRegisterArgs / decodeServerRecord", () => {
@@ -72,7 +71,7 @@ describe("layout round-trip", () => {
   });
 });
 
-// ── toolSignature ─────────────────────────────────────────────────────────────
+// toolSignature
 
 describe("toolSignature", () => {
   test("is order-independent", () => {
@@ -93,7 +92,7 @@ describe("toolSignature", () => {
   });
 });
 
-// ── serverPda ─────────────────────────────────────────────────────────────────
+// serverPda
 
 test("serverPda is deterministic", () => {
   const id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -103,7 +102,7 @@ test("serverPda is deterministic", () => {
   assert.equal(bump1, bump2);
 });
 
-// ── mock RPC tests ────────────────────────────────────────────────────────────
+// mock RPC tests
 
 describe("publishServer (mock RPC)", () => {
   function mockConnection(existingAccount: Buffer | null): Connection {
@@ -120,7 +119,7 @@ describe("publishServer (mock RPC)", () => {
       lastValidBlockHeight: 999999,
     }));
     let capturedTx: Buffer | null = null;
-    // Mock sendRawTransaction — capture the TX for inspection
+    // Mock sendRawTransaction - capture the TX for inspection
     mock.method(conn, "sendRawTransaction", async (rawTx: Uint8Array) => {
       capturedTx = Buffer.from(rawTx);
       return "mockSignature123";
@@ -226,12 +225,12 @@ describe("fetchRegistry (mock RPC)", () => {
   });
 });
 
-// ── integration test against local validator ──────────────────────────────────
+// integration test against local validator
 
 const LOCALNET_RPC = process.env["SOLANA_TEST_VALIDATOR_URL"] ?? "http://localhost:8899";
 
 describe("integration: local validator", { skip: !process.env["SOLANA_INTEGRATION_TEST"] }, () => {
-  test("register → fetchServer → update → fetchRegistry", async () => {
+  test("register -> fetchServer -> update -> fetchRegistry", async () => {
     const conn = new Connection(LOCALNET_RPC, "confirmed");
 
     // Check validator is reachable

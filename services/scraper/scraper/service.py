@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .capture import EscalationController, empty_bundle
@@ -29,11 +30,22 @@ def build_controller() -> EscalationController:
 
 def create_app(controller: Optional[EscalationController] = None) -> FastAPI:
     app = FastAPI(title="mcp-scraper")
+    # Fully-open CORS: any origin/header/method, OPTIONS preflight handled automatically.
+    # Wildcard origin without credentials is the spec-safe "allow everything" combo.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["*"],
+        max_age=86400,
+    )
     ctrl = controller or build_controller()
 
     @app.post("/capture", response_model=CaptureBundle, response_model_exclude_none=True)
     def capture(req: CaptureRequest) -> CaptureBundle:
-        # session is extension-only — the server-side scraper never acts in a user's session.
+        # session is extension-only - the server-side scraper never acts in a user's session.
         if req.legalMode == "session":
             return empty_bundle(req.url, req.legalMode, robots_allowed=False)
         # full_scrape requires explicit acknowledgement (04); otherwise treat as safe.

@@ -12,7 +12,7 @@ function jobResult(returnvalue: unknown): unknown {
   return undefined;
 }
 
-// GET /api/jobs/:jobId -> { status, result?, error? } (01 §7)
+// GET /api/jobs/:jobId -> { status, result?, error? } (01 S7)
 export async function GET(_req: Request, { params }: { params: Promise<{ jobId: string }> }): Promise<Response> {
   const { jobId } = await params;
   const job = await jobQueue().getJob(jobId);

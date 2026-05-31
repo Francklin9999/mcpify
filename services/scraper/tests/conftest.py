@@ -8,7 +8,7 @@ import pytest
 _PKG_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_PKG_ROOT))
 
-# Repo-root golden fixtures — the SAME corpus the TypeScript contract tests load (01 §Cross-language).
+# Repo-root golden fixtures - the SAME corpus the TypeScript contract tests load (01 SCross-language).
 _FIXTURES = _PKG_ROOT.parents[1] / "fixtures"
 
 

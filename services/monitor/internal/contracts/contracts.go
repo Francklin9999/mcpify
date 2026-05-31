@@ -1,5 +1,5 @@
-// Package contracts mirrors the subset of 01 §4 (queue) and 01 §5 (registry) the Go monitor needs.
-// JSON tags MUST match the camelCase @mcp/types shapes — the Node worker validates these via zod.
+// Package contracts mirrors the subset of 01 S4 (queue) and 01 S5 (registry) the Go monitor needs.
+// JSON tags MUST match the camelCase @mcp/types shapes - the Node worker validates these via zod.
 package contracts
 
 type ToolFailure struct {
@@ -9,7 +9,7 @@ type ToolFailure struct {
 	ObservedAt string `json:"observedAt"`
 }
 
-// SelfHealJob — produced ONLY by the monitor on a tool failure (01 §4).
+// SelfHealJob - produced ONLY by the monitor on a tool failure (01 S4).
 type SelfHealJob struct {
 	Kind     string      `json:"kind"` // always "self_heal"
 	ServerID string      `json:"serverId"`
@@ -21,7 +21,7 @@ func NewSelfHealJob(serverID, toolName string, f ToolFailure) SelfHealJob {
 	return SelfHealJob{Kind: "self_heal", ServerID: serverID, ToolName: toolName, Failure: f}
 }
 
-// RegenerateJob — produced ONLY by the monitor on large drift (01 §4).
+// RegenerateJob - produced ONLY by the monitor on large drift (01 S4).
 type RegenerateJob struct {
 	Kind     string `json:"kind"` // always "regenerate"
 	ServerID string `json:"serverId"`

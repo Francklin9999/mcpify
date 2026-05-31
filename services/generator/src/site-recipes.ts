@@ -123,6 +123,24 @@ function amazonTools(bundle: CaptureBundle): ToolDefinition[] {
       confidence: 0.8,
     }),
     browserTool({
+      name: "go_to_next_amazon_results_page",
+      description: "Open the next Amazon search results page for a query and return structured JSON results.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Product search keywords." },
+          page: { type: "string", description: "Next results page number, for example 2." },
+        },
+        required: ["query", "page"],
+      },
+      steps: [
+        { action: "navigate", value: `${origin}/s?k={{query}}&page={{page}}` },
+        { action: "waitFor", target: { role: "page", selector: "body" } },
+        { action: "extract", value: "json:listing" },
+      ],
+      confidence: 0.82,
+    }),
+    browserTool({
       name: "get_product_details",
       description: "Open an Amazon product page in a browser and return structured JSON fields such as title, price, availability, and rating.",
       inputSchema: {
@@ -139,6 +157,119 @@ function amazonTools(bundle: CaptureBundle): ToolDefinition[] {
       ],
       confidence: 0.79,
     }),
+    browserTool({
+      name: "open_amazon_product_url_and_extract_details",
+      description: "Open an Amazon product URL from search results and return structured product details.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          product_url: { type: "string", description: "Full Amazon product URL from a search result." },
+        },
+        required: ["product_url"],
+      },
+      steps: [
+        { action: "navigate", value: "{{product_url}}" },
+        { action: "waitFor", target: { role: "page", selector: "body" } },
+        { action: "extract", value: "json:product" },
+      ],
+      confidence: 0.81,
+    }),
+  ];
+}
+
+function linkedinTools(bundle: CaptureBundle): ToolDefinition[] {
+  const host = hostFor(bundle.url);
+  if (!/(^|\.)linkedin\.com$/.test(host)) return [];
+  const origin = originFor(bundle.url);
+  if (!origin) return [];
+
+  return [
+    browserTool({
+      name: "search_linkedin_all_results",
+      description: "Search LinkedIn all results for a person, company, post, or keyword and return readable page text.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "LinkedIn search keywords, for example a person's name." },
+        },
+        required: ["query"],
+      },
+      steps: [
+        { action: "navigate", value: `${origin}/search/results/all/?keywords={{query}}` },
+        { action: "waitFor", target: { role: "page", selector: "body" } },
+        { action: "extract", value: "page_text" },
+      ],
+      confidence: 0.86,
+    }),
+    browserTool({
+      name: "search_linkedin_people",
+      description: "Search LinkedIn people results for a person's name and return readable page text.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Person name or people-search keywords." },
+        },
+        required: ["query"],
+      },
+      steps: [
+        { action: "navigate", value: `${origin}/search/results/people/?keywords={{query}}` },
+        { action: "waitFor", target: { role: "page", selector: "body" } },
+        { action: "extract", value: "page_text" },
+      ],
+      confidence: 0.87,
+    }),
+    browserTool({
+      name: "go_to_next_linkedin_results_page",
+      description: "Open a specific LinkedIn search results page for the same query and return readable page text.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "LinkedIn search keywords." },
+          page: { type: "string", description: "Results page number, for example 2." },
+        },
+        required: ["query", "page"],
+      },
+      steps: [
+        { action: "navigate", value: `${origin}/search/results/all/?keywords={{query}}&page={{page}}` },
+        { action: "waitFor", target: { role: "page", selector: "body" } },
+        { action: "extract", value: "page_text" },
+      ],
+      confidence: 0.84,
+    }),
+    browserTool({
+      name: "open_linkedin_profile_and_extract_metadata",
+      description: "Open a LinkedIn profile URL and return readable profile text for experience, education, headline, and timeline analysis.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          profile_url: { type: "string", description: "Full LinkedIn profile URL, usually under /in/." },
+        },
+        required: ["profile_url"],
+      },
+      steps: [
+        { action: "navigate", value: "{{profile_url}}" },
+        { action: "waitFor", target: { role: "page", selector: "body" } },
+        { action: "extract", value: "page_text" },
+      ],
+      confidence: 0.87,
+    }),
+    browserTool({
+      name: "open_linkedin_post_and_extract_metadata",
+      description: "Open a LinkedIn post or activity URL and return readable post text and surrounding metadata.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          post_url: { type: "string", description: "Full LinkedIn post or activity URL." },
+        },
+        required: ["post_url"],
+      },
+      steps: [
+        { action: "navigate", value: "{{post_url}}" },
+        { action: "waitFor", target: { role: "page", selector: "body" } },
+        { action: "extract", value: "page_text" },
+      ],
+      confidence: 0.85,
+    }),
   ];
 }
 
@@ -147,5 +278,5 @@ function amazonTools(bundle: CaptureBundle): ToolDefinition[] {
  * get useful tools when a bot wall or weak snapshot prevents the model from discovering obvious actions.
  */
 export function siteRecipeTools(bundle: CaptureBundle): ToolDefinition[] {
-  return [...amazonTools(bundle)];
+  return [...amazonTools(bundle), ...linkedinTools(bundle)];
 }

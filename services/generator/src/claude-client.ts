@@ -24,7 +24,7 @@ function extractText(content: Anthropic.Messages.ContentBlock[]): string {
 
 /**
  * Claude-backed InferenceClient. Uses a JSON-prefill assistant turn so the model is forced to emit
- * valid JSON — more reliable than asking Claude to "output JSON only" in the system prompt alone.
+ * valid JSON - more reliable than asking Claude to "output JSON only" in the system prompt alone.
  * Prompt caching is enabled on the system prompt (ephemeral, 5-min TTL).
  */
 export class ClaudeInferenceClient implements InferenceClient {
@@ -49,7 +49,7 @@ export class ClaudeInferenceClient implements InferenceClient {
             network: bundle.network,
           }),
         },
-        // Prefill forces Claude to continue a valid JSON object — no prose preamble possible.
+        // Prefill forces Claude to continue a valid JSON object - no prose preamble possible.
         { role: "assistant", content: '{"tools":' },
       ],
     });

@@ -1,8 +1,8 @@
-"""Pydantic mirror of the CaptureBundle contract (docs/01-contracts.md §1).
+"""Pydantic mirror of the CaptureBundle contract (docs/01-contracts.md S1).
 
 The canonical schema is @mcp/types (zod); this mirror is kept in lockstep and proven against the SAME
 repo-root golden fixtures the TS tests load (tests/test_contracts.py). Hand-maintained per the v1
-cross-language strategy (01 §Cross-language) with a golden round-trip as the drift guard.
+cross-language strategy (01 SCross-language) with a golden round-trip as the drift guard.
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ class NetworkCapture(BaseModel):
     @field_validator("requestHeaders")
     @classmethod
     def _reject_secret_headers(cls, headers: dict[str, str]) -> dict[str, str]:
-        # FAIL-CLOSED legal backstop (04) — mirrors @mcp/types NetworkCapture.superRefine. A producer that
+        # FAIL-CLOSED legal backstop (04) - mirrors @mcp/types NetworkCapture.superRefine. A producer that
         # forgets to scrub fails validation here rather than leaking a secret downstream.
         for key in headers:
             if is_secret_header(key) or is_secret_field(key):

@@ -1,4 +1,4 @@
-// Web API client (01 §7). The extension talks ONLY to the web app — never to scraper/generator/monitor.
+// Web API client (01 S7). The extension talks ONLY to the web app - never to scraper/generator/monitor.
 // Override the base via the options page / storage; defaults to local dev.
 import { DEFAULT_API_BASE } from "./config.js";
 
@@ -93,9 +93,9 @@ export async function assistAgentStep(messages, pageContext, tools, signal) {
 
 /**
  * Find the registry serverId for a page URL so continuous discovery grows the RIGHT server. Servers are
- * one-per-URL (`generate` allocates serverId per url), so this matches the EXACT url only — a same-host but
+ * one-per-URL (`generate` allocates serverId per url), so this matches the EXACT url only - a same-host but
  * different page (e.g. /products vs /blog) is a DIFFERENT server, and a fuzzy match would contaminate it with
- * the wrong page's tools. No exact match ⇒ undefined (this page has no server yet; nothing to grow).
+ * the wrong page's tools. No exact match => undefined (this page has no server yet; nothing to grow).
  */
 export async function findServerForUrl(url) {
   const base = await apiBase();
@@ -108,9 +108,9 @@ export async function findServerForUrl(url) {
 
 /**
  * SYNCHRONOUS incremental discovery: given the tools already known for this page + a fresh capture, returns
- * { added, tools } (genuinely-new + merged) for live in-session use, and — when serverId is set — also grows
+ * { added, tools } (genuinely-new + merged) for live in-session use, and - when serverId is set - also grows
  * the persisted registry server. The server runs the delta-only engine (only new material reaches the model;
- * no new material ⇒ no model call). This is the "continuous generation" trigger.
+ * no new material => no model call). This is the "continuous generation" trigger.
  */
 export async function discoverTools(currentTools, bundle, serverId) {
   const base = await apiBase();

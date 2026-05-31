@@ -6,7 +6,7 @@ const sans = Hanken_Grotesk({ subsets: ["latin"], variable: "--font-sans", displ
 const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono", display: "swap" });
 
 export const metadata = {
-  title: "MCP Forge — turn any website into an MCP server",
+  title: "MCP Forge - turn any website into an MCP server",
   description: "Paste a URL. Get a runnable MCP server an LLM can act with. Generated locally, kept alive automatically.",
 };
 

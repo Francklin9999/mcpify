@@ -14,4 +14,5 @@ RUN pip install --no-cache-dir . \
   && python -m playwright install --with-deps chromium
 
 EXPOSE 8000
-CMD ["uvicorn", "scraper.service:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form so platform-injected $PORT (Render/Railway/Fly) is honored; falls back to 8000.
+CMD ["sh", "-c", "uvicorn scraper.service:app --host 0.0.0.0 --port ${PORT:-8000}"]

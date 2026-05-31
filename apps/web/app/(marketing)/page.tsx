@@ -1,5 +1,5 @@
 export const metadata = {
-  title: "MCP Forge — turn any website into an MCP server",
+  title: "MCP Forge - turn any website into an MCP server",
   description: "Paste a URL. Get a runnable MCP server an LLM can act with. Generated locally, kept alive automatically.",
 };
 
@@ -9,7 +9,7 @@ export default function Landing() {
       <section className="hero">
         <div className="hero-grid">
           <div className="hero-copy">
-            <span className="hero-badge">◆ Website in, living toolset out</span>
+            <span className="hero-badge">* Website in, living toolset out</span>
             <h1>
               Turn any website into an <span className="hl">MCP server</span>.
             </h1>
@@ -21,7 +21,7 @@ export default function Landing() {
               <a className="primary-btn" href="/generate">Generate a server</a>
               <a className="quiet-btn" href="/library">Browse the library</a>
             </div>
-            <p className="hero-note">Local-first runtime · confidence-scored servers · self-healing when sites drift</p>
+            <p className="hero-note">Local-first runtime &middot; confidence-scored servers &middot; self-healing when sites drift</p>
             <div className="hero-trust" aria-label="Key product traits">
               <span>Skyline-grade glass UI</span>
               <span>Traffic-to-tool inference</span>

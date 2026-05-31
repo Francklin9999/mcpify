@@ -55,7 +55,7 @@ test("heal changes EXACTLY the failing tool and increments the version", async (
   assert.equal(outcome.status, "active");
   assert.equal(outcome.version, 4); // 3 -> 4
   assert.equal(written.write?.createdBy, "self_heal");
-  // The write makes the new version LIVE: status active + current confidence (A — feature blocker).
+  // The write makes the new version LIVE: status active + current confidence (A - feature blocker).
   assert.equal(written.write?.status, "active");
   assert.ok(typeof written.write?.lastParsedAt === "string");
 
@@ -71,7 +71,7 @@ test("heal changes EXACTLY the failing tool and increments the version", async (
   assert.deepEqual(newNeighbor, neighborTool);
 });
 
-test("heal failure (non-JSON) leaves the server untouched — no new version", async () => {
+test("heal failure (non-JSON) leaves the server untouched - no new version", async () => {
   const { deps, written } = makeDeps("could not repair {oops");
   const outcome = await selfHeal(job, current, deps);
 

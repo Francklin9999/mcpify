@@ -19,7 +19,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             <p>Ask about any server, or paste a URL on the Generate tab to build one.</p>
           </div>
           <form className="assistant-input">
-            <input className="field" placeholder="Ask anything…" />
+            <input className="field" placeholder="Ask anything..." />
             <button className="primary-btn" type="button">Ask</button>
           </form>
         </div>

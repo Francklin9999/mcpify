@@ -1,4 +1,4 @@
-"""robots gate (safe mode) — tested with an injected fetch, no live internet."""
+"""robots gate (safe mode) - tested with an injected fetch, no live internet."""
 
 from scraper.robots import robots_allows
 

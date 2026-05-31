@@ -12,14 +12,14 @@
 #  1. Generate Cargo.lock with Rust 1.79 (understands the dep graph but doesn't
 #     write v4 lock-file format that the BPF toolchain can't read).
 #  2. Vendor the resolved crates using system Rust; patch the one crate whose
-#     Cargo.toml uses edition=2024 but is never compiled for BPF (wit-bindgen —
-#     it is only used for wasm32 targets via the jobserver→getrandom chain).
+#     Cargo.toml uses edition=2024 but is never compiled for BPF (wit-bindgen -
+#     it is only used for wasm32 targets via the jobserver->getrandom chain).
 #     Then build --offline so the 1.75 toolchain never hits the registry.
 #
 # Constraints committed to in Cargo.toml:
-#   solana-program = "=1.17.34"   (1.18.x unconditionally pulls borsh 1.x →
-#                                  proc-macro-crate 3.x → toml_edit → toml_datetime 1.1)
-#   blake3 = ">=1.3, <1.6"       (1.6+ pulls digest 0.11.x → block-buffer 0.12 (ed2024))
+#   solana-program = "=1.17.34"   (1.18.x unconditionally pulls borsh 1.x ->
+#                                  proc-macro-crate 3.x -> toml_edit -> toml_datetime 1.1)
+#   blake3 = ">=1.3, <1.6"       (1.6+ pulls digest 0.11.x -> block-buffer 0.12 (ed2024))
 
 set -e
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -59,4 +59,4 @@ trap cleanup EXIT
 echo "==> Building SBF program..."
 cargo build-sbf --manifest-path "$CARGO_MANIFEST"
 
-echo "==> Done — artifact: $REPO_ROOT/target/deploy/server_registry.so"
+echo "==> Done - artifact: $REPO_ROOT/target/deploy/server_registry.so"

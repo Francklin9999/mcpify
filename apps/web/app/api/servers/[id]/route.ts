@@ -3,7 +3,7 @@ import { getServerDetail } from "@/lib/registry";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/servers/:id -> RegistryEntry & { versions: ServerVersion[] } (01 §7)
+// GET /api/servers/:id -> RegistryEntry & { versions: ServerVersion[] } (01 S7)
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await params;
   const server = await getServerDetail(id);

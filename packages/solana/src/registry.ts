@@ -7,7 +7,6 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 import {
-  DISCRIMINANT,
   RECORD_SIZE,
   decodeServerRecord,
   encodeRegisterArgs,
@@ -29,14 +28,13 @@ export interface SolanaRegistryEntry {
   toolCount: number;
   version: number;
   updatedAt: Date;
-  /** Base58 address of the PDA account — use for Solana Explorer links. */
+  /** Base58 address of the PDA account - use for Solana Explorer links. */
   pdaAddress: string;
 }
 
 /**
- * Derive the PDA for a given serverId.
- * We use the first 32 characters of the UUID (which is 36 chars) as the seed —
- * Solana seeds are capped at 32 bytes, and UUID first-32 is still unique.
+ * Derive the PDA for a serverId. Solana seeds are capped at 32 bytes, so we seed
+ * with the first 32 chars of the 36-char UUID (still unique).
  */
 export function serverPda(serverId: string): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(

@@ -1,7 +1,7 @@
 /**
- * Worker integration test — the REAL bar: real Redis + Postgres, assert on actual rows.
+ * Worker integration test - the REAL bar: real Redis + Postgres, assert on actual rows.
  * Run via test/integration/run.sh (boots Docker pg+redis, applies the migration, sets env).
- * Inference + scraper are in-process fakes (no live Claude / no Python subprocess — that seam is the
+ * Inference + scraper are in-process fakes (no live Claude / no Python subprocess - that seam is the
  * separate scraper-seam check). This proves the persistence heart: transactional multi-table writes,
  * current_version repointing, and job-keyed idempotency under at-least-once delivery.
  */
@@ -73,7 +73,7 @@ test("generate writes real, atomic rows and points the server at v1", async () =
   assert.equal(pj.length, 1);
 });
 
-test("idempotent: reprocessing the same jobId is skipped — no duplicate version", async () => {
+test("idempotent: reprocessing the same jobId is skipped - no duplicate version", async () => {
   const url = "https://itest.example.com/idem";
   const job: GenerateJob = { kind: "generate", url, legalMode: "safe", requestedBy: "itest" };
   const first = await processJob("job-idem", job, deps);
@@ -86,7 +86,7 @@ test("idempotent: reprocessing the same jobId is skipped — no duplicate versio
   assert.equal(versions.length, 1, "no duplicate version from the retry");
 });
 
-test("generating the SAME url twice (different jobs) upserts — bumps version, no FK crash", async () => {
+test("generating the SAME url twice (different jobs) upserts - bumps version, no FK crash", async () => {
   // Regression: nextServer used to mint a new serverId + v1 every time; on a known url the servers insert
   // was skipped (onConflictDoNothing) and the server_versions FK insert then crashed the job.
   const url = "https://itest.example.com/twice";

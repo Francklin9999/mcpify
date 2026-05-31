@@ -1,4 +1,4 @@
-// Package poll is the real HTTP Poller — a cheap GET with a timeout. Read-only; never mutates the source.
+// Package poll is the real HTTP Poller - a cheap GET with a timeout. Read-only; never mutates the source.
 package poll
 
 import (

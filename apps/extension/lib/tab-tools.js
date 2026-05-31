@@ -1,13 +1,13 @@
-// lib/tab-tools.js — executes the side-panel agent's browser_* tools against the user's CURRENT tab via
+// lib/tab-tools.js - executes the side-panel agent's browser_* tools against the user's CURRENT tab via
 // chrome.scripting / chrome.tabs. This is the ONLY tab-touching code; it runs as the user's real, signed-in
-// session (which is exactly why mutating actions are confirmed in the loop — see lib/agent.js).
+// session (which is exactly why mutating actions are confirmed in the loop - see lib/agent.js).
 //
 // UNVERIFIED OFFLINE: this needs the extension loaded in Chrome (chrome.* APIs + a real tab). The control
 // flow that decides WHEN to call these is covered by test/agent.test.ts; the executors themselves are
 // exercised only in a loaded extension.
 //
 // The in-page functions (snapshot/click/extract) deliberately mirror the headless toolkit in
-// services/generator/src/codegen.ts — the SAME data-__mcp_ref tag-then-resolve scheme — so the two surfaces
+// services/generator/src/codegen.ts - the SAME data-__mcp_ref tag-then-resolve scheme - so the two surfaces
 // behave identically. setAttribute from executeScript's isolated world lands on the shared DOM, so a later
 // executeScript resolves the ref. Refs are re-assigned on every snapshot (self-healing after navigation).
 
@@ -25,6 +25,18 @@ function resolveUrl(target, baseUrl) {
     return new URL(String(target), baseUrl).toString();
   } catch {
     return String(target || "");
+  }
+}
+
+function sameUrl(a, b) {
+  try {
+    const left = new URL(String(a));
+    const right = new URL(String(b));
+    left.hash = "";
+    right.hash = "";
+    return left.toString() === right.toString();
+  } catch {
+    return String(a || "") === String(b || "");
   }
 }
 
@@ -67,12 +79,12 @@ function interpolate(template, args, encode = false) {
   });
 }
 
-// ── in-page functions (serialized & injected — must be self-contained, no outer references) ──────────────
+// in-page functions (serialized & injected - must be self-contained, no outer references)
 
 function snapshotInPage() {
   const doc = document;
   const clean = (v) => String(v == null ? "" : v).replace(/\s+/g, " ").trim();
-  // Broad enough to catch calendar day cells, dropdown options and other ARIA widgets — not just links/buttons.
+  // Broad enough to catch calendar day cells, dropdown options and other ARIA widgets - not just links/buttons.
   const selector = [
     "a[href]", "button", "input:not([type=hidden])", "select", "textarea", "summary", "label[for]",
     "[role=button]", "[role=link]", "[role=tab]", "[role=menuitem]", "[role=menuitemcheckbox]", "[role=menuitemradio]",
@@ -98,7 +110,7 @@ function snapshotInPage() {
     const inView = rect.bottom > -120 && rect.top < vh + 120 && rect.right > 0 && rect.left < vw;
     candidates.push({ el, inView });
   }
-  // In-viewport elements first (what the user/agent is actually looking at), then the rest — capped small.
+  // In-viewport elements first (what the user/agent is actually looking at), then the rest - capped small.
   candidates.sort((a, b) => (a.inView === b.inView ? 0 : a.inView ? -1 : 1));
   const elements = [];
   for (const c of candidates) {
@@ -276,7 +288,7 @@ function pressKeyInPage(arg) {
 
 function selectInPage(arg) {
   const el = document.querySelector('[data-__mcp_ref="' + String(arg.ref).replace(/[^a-zA-Z0-9_-]/g, "") + '"]');
-  if (!el) return { error: "No element for ref " + arg.ref + " — call browser_snapshot for current refs." };
+  if (!el) return { error: "No element for ref " + arg.ref + " - call browser_snapshot for current refs." };
   const value = String(arg.value);
   return selectValueOnElement(el, value);
 }
@@ -309,7 +321,7 @@ function readInPage() {
   const clean = (v) => String(v == null ? "" : v).replace(/[ \t]+/g, " ").replace(/\n\s*\n\s*\n+/g, "\n\n").trim();
   const body = document.body ? document.body.innerText : "";
   const text = clean(body);
-  return text.length > 40000 ? text.slice(0, 40000) + "\n…[truncated]" : text;
+  return text.length > 40000 ? text.slice(0, 40000) + "\n...[truncated]" : text;
 }
 
 function extractInPage(mode) {
@@ -371,7 +383,7 @@ function extractInPage(mode) {
         return {
           title: e.text,
           url: e.href,
-          price: (cardText.match(/(?:\$|£|€|CAD\s?)[\d,.]+/) || [""])[0],
+          price: (cardText.match(/(?:\$|\u00A3|\u20AC|CAD\s?)[\d,.]+/) || [""])[0],
         };
       })
       .filter((e) => (seen.has(e.url) ? false : (seen.add(e.url), true)))
@@ -416,8 +428,8 @@ export function makeTabExecutor() {
     const a = call.arguments || {};
     const snapshot = async () => {
       const text = formatSnapshot(await runInPage(tab.id, snapshotInPage));
-      // Trace for diagnosis: open the side panel's devtools (right-click the panel → Inspect) to read what
-      // the agent actually saw — invaluable for figuring out why a calendar/widget step failed.
+      // Trace for diagnosis: open the side panel's devtools (right-click the panel -> Inspect) to read what
+      // the agent actually saw - invaluable for figuring out why a calendar/widget step failed.
       try {
         console.debug("[MCP snapshot]\n" + text);
       } catch {}
@@ -437,8 +449,11 @@ export function makeTabExecutor() {
       case "browser_extract":
         return JSON.stringify(await runInPage(tab.id, extractInPage, String(a.mode || "metadata")), null, 2);
       case "browser_navigate": {
-        await chrome.tabs.update(tab.id, { url: resolveUrl(a.url, tab.url) });
-        await waitForLoad(tab.id);
+        const targetUrl = resolveUrl(a.url, tab.url);
+        if (!sameUrl(targetUrl, tab.url)) {
+          await chrome.tabs.update(tab.id, { url: targetUrl });
+          await waitForLoad(tab.id);
+        }
         return snapshot();
       }
       case "browser_back": {
@@ -497,9 +512,11 @@ export async function executeBrowserStepsOnActiveTab(steps, args = {}) {
     if (!step || !step.action) continue;
     switch (step.action) {
       case "navigate": {
-        const targetUrl = resolveUrl(interpolate(step.value, args, true), tab.url || "");
-        await chrome.tabs.update(tab.id, { url: targetUrl });
-        await waitForLoad(tab.id);
+        const targetUrl = resolveUrl(interpolate(step.value, args), tab.url || "");
+        if (!sameUrl(targetUrl, tab.url)) {
+          await chrome.tabs.update(tab.id, { url: targetUrl });
+          await waitForLoad(tab.id);
+        }
         break;
       }
       case "waitFor": {

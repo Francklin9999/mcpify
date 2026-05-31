@@ -69,9 +69,9 @@ export async function processJob(jobId: string, payload: unknown, deps: WorkerDe
         inference: deps.inference,
         persistence: deps.store.forVersion(jobId, "discover"),
       });
-      // Nothing genuinely new ⇒ no version written; report it as a no_op so the result is honest.
+      // Nothing genuinely new: no version written, report it as a no_op.
       return outcome.wroteVersion
-        ? { status: "done", detail: `discovered ${outcome.discovered} tool(s) → v${outcome.version}` }
+        ? { status: "done", detail: `discovered ${outcome.discovered} tool(s) -> v${outcome.version}` }
         : { status: "no_op", detail: "no new tools" };
     }
   }

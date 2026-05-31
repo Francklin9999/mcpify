@@ -14,7 +14,7 @@ export function AppRail() {
   return (
     <aside className="rail">
       <a className="brand" href="/">
-        <span className="dot">◆</span> MCP Forge
+        <span className="dot">*</span> MCP Forge
       </a>
       <nav>
         {LINKS.map((l) => {
@@ -27,7 +27,7 @@ export function AppRail() {
         })}
       </nav>
       <div className="rail-foot">
-        <span className="ver">v0.1 · local</span>
+        <span className="ver">v0.1 &middot; local</span>
         <ThemeToggle />
       </div>
     </aside>

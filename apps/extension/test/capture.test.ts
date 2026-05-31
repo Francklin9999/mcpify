@@ -41,7 +41,7 @@ test("net-intercept produces a bundle SHAPE-IDENTICAL to the scraper's (passes t
   assert.equal(bundle.source, "extension");
 
   const cap = bundle.network[0]!;
-  // Secrets scrubbed before leaving the client (04) — and the contract would have REJECTED them otherwise.
+  // Secrets scrubbed before leaving the client (04) - and the contract would have REJECTED them otherwise.
   assert.equal(cap.requestHeaders.authorization, undefined);
   assert.equal(cap.requestHeaders.cookie, undefined);
   assert.equal(cap.requestHeaders.accept, "application/json");

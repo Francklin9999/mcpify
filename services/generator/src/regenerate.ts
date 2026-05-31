@@ -7,8 +7,8 @@ import type { VersionPersistence } from "./version-write.js";
 import { publishToSolana } from "./solana-publish.js";
 
 /**
- * `regenerate` handler (`01 §4`, `03` Flow B large-drift). Unlike `generate()` — which allocates a NEW
- * serverId for a URL — this re-parses an EXISTING server and bumps ITS version. The `RegenerateJob`
+ * `regenerate` handler (`01 S4`, `03` Flow B large-drift). Unlike `generate()` - which allocates a NEW
+ * serverId for a URL - this re-parses an EXISTING server and bumps ITS version. The `RegenerateJob`
  * carries only `serverId`, so the caller resolves it to `CurrentServer` (url/title/version) first.
  * Re-infers ALL tools wholesale (drift may have changed several); 0 tools => the new version is `broken`.
  */
@@ -57,7 +57,7 @@ export async function regenerate(job: RegenerateJob, current: CurrentServer, dep
     lastParsedAt: new Date().toISOString(),
   });
 
-  // Publish updated tools to Solana on-chain registry (best-effort).
+  // Publish updated tools to the on-chain registry; failure is non-fatal.
   void publishToSolana(
     {
       serverId: job.serverId,

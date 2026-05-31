@@ -1,5 +1,5 @@
 /**
- * MongoDB Atlas integration — routes through the web app's /api/atlas so the
+ * MongoDB Atlas integration - routes through the web app's /api/atlas so the
  * MongoDB credentials stay server-side and never touch the browser.
  *
  * The web app must have MONGODB_URI set in .env. If it isn't, the routes
@@ -38,6 +38,6 @@ export async function saveToolsToAtlas(url, record) {
       body: JSON.stringify({ domain, origin, ...record }),
     });
   } catch {
-    // silently ignore — Atlas is optional
+    // silently ignore - Atlas is optional
   }
 }

@@ -1,0 +1,17 @@
+# MCP Forge — Fly.io: monitor (Go poller, background; no inbound port).
+# Deploy from the repo root:  fly deploy --config infra/fly/monitor.fly.toml
+# Secrets:  fly secrets set DATABASE_URL=... -a mcp-forge-monitor
+app = "mcp-forge-monitor"
+primary_region = "iad"
+
+[build]
+  dockerfile = "infra/docker/monitor.Dockerfile"
+
+[env]
+  ENQUEUE_URL = "http://mcp-forge-generator.internal:8081/enqueue"   # ← change if generator moves
+  POLL_INTERVAL = "60s"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

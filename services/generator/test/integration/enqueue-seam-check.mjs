@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { startEnqueueServer } from "../../dist/src/index.js";
 
-// IMPORTANT: use async spawn, NOT spawnSync — spawnSync blocks the event loop, so the in-process HTTP
+// IMPORTANT: use async spawn, NOT spawnSync - spawnSync blocks the event loop, so the in-process HTTP
 // shim can't handle the Go subprocess's POST (deadlock). spawn keeps the loop free.
 function runGo(cwd, env) {
   return new Promise((resolve) => {

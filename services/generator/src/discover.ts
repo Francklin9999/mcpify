@@ -6,7 +6,7 @@ import type { CurrentServer } from "./self-heal.js";
 import type { VersionPersistence } from "./version-write.js";
 
 /**
- * `discover` handler — the CONTINUOUS-generation path. Unlike `regenerate` (which re-infers ALL tools
+ * `discover` handler - the CONTINUOUS-generation path. Unlike `regenerate` (which re-infers ALL tools
  * wholesale from a fresh scrape), this takes a NEW capture of an existing server's page and runs INCREMENTAL
  * discovery: it merges only genuinely-new tools (`incremental.ts`) and bumps the version. Two efficiencies
  * are the whole point:
@@ -36,7 +36,7 @@ export async function discover(job: DiscoverJob, current: CurrentServer, deps: D
     ? { ...mergeCandidates(current.tools, job.candidates), calledModel: false }
     : await discoverMore(current.tools, job.bundle, deps.inference);
 
-  // No new capability surfaced — do NOT write a version (avoid churning the registry on every capture).
+  // No new capability surfaced - do NOT write a version (avoid churning the registry on every capture).
   if (added.length === 0) {
     return {
       serverId: job.serverId,

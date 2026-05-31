@@ -1,6 +1,8 @@
 node_modules/
 dist/
-.gen-test/
+.gen-test*/
+.gen-debug/
+services/.gen-test-manual/
 *.tsbuildinfo
 .env
 .env.*
@@ -21,3 +23,7 @@ __pycache__/
 
 # Go
 *.test
+
+# Rust / Solana build + local validator artifacts (multi-GB, never commit)
+target/
+test-ledger/

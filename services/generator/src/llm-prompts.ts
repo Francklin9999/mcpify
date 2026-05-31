@@ -23,7 +23,7 @@ structured JSON. For browser extract steps, prefer value "json:metadata", "json:
 Skip login, password, checkout, account, and credential/session-only actions. Output JSON only, no prose.`;
 
 export const INCREMENTAL_NOTE = `INCREMENTAL MODE: you are EXTENDING an existing MCP server. The payload contains only NEW
-page material discovered since the last pass, plus "knownToolNames" — tools that ALREADY exist. Propose ONLY
+page material discovered since the last pass, plus "knownToolNames" - tools that ALREADY exist. Propose ONLY
 genuinely-new, distinct capabilities for the new material. Do NOT restate, rename, or duplicate an existing
 tool (e.g. do not add "find_products" when "search_products" already exists). If nothing is genuinely new,
 output { "tools": [] }.`;

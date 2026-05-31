@@ -1,7 +1,9 @@
 import { and, desc, eq, ilike, or } from "drizzle-orm";
 import { serverVersions, servers } from "@mcp/db";
 import { RegistryEntry, ServerTier, ServerVersion, type RegistryEntry as RegistryEntryT, type ServerTier as ServerTierT, type ServerVersion as ServerVersionT } from "@mcp/types";
+import { atlasDocToEntry, atlasDocToVersion, filterEntries } from "@/lib/atlas-catalog";
 import { db } from "@/lib/db";
+import { toolsCollection } from "@/lib/mongo";
 import { sampleRegistry, sampleVersions } from "@/lib/sample-data";
 
 type SearchParams = {
@@ -55,7 +57,54 @@ function filterSamples(params: SearchParams): RegistryEntryT[] {
     .sort((a, b) => b.confidence - a.confidence);
 }
 
+function workingAtlasFilter(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    status: "active",
+    "artifact.files.0": { $exists: true },
+    "artifact.tools.1": { $exists: true },
+    "localTest.passed": true,
+    toolCount: { $gte: 2 },
+    ...extra,
+  };
+}
+
+async function listAtlasRegistry(params: SearchParams): Promise<RegistryEntryT[]> {
+  const col = await toolsCollection();
+  if (!col) return [];
+  const docs = await col
+    .find(workingAtlasFilter(), { projection: { _id: 0 } })
+    .sort({ confidence: -1, toolCount: -1, title: 1 })
+    .limit(100)
+    .toArray();
+  return filterEntries(
+    docs.flatMap((doc) => {
+      const entry = atlasDocToEntry(doc);
+      return entry ? [entry] : [];
+    }),
+    params,
+  );
+}
+
+async function getAtlasServerDetail(serverId: string): Promise<(RegistryEntryT & { versions: ServerVersionT[] }) | null> {
+  const col = await toolsCollection();
+  if (!col) return null;
+  const doc = await col.findOne(workingAtlasFilter({ serverId }), { projection: { _id: 0 } });
+  const entry = doc ? atlasDocToEntry(doc) : null;
+  const version = doc ? atlasDocToVersion(doc) : null;
+  if (!doc || !entry || !version) return null;
+  const tools = Array.isArray(doc.tools)
+    ? doc.tools.map((tool: any) => ({
+        name: String(tool?.name ?? ""),
+        description: String(tool?.description ?? ""),
+        confidence: typeof tool?.confidence === "number" ? tool.confidence : undefined,
+      }))
+    : [];
+  return { ...entry, versions: [version], tools } as RegistryEntryT & { versions: ServerVersionT[] };
+}
+
 export async function listRegistry(params: SearchParams = {}): Promise<RegistryEntryT[]> {
+  const atlas = await listAtlasRegistry(params).catch(() => []);
+  if (atlas.length) return atlas.sort((a, b) => b.confidence - a.confidence);
   if (!hasDatabase()) return filterSamples(params);
 
   const conds = [];
@@ -79,13 +128,13 @@ export async function listRegistry(params: SearchParams = {}): Promise<RegistryE
 export async function getServerDetail(serverId: string): Promise<(RegistryEntryT & { versions: ServerVersionT[] }) | null> {
   if (!hasDatabase()) {
     const entry = sampleRegistry.find((item) => item.serverId === serverId);
-    if (!entry) return null;
-    return { ...entry, versions: sampleVersions.filter((version) => version.serverId === serverId) };
+    if (entry) return { ...entry, versions: sampleVersions.filter((version) => version.serverId === serverId) };
+    return getAtlasServerDetail(serverId);
   }
 
   const [server] = await db().select().from(servers).where(eq(servers.serverId, serverId)).limit(1);
   const entry = server ? normalizeRegistryRow(server) : null;
-  if (!entry) return null;
+  if (!entry) return getAtlasServerDetail(serverId);
   const rows = await db()
     .select()
     .from(serverVersions)

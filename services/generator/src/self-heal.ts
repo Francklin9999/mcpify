@@ -6,7 +6,7 @@ import type { VersionPersistence } from "./version-write.js";
 /**
  * Self-healer (`services/generator.md`, the differentiator). Given a SelfHealJob, re-snapshot the source
  * and ask Claude to rewrite ONLY the failing tool, then bump the version.
- * Acceptance (enforced by tests): a heal changes EXACTLY the failing tool and increments the version —
+ * Acceptance (enforced by tests): a heal changes EXACTLY the failing tool and increments the version -
  * nothing else moves. The Claude call is behind `HealClient` so this is testable with zero network.
  *
  * v1: re-snapshots the whole source URL (a lighter per-tool path is an open question in `03`).
@@ -64,7 +64,7 @@ export async function selfHeal(job: SelfHealJob, current: CurrentServer, deps: S
   });
 
   const failing = current.tools.find((t) => t.name === job.toolName);
-  if (!failing) return failed("degraded"); // unknown tool — nothing to heal
+  if (!failing) return failed("degraded"); // unknown tool, nothing to heal
 
   const bundle = await deps.scraper.capture(current.url, "safe");
   const raw = await deps.heal.proposeHeal(failing, bundle, job.failure);
@@ -86,8 +86,8 @@ export async function selfHeal(job: SelfHealJob, current: CurrentServer, deps: S
     tools: newTools,
   });
   const artifactUrl = await deps.persistence.saveArtifact(artifact);
-  // writeVersion both inserts the new version AND repoints servers.current_version → newVersion with
-  // status active — without that the heal would write v+1 while the server still serves the broken v.
+  // writeVersion both inserts the new version AND repoints servers.current_version -> newVersion with
+  // status active - without that the heal would write v+1 while the server still serves the broken v.
   await deps.persistence.writeVersion({
     serverId: job.serverId,
     version: newVersion,

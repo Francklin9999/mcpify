@@ -13,10 +13,10 @@ PIDS=()
 cleanup() { for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null || true; done; docker rm -f "$PG" "$REDIS" >/dev/null 2>&1 || true; rm -rf "$ARTIFACT_ROOT" "$PAGEDIR"; }
 trap cleanup EXIT; cleanup
 
-# ── fixture SPA whose JS fires a load-time XHR (tier-2 captures it -> heuristic builds an http tool) ──
+# -- fixture SPA whose JS fires a load-time XHR (tier-2 captures it -> heuristic builds an http tool) --
 mkdir -p "$PAGEDIR/api"
 cat > "$PAGEDIR/index.html" <<'HTML'
-<!doctype html><html><head><title>Flow A SPA</title></head><body><div id=o>loading…</div>
+<!doctype html><html><head><title>Flow A SPA</title></head><body><div id=o>loading...</div>
 <script>fetch('/api/items.json').then(r=>r.json()).then(d=>{document.getElementById('o').textContent='item '+d.id})</script>
 </body></html>
 HTML

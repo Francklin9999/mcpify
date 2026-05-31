@@ -1,5 +1,5 @@
 /*!
-MCP Forge — On-chain Server Registry
+MCP Forge - On-chain Server Registry
 =====================================
 Fixed-size account layout, no external dependencies beyond `solana-program`.
 
@@ -58,7 +58,7 @@ pub fn process_instruction(
     }
 }
 
-// ── register_server ───────────────────────────────────────────────────────────
+// -- register_server -----------------------------------------------------------
 //
 // Args layout (after discriminant byte):
 //   [0..36]   server_id  [u8;36]
@@ -95,7 +95,7 @@ fn ix_register(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Pr
     let tool_count = u16::from_le_bytes(data[403..405].try_into().unwrap());
     let updated_at = i64::from_le_bytes(data[405..413].try_into().unwrap());
 
-    // Seeds capped at 32 bytes — use first 32 of the 36-char UUID.
+    // Seeds capped at 32 bytes - use first 32 of the 36-char UUID.
     let id_seed = &server_id[..32];
     let (pda, bump) = Pubkey::find_program_address(&[b"server", id_seed], program_id);
     if pda != *record_acct.key {
@@ -136,7 +136,7 @@ fn ix_register(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Pr
     Ok(())
 }
 
-// ── update_server ─────────────────────────────────────────────────────────────
+// -- update_server -------------------------------------------------------------
 //
 // Args layout (after discriminant byte):
 //   [0..64]  tool_sig   [u8;64]

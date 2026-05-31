@@ -3,7 +3,7 @@ import { analyzeBundleHtml, type DetailLinkPattern, type QueryLinkPattern, type 
 import { parseCandidates, validateCandidates, type InferenceClient } from "./inference.js";
 
 /**
- * Incremental tool discovery (`continuous generation`). As a reactive page changes, new structure appears —
+ * Incremental tool discovery (`continuous generation`). As a reactive page changes, new structure appears -
  * a new endpoint fires, a new form/list/detail-pattern renders. This module finds the tools for ONLY that
  * new material and merges them into an existing toolset, so:
  *   - the model is never re-sent material it already turned into tools (token budget), and
@@ -22,7 +22,7 @@ export interface Coverage {
 
 const APPSTATE = "APPSTATE";
 
-/** Templated path: strip query, normalize `{{x}}`→`{x}`, reduce absolute URLs to their pathname. */
+/** Templated path: strip query, normalize `{{x}}`->`{x}`, reduce absolute URLs to their pathname. */
 function normalizePath(urlPattern: string): string {
   let path = String(urlPattern || "").replace(/\{\{(\w+)\}\}/g, "{$1}");
   const q = path.indexOf("?");
@@ -39,7 +39,7 @@ function normalizePath(urlPattern: string): string {
   return path;
 }
 
-/** Structural signature of an endpoint/action: `METHOD templated-path`. Same endpoint ⇒ same sig. */
+/** Structural signature of an endpoint/action: `METHOD templated-path`. Same endpoint => same sig. */
 function sig(method: string, urlPattern: string): string {
   return `${String(method || "GET").toUpperCase()} ${normalizePath(urlPattern)}`;
 }
@@ -71,7 +71,7 @@ export function coverageOf(tools: ToolDefinition[]): Coverage {
 /** The compact "new material" sent to the model in incremental mode (NOT the whole bundle). */
 export interface DiscoveryDelta {
   url: string;
-  /** Names of tools already produced — given to the model so it proposes only genuinely-new capabilities. */
+  /** Names of tools already produced - given to the model so it proposes only genuinely-new capabilities. */
   knownToolNames: string[];
   newNetwork: NetworkCapture[];
   newForms: unknown[];
@@ -79,14 +79,14 @@ export interface DiscoveryDelta {
   newQueryPatterns: QueryLinkPattern[];
   newSearchActions: SearchActionPattern[];
   newActions: { kind: string; label: string; selector: string; href?: string }[];
-  /** Supporting context only — does NOT by itself trigger a model call. */
+  /** Supporting context only - does NOT by itself trigger a model call. */
   newAppState: { source: string; keys: string[]; types: string[] }[];
 }
 
 /**
  * Diff a fresh capture against what's already covered. Returns only-new material + whether anything
  * tool-bearing is new (`hasNew`). App-state changes are surfaced as context but don't flip `hasNew` on their
- * own (they're hints, not endpoints — gating a paid call on them would be noisy).
+ * own (they're hints, not endpoints - gating a paid call on them would be noisy).
  */
 export function computeDelta(bundle: CaptureBundle, coverage: Coverage): { delta: DiscoveryDelta; hasNew: boolean } {
   const analysis = analyzeBundleHtml(bundle);
@@ -136,7 +136,7 @@ export function computeDelta(bundle: CaptureBundle, coverage: Coverage): { delta
 }
 
 /**
- * Merge already-found `candidates` into `currentTools` WITHOUT any model call — dedup by name and by covered
+ * Merge already-found `candidates` into `currentTools` WITHOUT any model call - dedup by name and by covered
  * endpoint sig. Used by the worker when a synchronous /api/discover pass already paid for the inference, so
  * persistence doesn't re-infer the same material.
  */
@@ -158,7 +158,7 @@ export interface DiscoverMoreOutcome {
   /** only the new tools (empty when nothing new). */
   added: ToolDefinition[];
   droppedCount: number;
-  /** false when there was no new material — no model call was made (zero tokens). */
+  /** false when there was no new material - no model call was made (zero tokens). */
   calledModel: boolean;
   delta: DiscoveryDelta;
 }
@@ -166,7 +166,7 @@ export interface DiscoverMoreOutcome {
 /**
  * Discover ADDITIONAL tools from a new capture and merge them with `currentTools`. The paid path
  * (`client.proposeMoreTools`) is sent ONLY the delta; a client without it falls back to a full
- * `proposeTools` (fine for the free heuristic — the validator still filters down to genuinely-new tools).
+ * `proposeTools` (fine for the free heuristic - the validator still filters down to genuinely-new tools).
  * New candidates are dropped if their name OR their endpoint sig already exists (kills synonym/duplicate
  * capabilities the more this runs).
  */

@@ -49,7 +49,7 @@ def test_all_tiers_fail_yields_content_free_bundle():
 
 def test_tier1_script_shell_is_insufficient_and_escalates():
     # A script-bearing shell with little visible text is NOT sufficient at tier 1 -> escalate to tier 2.
-    shell = FetchResult(html="<html><body><div>loading…</div><script>fetch('/api/x')</script></body></html>",
+    shell = FetchResult(html="<html><body><div>loading...</div><script>fetch('/api/x')</script></body></html>",
                         status=200, rendered_with_js=False)
     t1 = FakeTier(1, shell)
     t2 = FakeTier(2, FetchResult(html="<html>rendered</html>", status=200, rendered_with_js=True))
@@ -60,7 +60,7 @@ def test_tier1_script_shell_is_insufficient_and_escalates():
 
 def test_shell_falls_back_to_best_when_browser_tiers_unavailable():
     # Tier-1 shell is insufficient, but if all browser tiers fail we keep the shell (not an empty bundle).
-    shell = FetchResult(html="<html><body><div>loading…</div><script>x()</script></body></html>",
+    shell = FetchResult(html="<html><body><div>loading...</div><script>x()</script></body></html>",
                         status=200, rendered_with_js=False)
     bundle = EscalationController([FakeTier(1, shell), FakeTier(2, None), FakeTier(3, None)]).capture("https://s.com", "safe")
     assert bundle.tier == 1  # best-effort fallback, not empty

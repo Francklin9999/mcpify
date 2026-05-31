@@ -3,7 +3,7 @@ package detect
 import "testing"
 
 func TestDomHashFormatAndParity(t *testing.T) {
-	// sha256("test") — identical to Python hashlib.sha256(b"test").hexdigest(), so monitor hashes are
+	// sha256("test") - identical to Python hashlib.sha256(b"test").hexdigest(), so monitor hashes are
 	// directly comparable to the scraper's "sha256:"+hexdigest() (cross-language change detection).
 	got := DomHash("test")
 	want := "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"

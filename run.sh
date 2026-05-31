@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
-# run.sh — bring up the whole MCP Forge stack locally.
+# run.sh - bring up the whole MCP Forge stack locally.
 #
 # Sequence (mirrors README "Run it locally"):
 #   1. npm install + build phase-0 packages (@mcp/types, @mcp/db)
 #   2. infra: docker compose up postgres + redis, wait until healthy
 #   3. apply DB migrations
-#   4. scraper  (Python/uvicorn)  — background
-#   5. worker   (Node/BullMQ)     — background
-#   6. web      (Next.js)         — foreground (Ctrl-C stops everything)
+#   4. scraper  (Python/uvicorn)  - background
+#   5. worker   (Node/BullMQ)     - background
+#   6. web      (Next.js)         - foreground (Ctrl-C stops everything)
 #
 # Usage:
 #   ./run.sh            # build + start the full stack, then open the API base from mcp.config.json
@@ -16,7 +16,7 @@
 #   ./run.sh --no-build # skip npm install / builds (faster restart)
 #
 # Put OPENAI_API_KEY (and optionally OPENAI_MODEL) in a .env file at the repo
-# root — copy .env.example to .env and fill in your key. With no key the worker
+# root - copy .env.example to .env and fill in your key. With no key the worker
 # falls back to the keyless heuristic (real servers, no live inference).
 
 set -euo pipefail
@@ -64,6 +64,59 @@ kill_tree() {
   kill "$pid" 2>/dev/null || true
 }
 
+kill_matching() {
+  local pattern="$1" pid
+  for pid in $(pgrep -f "$pattern" 2>/dev/null || true); do
+    [ "$pid" = "$$" ] && continue
+    kill_tree "$pid"
+  done
+}
+
+stop_local_processes() {
+  # Clean up stale processes from a previous ./run.sh that was interrupted before its EXIT trap ran.
+  kill_matching "services/generator.*npm run worker"
+  kill_matching "services/generator/dist/src/main\\.js"
+  kill_matching "uvicorn scraper\\.service:app"
+  kill_matching "apps/web.*next start"
+  kill_matching "apps/web.*next dev"
+  sleep 0.4
+}
+
+port_owner() {
+  local port="$1"
+  if command -v ss >/dev/null; then
+    ss -ltnp "sport = :$port" 2>/dev/null | awk 'NR > 1 {print; found=1} END {exit found ? 0 : 1}'
+    return
+  fi
+  if command -v lsof >/dev/null; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | awk 'NR > 1 {print; found=1} END {exit found ? 0 : 1}'
+    return
+  fi
+  return 1
+}
+
+port_from_url() {
+  local value="$1" fallback="$2" endpoint
+  endpoint="${value#*://}"
+  endpoint="${endpoint%%/*}"
+  if [[ "$endpoint" == *:* ]]; then
+    printf '%s' "${endpoint##*:}"
+    return
+  fi
+  printf '%s' "$fallback"
+}
+
+assert_port_free() {
+  local port="$1" label="$2" owner
+  [[ "$port" =~ ^[0-9]+$ ]] || die "cannot determine numeric $label port from '$port'"
+  owner="$(port_owner "$port" || true)"
+  if [ -n "$owner" ]; then
+    warn "$label port :$port is already in use:"
+    printf '%s\n' "$owner" >&2
+    die "free port :$port or set the matching env var before running ./run.sh"
+  fi
+}
+
 cleanup() {
   log "Shutting down background services..."
   for pid in "${PIDS[@]:-}"; do
@@ -75,13 +128,23 @@ cleanup() {
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
 
 if [ "${1:-}" = "--down" ]; then
+  log "Stopping local app processes..."
+  stop_local_processes
   log "Stopping docker infra (postgres + redis)..."
-  compose down
+  compose down || warn "docker compose down failed; stop Docker services manually if they are still running."
   log "Done. (Background node/python procs are tied to a running run.sh; nothing else to stop.)"
   exit 0
 fi
 
 trap cleanup EXIT INT TERM
+
+log "Stopping stale local app processes..."
+stop_local_processes
+
+SCRAPER_PORT="$(port_from_url "$SCRAPER_URL" "8000")"
+assert_port_free "$SCRAPER_PORT" "scraper"
+assert_port_free "${ENQUEUE_PORT:-8081}" "worker enqueue"
+assert_port_free "$WEB_PORT" "web"
 
 # --- preflight ------------------------------------------------------------
 command -v node    >/dev/null || die "node is required (>=20)"
@@ -134,8 +197,8 @@ if [ ! -d .venv ]; then
   .venv/bin/pip install -q -e '.[dev]'
   .venv/bin/python -m playwright install chromium
 fi
-log "Starting scraper on :8000..."
-.venv/bin/uvicorn scraper.service:app --port 8000 &
+log "Starting scraper on :$SCRAPER_PORT..."
+.venv/bin/uvicorn scraper.service:app --port "$SCRAPER_PORT" &
 PIDS+=($!)
 popd >/dev/null
 
@@ -145,7 +208,7 @@ for i in $(seq 1 30); do
     break
   fi
   sleep 1
-  [ "$i" = 30 ] && warn "scraper not responding yet — continuing anyway"
+  [ "$i" = 30 ] && warn "scraper not responding yet - continuing anyway"
 done
 
 # --- 5. worker (Node) -----------------------------------------------------
@@ -155,7 +218,7 @@ npm run build --workspace=@mcp/generator
 PIDS+=($!)
 
 if [ -z "${OPENAI_API_KEY:-}" ]; then
-  warn "OPENAI_API_KEY not set — worker uses the keyless heuristic (no live inference). Add it to .env."
+  warn "OPENAI_API_KEY not set - worker uses the keyless heuristic (no live inference). Add it to .env."
 fi
 
 # --- 6. web (Next.js) -----------------------------------------------------

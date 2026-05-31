@@ -3,7 +3,7 @@ import type { Scraper } from "../generate.js";
 
 /**
  * Real `Scraper` adapter: calls the Python scraper service over HTTP (03 Flow A, sync v1) and validates
- * the wire response through the contract — fail-closed, don't trust the wire (the Node↔Python seam).
+ * the wire response through the contract - fail-closed, don't trust the wire (the Node<->Python seam).
  */
 export class HttpScraper implements Scraper {
   constructor(private readonly baseUrl: string) {}

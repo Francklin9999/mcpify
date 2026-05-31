@@ -83,8 +83,71 @@ test("artifact ships an installable manifest pinning the verified dep ranges", (
   assert.ok(artifact.files.some((f) => f.path === "tsconfig.json"));
 });
 
-// ── Gate A: the generated server.ts TYPE-CHECKS against the real @modelcontextprotocol/sdk ──
-// (a clean tsc emit catches a hallucinated SDK API — wrong registerTool config, bad CallToolResult shape).
+test("artifact ships one-step installers (install.sh/install.ps1) + a config-merge helper", () => {
+  const sh = artifact.files.find((f) => f.path === "install.sh")!.content;
+  const ps1 = artifact.files.find((f) => f.path === "install.ps1")!.content;
+  const helper = artifact.files.find((f) => f.path === "mcp-register.mjs")!.content;
+  assert.ok(sh && ps1 && helper, "installers + helper are emitted");
+
+  // install.sh: builds, resolves an absolute node path, honors MCP_CONFIG_PATH, delegates the merge.
+  assert.match(sh, /^#!\/usr\/bin\/env bash/);
+  assert.match(sh, /npm run build/);
+  assert.match(sh, /command -v node/);
+  assert.match(sh, /MCP_CONFIG_PATH/);
+  assert.match(sh, /mcp-register\.mjs/);
+  // install.ps1: PowerShell, %APPDATA% Claude config, same helper.
+  assert.match(ps1, /\$PSScriptRoot/);
+  assert.match(ps1, /APPDATA/);
+  assert.match(ps1, /mcp-register\.mjs/);
+  // The server slug appears in both so the registered entry is named per-site.
+  assert.match(sh, /SERVER_NAME="example-com"/);
+  assert.match(ps1, /\$ServerName = "example-com"/);
+});
+
+// The merge helper must be idempotent and PRESERVE pre-existing mcpServers entries (the classic overwrite bug),
+// create the file/dir when absent, and write an absolute command/args. Run the real helper to prove it.
+test("mcp-register.mjs merges without clobbering existing entries and creates the file", () => {
+  rmSync(genDir, { recursive: true, force: true });
+  mkdirSync(genDir, { recursive: true });
+  const helper = artifact.files.find((f) => f.path === "mcp-register.mjs")!.content;
+  const helperPath = `${genDir}/mcp-register.mjs`;
+  writeFileSync(helperPath, helper);
+
+  const cfgPath = `${genDir}/nested/dir/config.json`; // parent dirs do not exist yet
+  // Pre-existing config with another server that MUST survive the merge.
+  mkdirSync(`${genDir}/nested/dir`, { recursive: true });
+  writeFileSync(cfgPath, JSON.stringify({ mcpServers: { existing: { command: "node", args: ["/x/other.js"] } } }));
+
+  const res = spawnSync(process.execPath, [helperPath], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      MCP_REG_CONFIG: cfgPath,
+      MCP_REG_NAME: "example-com",
+      MCP_REG_NODE: "/usr/local/bin/node",
+      MCP_REG_JS: `${genDir}/server.js`,
+    },
+  });
+  assert.equal(res.status, 0, `helper failed:\n${res.stdout}\n${res.stderr}`);
+
+  const merged = JSON.parse(readFileSync(cfgPath, "utf8"));
+  assert.deepEqual(merged.mcpServers.existing, { command: "node", args: ["/x/other.js"] }, "existing entry preserved");
+  assert.equal(merged.mcpServers["example-com"].command, "/usr/local/bin/node");
+  assert.deepEqual(merged.mcpServers["example-com"].args, [`${genDir}/server.js`]);
+
+  // First-time install: no config file at all -> helper creates it (+ parent dirs).
+  const freshPath = `${genDir}/fresh/config.json`;
+  const res2 = spawnSync(process.execPath, [helperPath], {
+    encoding: "utf8",
+    env: { ...process.env, MCP_REG_CONFIG: freshPath, MCP_REG_NAME: "example-com", MCP_REG_NODE: "node", MCP_REG_JS: "/s.js" },
+  });
+  assert.equal(res2.status, 0, `helper (fresh) failed:\n${res2.stdout}\n${res2.stderr}`);
+  assert.ok(existsSync(freshPath), "helper created the config file from scratch");
+  assert.ok(JSON.parse(readFileSync(freshPath, "utf8")).mcpServers["example-com"]);
+});
+
+// Gate A: the generated server.ts TYPE-CHECKS against the real @modelcontextprotocol/sdk
+// (a clean tsc emit catches a hallucinated SDK API - wrong registerTool config, bad CallToolResult shape).
 test("generated server.ts compiles against the real MCP SDK", () => {
   rmSync(genDir, { recursive: true, force: true });
   mkdirSync(genDir, { recursive: true });
@@ -110,7 +173,7 @@ test("generated server.ts compiles against the real MCP SDK", () => {
   assert.equal(res.status, 0, `tsc failed:\n${res.stdout}\n${res.stderr}`);
 });
 
-// ── Gate B: the generated server ACTS — register tools and execute an http tool over a real client ──
+// Gate B: the generated server ACTS - register tools and execute an http tool over a real client
 test("generated server registers tools and executes an http call mapped from paramMapping", async () => {
   // Import the emitted JS (compiled in Gate A). The main-guard does NOT connect stdio on import.
   const mod = await import(`${genDir}/out/server.js`);
@@ -216,7 +279,7 @@ test("generated server registers tools and executes an http call mapped from par
   }
 });
 
-// ── Shared helper: write a server.ts + tsconfig, compile with the real tsc, return its emitted JS path ──
+// Shared helper: write a server.ts + tsconfig, compile with the real tsc, return its emitted JS path
 function compileServer(dir: string, serverTs: string): string {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
@@ -235,10 +298,10 @@ function compileServer(dir: string, serverTs: string): string {
   return `${dir}/out/server.js`;
 }
 
-// ── The shared-session GUARANTEE: the browsing toolkit routes every tool call to ONE persistent session,
+// The shared-session GUARANTEE: the browsing toolkit routes every tool call to ONE persistent session,
 // so state set by one tool call (e.g. add-to-cart) is visible to a later, separate tool call (view cart).
 // This is the whole reason multi-step flows work; it's proven here with an injected fake backend (no
-// browser needed) so the WIRING is verified deterministically even where Chromium is unavailable. ──
+// browser needed) so the WIRING is verified deterministically even where Chromium is unavailable.
 test("browsing toolkit shares one persistent session across separate tool calls", async () => {
   const genDir2 = `${packageRoot}.gen-test-session`;
   const serverTs = generateServer({
@@ -286,7 +349,7 @@ test("browsing toolkit shares one persistent session across separate tool calls"
       const c1: any = await client.callTool({ name: "browser_click", arguments: { ref: "addcart" } });
       assert.match(c1.content[0].text, /cart=1/);
 
-      // a LATER, separate snapshot call sees the persisted state — proves one shared session
+      // a LATER, separate snapshot call sees the persisted state - proves one shared session
       const s1: any = await client.callTool({ name: "browser_snapshot", arguments: {} });
       assert.match(s1.content[0].text, /cart=1/);
 
@@ -302,9 +365,9 @@ test("browsing toolkit shares one persistent session across separate tool calls"
   }
 });
 
-// ── Real-mechanism test: the actual snapshot→ref→click loop driven by REAL Chromium against a local HTML
+// Real-mechanism test: the actual snapshot->ref->click loop driven by REAL Chromium against a local HTML
 // fixture (no network). A fake backend can't catch a broken data-__mcp_ref scheme; this can. Skips LOUDLY
-// when playwright/chromium isn't installed (mirrors the repo's tier-2 "skip, don't fake" stance). ──
+// when playwright/chromium isn't installed (mirrors the repo's tier-2 "skip, don't fake" stance).
 test("real browser session: snapshot assigns refs and click-by-ref mutates the live page", async (t) => {
   let chromiumPath: string | undefined;
   let pw: any;
@@ -317,7 +380,7 @@ test("real browser session: snapshot assigns refs and click-by-ref mutates the l
     /* playwright not installed */
   }
   if (!chromiumPath || !existsSync(chromiumPath)) {
-    t.skip("playwright + chromium not installed — run `npm i -D playwright -w @mcp/generator && npx playwright install chromium` to exercise the real session");
+    t.skip("playwright + chromium not installed - run `npm i -D playwright -w @mcp/generator && npx playwright install chromium` to exercise the real session");
     return;
   }
   try {
@@ -357,7 +420,7 @@ test("real browser session: snapshot assigns refs and click-by-ref mutates the l
 
   try {
     const mod = await import(jsPath);
-    const server = mod.createServer(); // REAL PlaywrightBrowsing — no injection
+    const server = mod.createServer(); // REAL PlaywrightBrowsing, no injection
     const [ct, st] = InMemoryTransport.createLinkedPair();
     await server.connect(st);
     const client = new Client({ name: "real-browser-test", version: "1.0.0" });
@@ -372,7 +435,7 @@ test("real browser session: snapshot assigns refs and click-by-ref mutates the l
       const ref = snapText.match(/\[(e\d+)\][^\n]*Add to cart/)?.[1];
       assert.ok(ref, `snapshot did not assign a ref to the button:\n${snapText}`);
 
-      // 2. click BY REF — the page's JS must run and mutate the DOM; click returns a fresh snapshot
+      // 2. click BY REF - the page's JS must run and mutate the DOM; click returns a fresh snapshot
       const clicked: any = await client.callTool({ name: "browser_click", arguments: { ref } });
       assert.match(clicked.content[0].text, /cart: 1/, "click-by-ref did not mutate the live page");
 
@@ -380,12 +443,190 @@ test("real browser session: snapshot assigns refs and click-by-ref mutates the l
       const stale: any = await client.callTool({ name: "browser_click", arguments: { ref: "e999" } });
       assert.match(stale.content[0].text, /browser_snapshot/);
     } finally {
-      // Release Chromium — without this the launched browser is an open handle and node --test never exits.
+      // Release Chromium - without this the launched browser is an open handle and node --test never exits.
       await (server as unknown as { browsing?: { close?: () => Promise<void> } }).browsing?.close?.();
       await client.close();
       await server.close();
     }
   } finally {
     rmSync(genDir3, { recursive: true, force: true });
+  }
+});
+
+// Regression: json:listing extraction must honor the inference's explicit card selector and return ONE
+// record per card - on ANY listing site, not just product-URL pages. (Before the fix, the extractor used a
+// hardcoded /dp//product/ URL heuristic and returned [] on e.g. quotes/articles.) REAL Chromium, local file.
+test("real browser session: json:listing extract honors the card selector (one record per card)", async (t) => {
+  let chromiumPath: string | undefined;
+  let pw: any;
+  try {
+    const dynamicImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
+    pw = await dynamicImport("playwright");
+    chromiumPath = pw.chromium.executablePath?.();
+  } catch {
+    /* playwright not installed */
+  }
+  if (!chromiumPath || !existsSync(chromiumPath)) {
+    t.skip("playwright + chromium not installed - skipping the real listing-extraction test");
+    return;
+  }
+  try {
+    const browser = await pw.chromium.launch({ executablePath: chromiumPath, chromiumSandbox: false });
+    await browser.close();
+  } catch (err) {
+    t.skip(`playwright chromium launch is unavailable in this environment: ${String(err)}`);
+    return;
+  }
+
+  const genDir4 = `${packageRoot}.gen-test-listing`;
+  // A non-ecommerce listing (no /dp//product/ URLs) - the old heuristic would return [] here.
+  const fixtureHtml = `<!doctype html><html><head><title>Quotes Fixture</title></head><body>
+    <h1>Quotes</h1>
+    <div class="quote"><span class="text">First quote here</span><small class="author">Ada</small></div>
+    <div class="quote"><span class="text">Second quote here</span><small class="author">Alan</small></div>
+    <div class="quote"><span class="text">Third quote here</span><small class="author">Grace</small></div>
+  </body></html>`;
+  const fixturePath = `${genDir4}/fixture.html`;
+  const fixtureUrl = pathToFileURL(fixturePath).href;
+
+  const listTool = {
+    name: "list_quotes",
+    description: "List the quotes on the page.",
+    inputSchema: { type: "object", properties: {} },
+    execution: {
+      kind: "browser" as const,
+      steps: [
+        { action: "navigate" as const, value: fixtureUrl },
+        { action: "waitFor" as const, target: { role: "list", selector: "div.quote" } },
+        { action: "extract" as const, target: { role: "list", selector: "div.quote", fallbackSelectors: [".quote"] }, value: "json:listing" },
+      ],
+    },
+    confidence: 0.8,
+  };
+  const serverTs = generateServer({
+    serverId: "77777777-7777-4777-8777-777777777777",
+    version: 1,
+    url: fixtureUrl,
+    title: "Quotes Fixture",
+    tools: [listTool as any],
+  }).files.find((f) => f.path === "server.ts")!.content;
+  const jsPath = compileServer(genDir4, serverTs);
+  writeFileSync(fixturePath, fixtureHtml);
+
+  try {
+    const mod = await import(jsPath);
+    const server = mod.createServer();
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await server.connect(st);
+    const client = new Client({ name: "listing-test", version: "1.0.0" });
+    await client.connect(ct);
+    try {
+      const res: any = await client.callTool({ name: "list_quotes", arguments: {} });
+      assert.equal(res.isError, false, `list_quotes errored: ${res.content?.[0]?.text}`);
+      const records = JSON.parse(res.content[0].text);
+      assert.ok(Array.isArray(records), "extract should return a JSON array");
+      assert.equal(records.length, 3, `expected one record per card, got ${records.length}: ${res.content[0].text}`);
+      const joined = records.map((r: any) => r.text || "").join(" | ");
+      assert.match(joined, /First quote here/);
+      assert.match(joined, /Second quote here/);
+      assert.match(joined, /Third quote here/);
+    } finally {
+      await (server as unknown as { browsing?: { close?: () => Promise<void> } }).browsing?.close?.();
+      await client.close();
+      await server.close();
+    }
+  } finally {
+    rmSync(genDir4, { recursive: true, force: true });
+  }
+});
+
+// Pagination interpolation: a single-brace {page} template (inference is inconsistent about braces) must be
+// filled, and calling the tool with NO page must stay on the opening page instead of navigating to a 404.
+test("real browser session: single-brace {page} fills, and missing page stays on the current listing", async (t) => {
+  let chromiumPath: string | undefined;
+  let pw: any;
+  try {
+    const dynamicImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
+    pw = await dynamicImport("playwright");
+    chromiumPath = pw.chromium.executablePath?.();
+  } catch {
+    /* playwright not installed */
+  }
+  if (!chromiumPath || !existsSync(chromiumPath)) {
+    t.skip("playwright + chromium not installed - skipping the real pagination test");
+    return;
+  }
+  try {
+    const browser = await pw.chromium.launch({ executablePath: chromiumPath, chromiumSandbox: false });
+    await browser.close();
+  } catch (err) {
+    t.skip(`playwright chromium launch is unavailable in this environment: ${String(err)}`);
+    return;
+  }
+
+  const genDir5 = `${packageRoot}.gen-test-paginate`;
+  rmSync(genDir5, { recursive: true, force: true });
+  mkdirSync(genDir5, { recursive: true });
+  const card = (text: string) => `<div class="card">${text}</div>`;
+  writeFileSync(`${genDir5}/page-1.html`, `<!doctype html><title>p1</title><body>${card("ALPHA-ONE")}${card("ALPHA-TWO")}</body>`);
+  writeFileSync(`${genDir5}/page-2.html`, `<!doctype html><title>p2</title><body>${card("BETA-ONE")}${card("BETA-TWO")}</body>`);
+  const baseUrl = pathToFileURL(`${genDir5}/page-1.html`).href; // the session opens here
+  const dirUrl = pathToFileURL(`${genDir5}/`).href;
+
+  // Single-brace {page} on purpose - the bug was that only {{page}} was interpolated.
+  const listTool = {
+    name: "list_items",
+    description: "List items on a page.",
+    inputSchema: { type: "object", properties: { page: { type: "string" } } },
+    execution: {
+      kind: "browser" as const,
+      steps: [
+        { action: "navigate" as const, value: `${dirUrl}page-{page}.html` },
+        { action: "waitFor" as const, target: { role: "list", selector: "div.card" } },
+        { action: "extract" as const, target: { role: "list", selector: "div.card" }, value: "json:listing" },
+      ],
+    },
+    confidence: 0.8,
+  };
+  const serverTs = generateServer({
+    serverId: "12121212-1212-4121-8121-121212121212",
+    version: 1,
+    url: baseUrl,
+    title: "Paginate Fixture",
+    tools: [listTool as any],
+  }).files.find((f) => f.path === "server.ts")!.content;
+  const jsPath = compileServer(genDir5, serverTs);
+  // compileServer wipes the dir, so rewrite the fixtures after it.
+  writeFileSync(`${genDir5}/page-1.html`, `<!doctype html><title>p1</title><body>${card("ALPHA-ONE")}${card("ALPHA-TWO")}</body>`);
+  writeFileSync(`${genDir5}/page-2.html`, `<!doctype html><title>p2</title><body>${card("BETA-ONE")}${card("BETA-TWO")}</body>`);
+
+  try {
+    const mod = await import(jsPath);
+    const server = mod.createServer();
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await server.connect(st);
+    const client = new Client({ name: "paginate-test", version: "1.0.0" });
+    await client.connect(ct);
+    try {
+      // no page, as the first action: the session opens at the base URL (page-1) and the paginated
+      // navigate is skipped -> ALPHA cards, instead of a 404 timeout on page-{page}.html.
+      const r0: any = await client.callTool({ name: "list_items", arguments: {} });
+      const t0 = (r0.content || []).map((c: any) => c.text || "").join(" ");
+      assert.equal(r0.isError, false, `no-page errored (expected current-page fallback): ${t0}`);
+      assert.match(t0, /ALPHA-ONE/, "missing page should stay on the opening listing, not 404");
+
+      // page=2 -> single-brace {page} fills (the bug was only {{page}} was interpolated) -> BETA cards.
+      const r2: any = await client.callTool({ name: "list_items", arguments: { page: "2" } });
+      const t2 = (r2.content || []).map((c: any) => c.text || "").join(" ");
+      assert.equal(r2.isError, false, `page=2 errored: ${t2}`);
+      assert.match(t2, /BETA-ONE/, "single-brace {page} should navigate to page-2");
+      assert.doesNotMatch(t2, /ALPHA-ONE/);
+    } finally {
+      await (server as unknown as { browsing?: { close?: () => Promise<void> } }).browsing?.close?.();
+      await client.close();
+      await server.close();
+    }
+  } finally {
+    rmSync(genDir5, { recursive: true, force: true });
   }
 });

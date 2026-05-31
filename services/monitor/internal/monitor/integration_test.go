@@ -21,7 +21,7 @@ import (
 func TestMonitorAgainstRealPostgres(t *testing.T) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		t.Skip("DATABASE_URL not set — integration test skipped")
+		t.Skip("DATABASE_URL not set - integration test skipped")
 	}
 	ctx := context.Background()
 

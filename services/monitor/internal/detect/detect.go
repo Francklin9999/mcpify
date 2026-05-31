@@ -1,5 +1,5 @@
 // Package detect holds the monitor's pure detection logic: DOM hashing, health classification, and
-// drift classification. No I/O — fully unit-testable.
+// drift classification. No I/O - fully unit-testable.
 package detect
 
 import (
@@ -13,7 +13,7 @@ func DomHash(html string) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// Health is the result of a health check, mapped to ToolFailure.errorClass (01 §4).
+// Health is the result of a health check, mapped to ToolFailure.errorClass (01 S4).
 type Health struct {
 	Pass       bool
 	ErrorClass string // "" when Pass

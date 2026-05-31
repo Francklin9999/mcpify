@@ -3,7 +3,7 @@ import { siteRecipeTools } from "./site-recipes.js";
 import type { DiscoveryDelta } from "./incremental.js";
 
 /**
- * Inference: CaptureBundle -> validated ToolDefinition[] (`01 §2`, `services/generator.md`).
+ * Inference: CaptureBundle -> validated ToolDefinition[] (`01 S2`, `services/generator.md`).
  * The model call lives behind `InferenceClient` so this module is testable with zero network.
  * This module's real job is the VALIDATION GATE: parse the model's JSON, drop tools that fail the
  * contract zod, dedup by name, and never crash on garbage output.
@@ -24,7 +24,7 @@ export function contentToolFor(bundle: CaptureBundle): ToolDefinition {
   }
   return ToolDefinition.parse({
     name: "fetch_page_content",
-    description: `Fetch the page content (HTML) from ${bundle.url}${bundle.meta.title ? ` — ${bundle.meta.title}` : ""}.`,
+    description: `Fetch the page content (HTML) from ${bundle.url}${bundle.meta.title ? ` - ${bundle.meta.title}` : ""}.`,
     inputSchema: { type: "object", properties: {} },
     execution: {
       kind: "http",
@@ -46,7 +46,7 @@ export interface InferenceClient {
   proposeTools(bundle: CaptureBundle): Promise<string>;
   /**
    * Optional INCREMENTAL proposal: given only newly-discovered page material (the delta) plus the names of
-   * tools already produced, propose ADDITIONAL distinct tools — same JSON-string shape as `proposeTools`.
+   * tools already produced, propose ADDITIONAL distinct tools - same JSON-string shape as `proposeTools`.
    * This is the token-efficient path: the model never re-sees material it already turned into tools.
    * Clients that omit it fall back (in `discoverMore`) to a `proposeTools` call over a delta-only bundle.
    */
@@ -74,15 +74,15 @@ export function parseCandidates(raw: string): unknown[] {
 }
 
 export interface ValidateOptions {
-  /** Names already taken — a candidate reusing one is dropped (dedup across an existing toolset). */
+  /** Names already taken - a candidate reusing one is dropped (dedup across an existing toolset). */
   seenNames?: Iterable<string>;
   /** Extra drop predicate, e.g. incremental discovery dropping a candidate that targets an already-covered endpoint. */
   dropIf?: (tool: ToolDefinition) => boolean;
 }
 
 /**
- * The VALIDATION GATE shared by full and incremental inference: parse → contract-validate → dedup by name
- * (MCP registerTool throws on a duplicate; DB tools PK is (server_id, version, name)) → optional drop. Pure;
+ * The VALIDATION GATE shared by full and incremental inference: parse -> contract-validate -> dedup by name
+ * (MCP registerTool throws on a duplicate; DB tools PK is (server_id, version, name)) -> optional drop. Pure;
  * never throws on garbage.
  */
 export function validateCandidates(candidates: unknown[], opts: ValidateOptions = {}): { tools: ToolDefinition[]; droppedCount: number } {
@@ -126,7 +126,7 @@ export async function inferTools(
   const candidates = [...siteRecipeTools(bundle), ...parseCandidates(raw)];
   const { tools, droppedCount } = validateCandidates(candidates);
 
-  // Floor: never ship a zero-tool (broken) server — give every site the content-fetch baseline.
+  // Floor: never ship a zero-tool (broken) server - give every site the content-fetch baseline.
   if (tools.length === 0) tools.push(contentToolFor(bundle));
 
   const confidence = aggregateConfidence(tools.map((t) => t.confidence));

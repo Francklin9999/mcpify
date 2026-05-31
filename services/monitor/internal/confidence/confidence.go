@@ -1,8 +1,8 @@
-// Package confidence mirrors the [0,1] clamp invariant from 01 §5 (the canonical aggregateConfidence
+// Package confidence mirrors the [0,1] clamp invariant from 01 S5 (the canonical aggregateConfidence
 // lives in @mcp/types; the monitor only needs the clamp + a health-driven nudge).
 package confidence
 
-// Clamp keeps confidence in [0,1] (contract invariant, 01 §5).
+// Clamp keeps confidence in [0,1] (contract invariant, 01 S5).
 func Clamp(n float64) float64 {
 	if n < 0 {
 		return 0

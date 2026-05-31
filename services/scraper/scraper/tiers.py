@@ -1,6 +1,6 @@
 """Scrapling-backed tier fetchers (docs/services/scraper.md).
 
-Tier classes map to the REAL Scrapling 0.4.8 API (verified from source — reconciles the doc's older
+Tier classes map to the REAL Scrapling 0.4.8 API (verified from source - reconciles the doc's older
 class names):
   Tier 1 -> Fetcher.get        (static HTTP; no JS, no network capture)
   Tier 2 -> DynamicFetcher.fetch(capture_xhr=...)   (Playwright/Chromium; native XHR capture)
@@ -20,7 +20,7 @@ from .contracts import ElementRef
 
 # Why page_setup instead of Scrapling's native capture_xhr:
 #   - capture_xhr="" is coerced to None (disabled); ".*" captures, BUT the wrapped Response drops the HTTP
-#     method (`.request` is None) — and method matters: POST endpoints are the action-capable tools.
+#     method (`.request` is None) - and method matters: POST endpoints are the action-capable tools.
 #   - page_setup runs BEFORE navigation, so our page.on("response") catches LOAD-TIME XHR (page_action runs
 #     after nav and would miss them). The raw Playwright response gives method + url + status + headers + body.
 # All verified against a real Chromium (tests/test_tiers_real.py).
@@ -100,7 +100,7 @@ class Tier1Fetcher:
 
 
 class Tier2Fetcher:
-    """Playwright/Chromium with native XHR capture — the high-signal tier."""
+    """Playwright/Chromium with native XHR capture - the high-signal tier."""
 
     tier = 2
 

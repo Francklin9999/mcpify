@@ -19,7 +19,7 @@ import type { ToolDefinition } from "@mcp/types";
  * cannot drift from the contract (consistent with the v1 hand-maintained-mirror + drift-test approach).
  */
 
-// ── Enums ────────────────────────────────────────────────────────────────────
+// Enums
 export const serverTierEnum = pgEnum("server_tier", ["curated", "auto_gen"]);
 export const serverStatusEnum = pgEnum("server_status", [
   "active",
@@ -35,7 +35,7 @@ export const contributionStatusEnum = pgEnum("contribution_status", [
   "rejected",
 ]);
 
-// ── servers (= RegistryEntry) ────────────────────────────────────────────────
+// servers (= RegistryEntry)
 export const servers = pgTable("servers", {
   serverId: uuid("server_id").primaryKey().defaultRandom(),
   url: text("url").notNull().unique(),
@@ -44,7 +44,7 @@ export const servers = pgTable("servers", {
   confidence: real("confidence").notNull(),
   installCount: integer("install_count").notNull().default(0),
   status: serverStatusEnum("status").notNull(),
-  // Plain nullable pointer to the live version — NOT a FK: server_versions' PK is composite
+  // Plain nullable pointer to the live version - NOT a FK: server_versions' PK is composite
   // (server_id, version), so `version` alone isn't referenceable, and an FK here would create a
   // circular insert dependency. The generator maintains this after inserting the version row. (advisor #1)
   currentVersion: integer("current_version"),
@@ -52,7 +52,7 @@ export const servers = pgTable("servers", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// ── server_versions (= ServerVersion) ────────────────────────────────────────
+// server_versions (= ServerVersion)
 export const serverVersions = pgTable(
   "server_versions",
   {
@@ -70,7 +70,7 @@ export const serverVersions = pgTable(
   }),
 );
 
-// ── tools ────────────────────────────────────────────────────────────────────
+// tools
 export const tools = pgTable(
   "tools",
   {
@@ -79,7 +79,7 @@ export const tools = pgTable(
     name: text("name").notNull(),
     confidence: real("confidence").notNull(),
     executionKind: executionKindEnum("execution_kind").notNull(),
-    // Compile-time typed only. Drizzle does NOT validate writes — the generator MUST
+    // Compile-time typed only. Drizzle does NOT validate writes - the generator MUST
     // `ToolDefinition.parse()` before insert (fail-closed posture, like NetworkCapture). (advisor #4)
     definition: jsonb("definition").$type<ToolDefinition>().notNull(),
   },
@@ -92,7 +92,7 @@ export const tools = pgTable(
   }),
 );
 
-// ── health_events (monitor writes, append-only) ──────────────────────────────
+// health_events (monitor writes, append-only)
 export const healthEvents = pgTable("health_events", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   serverId: uuid("server_id")
@@ -100,13 +100,13 @@ export const healthEvents = pgTable("health_events", {
     .references(() => servers.serverId, { onDelete: "cascade" }),
   toolName: text("tool_name"), // null = whole-server check
   result: healthResultEnum("result").notNull(),
-  errorClass: text("error_class"), // matches ToolFailure.errorClass (01 §4); text per 02
+  errorClass: text("error_class"), // matches ToolFailure.errorClass (01 S4); text per 02
   domHash: text("dom_hash"),
   contentLength: integer("content_length"), // size metric for the monitor's small-vs-large drift call
   observedAt: timestamp("observed_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// ── contributions (extension passive captures / community) ───────────────────
+// contributions (extension passive captures / community)
 export const contributions = pgTable("contributions", {
   id: uuid("id").primaryKey().defaultRandom(),
   serverId: uuid("server_id").references(() => servers.serverId, { onDelete: "set null" }), // null = new site
@@ -115,9 +115,9 @@ export const contributions = pgTable("contributions", {
   status: contributionStatusEnum("status").notNull().default("pending"),
 });
 
-// ── processed_jobs (idempotency keys for at-least-once BullMQ delivery) ───────
+// processed_jobs (idempotency keys for at-least-once BullMQ delivery)
 // A job's id is inserted in the SAME transaction as its effects. A retry of an already-processed job
-// conflicts here and is skipped — so e.g. self_heal's version+1 mints exactly one version per job.
+// conflicts here and is skipped - so e.g. self_heal's version+1 mints exactly one version per job.
 export const processedJobs = pgTable("processed_jobs", {
   jobId: text("job_id").primaryKey(),
   kind: text("kind").notNull(),

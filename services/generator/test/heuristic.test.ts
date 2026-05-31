@@ -20,7 +20,7 @@ const contentBundle: CaptureBundle = {
   meta: { title: "Cristiano Ronaldo", renderedWithJs: false },
 };
 
-test("content site (0 network) still yields a usable tool — never a broken zero-tool server", async () => {
+test("content site (0 network) still yields a usable tool - never a broken zero-tool server", async () => {
   const { result } = await inferTools(contentBundle, new HeuristicInferenceClient());
   assert.ok(result.tools.length >= 1, "must produce at least the content tool");
   const content = result.tools.find((t) => t.name === "fetch_page_content")!;

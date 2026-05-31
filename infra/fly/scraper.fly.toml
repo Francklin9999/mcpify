@@ -1,0 +1,17 @@
+# MCP Forge — Fly.io: scraper (Playwright/Python, private).
+# Reachable by the generator at http://mcp-forge-scraper.internal:8000
+# Deploy from the repo root:  fly deploy --config infra/fly/scraper.fly.toml
+app = "mcp-forge-scraper"
+primary_region = "iad"
+
+[build]
+  dockerfile = "infra/docker/scraper.Dockerfile"
+
+[env]
+  PORT = "8000"
+
+# Headless Chromium needs headroom; give it RAM + a bit of swap.
+[[vm]]
+  memory = "2gb"
+  cpu_kind = "shared"
+  cpus = 1
