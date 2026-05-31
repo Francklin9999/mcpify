@@ -9,7 +9,7 @@ import { TOOL_SYSTEM_PROMPT, INCREMENTAL_NOTE, HEAL_SYSTEM_PROMPT } from "./llm-
 /**
  * Real OpenAI-backed InferenceClient. NOTE: this file is compiled but NOT unit-tested (tests mock the
  * port). Uses JSON mode (`response_format: json_object`) so the model is forced to emit parseable JSON;
- * the model is configurable via OPENAI_MODEL (default gpt-4o). Prompt caching on OpenAI is automatic for
+ * the model is configurable via OPENAI_MODEL (default gpt-5.4). Prompt caching on OpenAI is automatic for
  * long stable prefixes — no per-message flag needed.
  *
  * JSON mode cannot return a bare array, so we ask for `{ "tools": [...] }` — inference.ts already accepts
