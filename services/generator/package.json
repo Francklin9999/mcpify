@@ -1,0 +1,25 @@
+{
+  "name": "@mcp/generator",
+  "version": "0.0.0",
+  "description": "Inference + codegen + self-healer. See docs/services/generator.md.",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "scripts": {
+    "build": "npm run build --workspace=@mcp/types && tsc -p tsconfig.json",
+    "worker": "node dist/src/main.js",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  },
+  "dependencies": {
+    "@mcp/db": "0.0.0",
+    "@mcp/types": "0.0.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "bullmq": "^5.77.6",
+    "drizzle-orm": "^0.45.2",
+    "openai": "^6.39.1",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "@mcp/extension",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Static MV3 chat extension — load unpacked, no build step. See README.md.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types test/*.test.ts"
+  },
+  "dependencies": {
+    "@mcp/types": "0.0.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.42",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

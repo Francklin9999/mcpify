@@ -1,0 +1,19 @@
+{
+  "$comment": "Cross-language golden ToolDefinition. Loaded by @mcp/types contract tests and (Phase 1) by the generator codegen tests (services/generator.md). A valid http-execution tool.",
+  "name": "get_product",
+  "description": "Fetch a product by id",
+  "inputSchema": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"] },
+  "execution": {
+    "kind": "http",
+    "request": {
+      "method": "GET",
+      "urlPattern": "/api/products/{id}",
+      "rawUrl": "https://example.com/api/products/42",
+      "requestHeaders": { "accept": "application/json" },
+      "statusCode": 200,
+      "contentType": "application/json"
+    },
+    "paramMapping": { "id": { "in": "path", "key": "id" } }
+  },
+  "confidence": 0.9
+}

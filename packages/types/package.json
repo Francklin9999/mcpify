@@ -1,0 +1,26 @@
+{
+  "name": "@mcp/types",
+  "version": "0.0.0",
+  "description": "Keystone shared contracts (zod) for the MCP-generation platform. See docs/01-contracts.md.",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./secret-list.json": "./src/secret-list.json"
+  },
+  "files": [
+    "dist",
+    "src/secret-list.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && cp src/secret-list.json dist/src/secret-list.json",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  },
+  "dependencies": {
+    "zod": "^3.25.0"
+  }
+}

@@ -1,0 +1,23 @@
+[project]
+name = "mcp-scraper"
+version = "0.0.0"
+description = "Scrapling 3-tier fetcher -> CaptureBundle. See docs/services/scraper.md."
+requires-python = ">=3.11"
+dependencies = [
+    # [fetchers] pulls curl_cffi (used even by the static tier-1 HTTP client), playwright (tier 2),
+    # and the camoufox machinery (tier 3). After install run: `python -m playwright install chromium`.
+    "scrapling[fetchers]==0.4.8",
+    "pydantic>=2.0",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "httpx>=0.27"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.setuptools.packages.find]
+include = ["scraper*"]

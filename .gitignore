@@ -1,0 +1,23 @@
+node_modules/
+dist/
+.gen-test/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# Next.js / Plasmo build outputs
+.next/
+.turbo/
+apps/extension/.plasmo/
+apps/extension/build/
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+
+# Go
+*.test

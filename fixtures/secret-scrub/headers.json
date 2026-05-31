@@ -1,0 +1,13 @@
+{
+  "$comment": "Cross-language golden fixture for the secret-list scrub. TS test (packages/types) and the Python scraper test BOTH load this and assert scrubHeaders(input) keeps exactly expectedKeptKeys. See docs/04-legal-modes.md.",
+  "input": {
+    "Authorization": "Bearer abc.def.ghi",
+    "Cookie": "session=deadbeef",
+    "X-Api-Key": "sk-12345",
+    "x-session-token": "tok_98765",
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "User-Agent": "mcp-scraper/0.1"
+  },
+  "expectedKeptKeys": ["Accept", "Content-Type", "User-Agent"]
+}

@@ -1,0 +1,7 @@
+{
+  "local": {
+    "webProtocol": "http",
+    "webHost": "localhost",
+    "webPort": 3001
+  }
+}
