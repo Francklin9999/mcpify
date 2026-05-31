@@ -91,20 +91,55 @@ See [`apps/extension/README.md`](./apps/extension/README.md).
 
 ## Deployment readiness (honest assessment)
 
+**Vercel web deployment is configured.** Keep the Vercel project root at the repository root. The root
+`vercel.json` runs `npm run vercel-build`, which compiles the workspace dependencies first and then builds
+`apps/web`, avoiding missing `dist` imports like `@mcp/generator/dist/...`.
+
+Expected Vercel settings:
+
+```bash
+Root Directory: .
+Build Command: npm run vercel-build
+Output Directory: apps/web/.next
+Install Command: npm install
+```
+
+Vercel can host the Next frontend/API routes. The long-running generator worker, scraper, monitor, Redis,
+Postgres, and nginx load-balancer still need the container stack below or managed equivalents. For real
+Vercel production use, point `DATABASE_URL` and `REDIS_URL` at external managed services; local Docker host
+URLs will not work from Vercel.
+
+**Container deployment is now scaffolded.** `infra/compose.prod.yml` builds Docker images for the Next web
+frontend, generator worker, Python scraper, Go monitor, nginx load balancer, Postgres, Redis, migrations,
+and shared artifact storage. Start the full stack with:
+
+```bash
+npm run deploy:up
+# open http://localhost:8080
+```
+
+Scale the frontend and microservices with Docker Compose:
+
+```bash
+docker compose -f infra/compose.prod.yml up -d --scale web=3 --scale generator=2 --scale scraper=2
+```
+
+`load-balancer` routes public traffic to scaled `web` containers. `generator` replicas share the BullMQ
+queue, `scraper` replicas are reached through Docker DNS, and `web`/`generator` share the `artifacts`
+volume so downloads still work after scaling.
+
 **Works end-to-end locally — verified.** The assembled product runs: paste a URL in the web app → job
 enqueues → worker consumes → real scraper captures real network traffic (real Chromium) → codegen → the UI
 job-result path returns the artifact → download a runnable MCP server. Flow B (self-heal) is verified
 link-by-link (monitor produces jobs on real Postgres; Go→Node→BullMQ enqueue seam; worker self-heals on
 real Postgres) but not yet as one assembled 6-process chain.
 
-**Not yet production-deployable — these need your decisions/infra (not built, by design):**
+**Remaining production decisions:**
 
 | Gap | Why it matters | Needs |
 |-----|----------------|-------|
-| **Deployment target** | Dictates everything below | Pick: containers (k8s/ECS/Fly), serverless, single VM? |
 | **Auth + rate-limiting on the web API** | `/api/generate` is an **open, unauthenticated enqueue** — an abuse vector | Auth model + rate-limit policy |
 | **Secrets management** | `ANTHROPIC_API_KEY`, DB/Redis creds | A secrets store for your target |
-| **Dockerfiles / process manager** | 4 long-running services (web, worker, scraper, monitor) | One per service, tuned to the target |
 | **Real R2/S3 artifact adapter** | Only `FsArtifactStore` exists (local FS); web+worker must share storage | Implement `ArtifactStore` for object storage |
 | **CI** | No automated gate | Wire the test commands below into CI |
 | **Live-Claude inference** | Tests use the keyless heuristic — real inference output is **unverified** | An API key + an eval pass |

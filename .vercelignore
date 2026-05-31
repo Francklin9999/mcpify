@@ -1,0 +1,15 @@
+.git
+.codex
+.claude
+.agents
+.env
+.env.*
+node_modules
+**/node_modules
+target
+test-ledger
+services/scraper/.venv
+services/scraper/.pytest_cache
+services/scraper/**/__pycache__
+coverage
+*.log

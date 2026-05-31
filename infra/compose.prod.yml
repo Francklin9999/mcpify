@@ -1,0 +1,163 @@
+name: mcp-forge
+
+x-app-env: &app-env
+  DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-mcp}
+  REDIS_URL: redis://redis:6379
+  ARTIFACT_ROOT: /data/artifacts
+  LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4}
+  OPENAI_REASONING: ${OPENAI_REASONING:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  CLAUDE_MODEL: ${CLAUDE_MODEL:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GEMINI_MODEL: ${GEMINI_MODEL:-}
+  AGENT_MODEL: ${AGENT_MODEL:-}
+  AGENT_REASONING: ${AGENT_REASONING:-}
+  ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+  ELEVENLABS_VOICE_ID: ${ELEVENLABS_VOICE_ID:-}
+  ELEVENLABS_TTS_MODEL: ${ELEVENLABS_TTS_MODEL:-}
+  ELEVENLABS_STT_MODEL: ${ELEVENLABS_STT_MODEL:-}
+  MONGODB_URI: ${MONGODB_URI:-}
+  MONGODB_DATABASE: ${MONGODB_DATABASE:-mcp_forge}
+  MONGODB_COLLECTION: ${MONGODB_COLLECTION:-tools}
+  SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+  SOLANA_REGISTRY_KEYPAIR: ${SOLANA_REGISTRY_KEYPAIR:-}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-mcp}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DB:-mcp}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    image: mcp-forge-web:local
+    build:
+      context: ..
+      dockerfile: infra/docker/web.Dockerfile
+    command: ["node", "packages/db/scripts/apply-migrations.mjs"]
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-mcp}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  scraper:
+    image: mcp-forge-scraper:local
+    build:
+      context: ..
+      dockerfile: infra/docker/scraper.Dockerfile
+    shm_size: "1gb"
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).read()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  generator:
+    image: mcp-forge-generator:local
+    build:
+      context: ..
+      dockerfile: infra/docker/generator.Dockerfile
+    environment:
+      <<: *app-env
+      SCRAPER_URL: http://scraper:8000
+      ENQUEUE_PORT: "8081"
+    volumes:
+      - artifacts:/data/artifacts
+    expose:
+      - "8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      scraper:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  monitor:
+    image: mcp-forge-monitor:local
+    build:
+      context: ..
+      dockerfile: infra/docker/monitor.Dockerfile
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-mcp}
+      ENQUEUE_URL: http://generator:8081/enqueue
+      POLL_INTERVAL: ${POLL_INTERVAL:-60s}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      generator:
+        condition: service_started
+    restart: unless-stopped
+
+  web:
+    image: mcp-forge-web:local
+    build:
+      context: ..
+      dockerfile: infra/docker/web.Dockerfile
+    environment:
+      <<: *app-env
+      PORT: "3001"
+      HOSTNAME: 0.0.0.0
+      NEXT_TELEMETRY_DISABLED: "1"
+    volumes:
+      - artifacts:/data/artifacts
+    expose:
+      - "3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  load-balancer:
+    image: nginx:1.27-alpine
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      web:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/healthz >/dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  artifacts:

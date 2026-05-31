@@ -8,17 +8,35 @@ golden fixture tests/fixtures parity test fails CI if they drift.
 from __future__ import annotations
 
 import json
+import os
 import re
 from functools import lru_cache
 from pathlib import Path
 
-# services/scraper/scraper/legal.py -> repo root is three parents up.
-_SECRET_LIST_PATH = Path(__file__).resolve().parents[3] / "packages" / "types" / "src" / "secret-list.json"
+
+def _candidate_secret_list_paths() -> list[Path]:
+    here = Path(__file__).resolve()
+    paths: list[Path] = []
+    if env_path := os.getenv("MCP_SECRET_LIST_PATH"):
+        paths.append(Path(env_path))
+    if len(here.parents) > 3:
+        paths.append(here.parents[3] / "packages" / "types" / "src" / "secret-list.json")
+    paths.append(Path.cwd() / "packages" / "types" / "src" / "secret-list.json")
+    paths.append(here.with_name("secret-list.json"))
+    return paths
+
+
+def _secret_list_path() -> Path:
+    for path in _candidate_secret_list_paths():
+        if path.exists():
+            return path
+    candidates = ", ".join(str(p) for p in _candidate_secret_list_paths())
+    raise FileNotFoundError(f"secret-list.json not found; checked: {candidates}")
 
 
 @lru_cache(maxsize=1)
 def _secret_list() -> tuple[tuple[str, ...], tuple[re.Pattern[str], ...]]:
-    data = json.loads(_SECRET_LIST_PATH.read_text())
+    data = json.loads(_secret_list_path().read_text())
     headers = tuple(h.lower() for h in data["headers"])
     patterns = tuple(_glob_to_regex(g) for g in data["fieldPatterns"])
     return headers, patterns

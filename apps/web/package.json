@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build:deps": "npm run build --workspace=@mcp/types && npm run build --workspace=@mcp/db && npm run build --workspace=@mcp/solana && npm run build --workspace=@mcp/generator",
+    "build": "npm run build:deps && next build",
     "start": "next start",
     "test": "node --test --experimental-strip-types test/*.test.ts"
   },
