@@ -95,13 +95,22 @@ See [`apps/extension/README.md`](./apps/extension/README.md).
 `vercel.json` runs `npm run vercel-build`, which compiles the workspace dependencies first and then builds
 `apps/web`, avoiding missing `dist` imports like `@mcp/generator/dist/...`.
 
-Expected Vercel settings:
+Expected Vercel settings if the Vercel project root is the repo root:
 
 ```bash
 Root Directory: .
 Build Command: npm run vercel-build
 Output Directory: apps/web/.next
 Install Command: npm install
+```
+
+If you want the Vercel project root to be `apps/web`, use the checked-in `apps/web/vercel.json`:
+
+```bash
+Root Directory: apps/web
+Build Command: cd ../.. && npm run vercel-build
+Output Directory: .next
+Install Command: cd ../.. && npm install
 ```
 
 Vercel can host the Next frontend/API routes. The long-running generator worker, scraper, monitor, Redis,
