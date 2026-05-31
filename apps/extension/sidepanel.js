@@ -13,7 +13,7 @@ import {
   httpRequestFromTool,
 } from "./lib/agent.js";
 import { makeTabExecutor, executeBrowserStepsOnActiveTab } from "./lib/tab-tools.js";
-import { ATLAS_STORAGE_KEYS, getAtlasSettings, fetchToolsFromAtlas, saveToolsToAtlas } from "./lib/atlas.js";
+import { fetchToolsFromAtlas, saveToolsToAtlas } from "./lib/atlas.js";
 
 const log = document.getElementById("log");
 const form = document.getElementById("form");
@@ -38,7 +38,7 @@ let autoApprove = false;
 let chatSessions = [];
 let activeChatId = null;
 let elevenLabsSettings = null;
-let atlasSettings = null;
+
 let recordingState = null;
 let playingAudio = null;
 let speakingBusy = false;
@@ -149,8 +149,8 @@ async function syncConfigFromServer() {
     if (!res.ok) return;
     const config = await res.json();
 
-    const allKeys = [...Object.values(ELEVENLABS_STORAGE_KEYS), ...Object.values(ATLAS_STORAGE_KEYS)];
-    const stored = await chrome.storage.local.get(allKeys).catch(() => ({}));
+    const elKeys = Object.values(ELEVENLABS_STORAGE_KEYS);
+    const stored = await chrome.storage.local.get(elKeys).catch(() => ({}));
     const updates = {};
 
     if (config.elevenLabs) {
@@ -160,18 +160,10 @@ async function syncConfigFromServer() {
       if (el.ttsModel && !stored[ELEVENLABS_STORAGE_KEYS.ttsModel]) updates[ELEVENLABS_STORAGE_KEYS.ttsModel] = el.ttsModel;
       if (el.sttModel && !stored[ELEVENLABS_STORAGE_KEYS.sttModel]) updates[ELEVENLABS_STORAGE_KEYS.sttModel] = el.sttModel;
     }
-    if (config.atlas) {
-      const at = config.atlas;
-      if (at.endpoint   && !stored[ATLAS_STORAGE_KEYS.endpoint])   updates[ATLAS_STORAGE_KEYS.endpoint]   = at.endpoint;
-      if (at.apiKey     && !stored[ATLAS_STORAGE_KEYS.apiKey])     updates[ATLAS_STORAGE_KEYS.apiKey]     = at.apiKey;
-      if (at.dataSource && !stored[ATLAS_STORAGE_KEYS.dataSource]) updates[ATLAS_STORAGE_KEYS.dataSource] = at.dataSource;
-      if (at.database   && !stored[ATLAS_STORAGE_KEYS.database])   updates[ATLAS_STORAGE_KEYS.database]   = at.database;
-      if (at.collection && !stored[ATLAS_STORAGE_KEYS.collection]) updates[ATLAS_STORAGE_KEYS.collection] = at.collection;
-    }
 
     if (Object.keys(updates).length) {
       await chrome.storage.local.set(updates);
-      await Promise.all([loadElevenLabsSettings(), loadAtlasSettings()]);
+      await loadElevenLabsSettings();
     }
   } catch {
     // Web app not running or endpoint unavailable — silently skip.
@@ -183,9 +175,6 @@ async function loadElevenLabsSettings() {
   updateVoiceUi();
 }
 
-async function loadAtlasSettings() {
-  atlasSettings = await getAtlasSettings().catch(() => null);
-}
 
 function applyTheme(theme, persist = true) {
   const next = theme === "dark" ? "dark" : "light";
@@ -997,8 +986,8 @@ async function runDiscovery() {
     discovery.serverId = undefined;
 
     // Pull pre-cached tools from Atlas first — instant, no generation needed.
-    if (atlasSettings) {
-      const record = await fetchToolsFromAtlas(url, atlasSettings).catch(() => null);
+    {
+      const record = await fetchToolsFromAtlas(url).catch(() => null);
       if (record?.serverId) discovery.serverId = record.serverId;
       if (Array.isArray(record?.tools) && record.tools.length) {
         const known = new Set(discovery.sessionTools.map((t) => t.name));
@@ -1198,13 +1187,13 @@ async function generateServer() {
     pending.body.innerHTML = html;
     wireArtifact(pending.wrapper, artifact, tab);
     await appendHistory("assistant", `Generated MCP server v${artifact.version} for ${target}. Tools: ${toolNames.join(", ") || "none detected"}.`);
-    if (atlasSettings && Array.isArray(artifact.tools) && artifact.tools.length) {
+    if (Array.isArray(artifact.tools) && artifact.tools.length) {
       saveToolsToAtlas(generateUrl, {
         serverId: artifact.serverId,
         tools: artifact.tools,
         version: artifact.version,
         title: tab.title || tab.url,
-      }, atlasSettings).catch(() => {});
+      }).catch(() => {});
     }
     // A server now exists for this page, so let continuous discovery resolve it and grow it as you browse.
     discovery.resolvedFor = undefined;
@@ -1389,14 +1378,12 @@ chrome.storage.onChanged?.addListener((changes, area) => {
   if (area !== "local") return;
   const keys = Object.keys(changes);
   if (keys.some((key) => key.startsWith("elevenLabs"))) loadElevenLabsSettings().catch(() => {});
-  if (keys.some((key) => key.startsWith("atlas"))) loadAtlasSettings().catch(() => {});
 });
 
 initPageTitle();
 initTheme();
 syncConfigFromServer().finally(() => {
   loadElevenLabsSettings();
-  loadAtlasSettings();
 });
 initChatMemory();
 autoGrowInput();
