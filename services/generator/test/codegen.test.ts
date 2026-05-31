@@ -539,3 +539,94 @@ test("real browser session: json:listing extract honors the card selector (one r
     rmSync(genDir4, { recursive: true, force: true });
   }
 });
+
+// Pagination interpolation: a single-brace {page} template (inference is inconsistent about braces) must be
+// filled, and calling the tool with NO page must stay on the opening page instead of navigating to a 404.
+test("real browser session: single-brace {page} fills, and missing page stays on the current listing", async (t) => {
+  let chromiumPath: string | undefined;
+  let pw: any;
+  try {
+    const dynamicImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
+    pw = await dynamicImport("playwright");
+    chromiumPath = pw.chromium.executablePath?.();
+  } catch {
+    /* playwright not installed */
+  }
+  if (!chromiumPath || !existsSync(chromiumPath)) {
+    t.skip("playwright + chromium not installed - skipping the real pagination test");
+    return;
+  }
+  try {
+    const browser = await pw.chromium.launch({ executablePath: chromiumPath, chromiumSandbox: false });
+    await browser.close();
+  } catch (err) {
+    t.skip(`playwright chromium launch is unavailable in this environment: ${String(err)}`);
+    return;
+  }
+
+  const genDir5 = `${packageRoot}.gen-test-paginate`;
+  rmSync(genDir5, { recursive: true, force: true });
+  mkdirSync(genDir5, { recursive: true });
+  const card = (text: string) => `<div class="card">${text}</div>`;
+  writeFileSync(`${genDir5}/page-1.html`, `<!doctype html><title>p1</title><body>${card("ALPHA-ONE")}${card("ALPHA-TWO")}</body>`);
+  writeFileSync(`${genDir5}/page-2.html`, `<!doctype html><title>p2</title><body>${card("BETA-ONE")}${card("BETA-TWO")}</body>`);
+  const baseUrl = pathToFileURL(`${genDir5}/page-1.html`).href; // the session opens here
+  const dirUrl = pathToFileURL(`${genDir5}/`).href;
+
+  // Single-brace {page} on purpose - the bug was that only {{page}} was interpolated.
+  const listTool = {
+    name: "list_items",
+    description: "List items on a page.",
+    inputSchema: { type: "object", properties: { page: { type: "string" } } },
+    execution: {
+      kind: "browser" as const,
+      steps: [
+        { action: "navigate" as const, value: `${dirUrl}page-{page}.html` },
+        { action: "waitFor" as const, target: { role: "list", selector: "div.card" } },
+        { action: "extract" as const, target: { role: "list", selector: "div.card" }, value: "json:listing" },
+      ],
+    },
+    confidence: 0.8,
+  };
+  const serverTs = generateServer({
+    serverId: "12121212-1212-4121-8121-121212121212",
+    version: 1,
+    url: baseUrl,
+    title: "Paginate Fixture",
+    tools: [listTool as any],
+  }).files.find((f) => f.path === "server.ts")!.content;
+  const jsPath = compileServer(genDir5, serverTs);
+  // compileServer wipes the dir, so rewrite the fixtures after it.
+  writeFileSync(`${genDir5}/page-1.html`, `<!doctype html><title>p1</title><body>${card("ALPHA-ONE")}${card("ALPHA-TWO")}</body>`);
+  writeFileSync(`${genDir5}/page-2.html`, `<!doctype html><title>p2</title><body>${card("BETA-ONE")}${card("BETA-TWO")}</body>`);
+
+  try {
+    const mod = await import(jsPath);
+    const server = mod.createServer();
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await server.connect(st);
+    const client = new Client({ name: "paginate-test", version: "1.0.0" });
+    await client.connect(ct);
+    try {
+      // no page, as the first action: the session opens at the base URL (page-1) and the paginated
+      // navigate is skipped -> ALPHA cards, instead of a 404 timeout on page-{page}.html.
+      const r0: any = await client.callTool({ name: "list_items", arguments: {} });
+      const t0 = (r0.content || []).map((c: any) => c.text || "").join(" ");
+      assert.equal(r0.isError, false, `no-page errored (expected current-page fallback): ${t0}`);
+      assert.match(t0, /ALPHA-ONE/, "missing page should stay on the opening listing, not 404");
+
+      // page=2 -> single-brace {page} fills (the bug was only {{page}} was interpolated) -> BETA cards.
+      const r2: any = await client.callTool({ name: "list_items", arguments: { page: "2" } });
+      const t2 = (r2.content || []).map((c: any) => c.text || "").join(" ");
+      assert.equal(r2.isError, false, `page=2 errored: ${t2}`);
+      assert.match(t2, /BETA-ONE/, "single-brace {page} should navigate to page-2");
+      assert.doesNotMatch(t2, /ALPHA-ONE/);
+    } finally {
+      await (server as unknown as { browsing?: { close?: () => Promise<void> } }).browsing?.close?.();
+      await client.close();
+      await server.close();
+    }
+  } finally {
+    rmSync(genDir5, { recursive: true, force: true });
+  }
+});

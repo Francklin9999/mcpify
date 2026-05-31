@@ -229,7 +229,11 @@ async function callHttp(spec: HttpToolSpec, args: Record<string, unknown>) {
   for (const [param, value] of Object.entries(args)) {
     const m = spec.paramMapping[param];
     if (!m) continue;
-    if (m.in === "path") url = url.replace("{" + m.key + "}", encodeURIComponent(String(value)));
+    if (m.in === "path") {
+      // Replace every {{key}} and {key} (inference is inconsistent about brace style).
+      const enc = encodeURIComponent(String(value));
+      url = url.split("{{" + m.key + "}}").join(enc).split("{" + m.key + "}").join(enc);
+    }
     else if (m.in === "query") query.set(m.key, String(value));
     else if (m.in === "header") headers[m.key] = String(value);
     else { body[m.key] = value; hasBody = true; }
@@ -250,12 +254,26 @@ async function callHttp(spec: HttpToolSpec, args: Record<string, unknown>) {
   return { content: [{ type: "text" as const, text }], isError: !res.ok };
 }
 
+// Accept both {param} and {{param}} - inference is not consistent about brace style.
+const PLACEHOLDER = /\\{\\{?(\\w+)\\}\\}?/g;
+
 function interpolate(template: string | undefined, args: Record<string, unknown>, encode = false): string {
-  return String(template ?? "").replace(/\\{\\{(\\w+)\\}\\}/g, (_m, key) => {
+  return String(template ?? "").replace(PLACEHOLDER, (_m, key) => {
     const value = args[key];
     const text = value == null ? "" : String(value);
     return encode ? encodeURIComponent(text) : text;
   });
+}
+
+// A navigate template references a param that was not supplied (e.g. paginated tool called with no page).
+function templateMissingParam(template: string | undefined, args: Record<string, unknown>): boolean {
+  const re = new RegExp(PLACEHOLDER.source, "g");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(String(template ?? "")))) {
+    const key = m[1];
+    if (key && (args[key] == null || String(args[key]) === "")) return true;
+  }
+  return false;
 }
 
 async function importBrowserDriver(): Promise<any> {
@@ -336,7 +354,16 @@ class PlaywrightBrowsing implements Browsing {
     const page = await this.page();
     let extracted: unknown;
     for (const step of spec.steps) {
-      if (step.action === "navigate") { await page.goto(interpolate(step.value, args, true), { waitUntil: "domcontentloaded" }); continue; }
+      if (step.action === "navigate") {
+        // Skip a navigate whose params were not supplied (stay on the current page) so a paginated tool
+        // called without e.g. page extracts the current listing instead of a 404 URL like /page-.html.
+        // Tradeoff: if the inputSchema param and the URL placeholder are named differently, a supplied arg
+        // looks "missing" here and we silently stay put instead of erroring. The base navigate (when present)
+        // still lands on the right listing, so this favors a useful result over a loud failure.
+        if (templateMissingParam(step.value, args)) continue;
+        await page.goto(interpolate(step.value, args, true), { waitUntil: "domcontentloaded" });
+        continue;
+      }
       if (step.action === "waitFor") {
         if (step.target?.selector) await page.locator(step.target.selector).first().waitFor({ state: "visible" });
         else await page.waitForTimeout(Number(step.value || 300));
