@@ -1,171 +1,162 @@
-# MCP Forge - auto-generate MCP servers from any website
+# MCP Forge
 
-Paste a URL -> a 3-tier scraper captures the page's real network traffic -> Claude (or a keyless heuristic)
-infers **action-capable** tools (plus a `fetch_page_content` baseline so even pure content sites like
-Wikipedia yield a usable server) -> codegen emits a runnable MCP server you download and run locally.
-Generated servers don't stop at one-shot calls: each ships a **persistent-session browsing toolkit**
-(`browser_navigate/snapshot/click/type/select/extract`) so an LLM can drive a real page turn-by-turn -
-paginate, fill forms, add to cart, multi-step flows (Skyscanner-style). A Go monitor keeps servers alive
-(health-check + drift detection -> self-heal/regenerate), and a **Chrome chat extension** (loads unpacked, no
-build) both **drives the page you're on** (an in-browser agent loop, confirming each page-changing action)
-and turns it into an MCP server from the chat.
+**Turn any website into a runnable MCP server.** Paste a URL → MCP Forge captures the page's real
+network traffic, infers action-capable tools, and emits a standalone MCP server you download and run
+locally — so an LLM can actually *act* on that site, using your machine and your creds.
 
-The web app has a Jobright-inspired landing page (`/`) and the app (`/library`, `/generate`, `/monitor`):
-white + green, with a first-class **dark mode** (toggle in the nav). The confidence score is the signature
-visual (color = health), like Jobright's match %.
+> Generate, don't integrate.
 
-Full design: [`docs/`](./docs/) (start with `docs/00-overview.md`, then the keystone `docs/01-contracts.md`).
+## What it does
+
+1. **Capture** — a 3-tier scraper loads the page in a real browser and records its live network calls
+   (XHR/fetch), DOM, and forms into a `CaptureBundle`.
+2. **Infer** — a pluggable LLM reads the bundle and proposes **action-capable** tools, validated against a
+   strict contract. Provider is chosen at runtime (see [LLM providers](#llm-providers)); with no key, a
+   **keyless heuristic** produces a real fallback. Every server also gets a `fetch_page_content` baseline, so
+   even pure content sites (Wikipedia) yield something usable.
+3. **Generate** — codegen emits a **standalone installable project**: `server.ts` (MCP SDK), pinned
+   `package.json`, `tsconfig.json`, an MCP-client config snippet, and install scripts. Deterministic.
+4. **Drive** — every generated server ships a **persistent-session browsing toolkit**
+   (`browser_navigate / snapshot / click / type / select / extract`) holding one Chromium session across
+   tool calls, so an LLM can drive a real page turn-by-turn: paginate, fill forms, add to cart, multi-step
+   flows. Released cleanly on shutdown so servers don't leak browsers.
+5. **Keep alive** — a Go monitor health-checks servers and detects drift, enqueueing jobs; the worker
+   **self-heals** (rewrites only the broken tool) or **regenerates** (re-parses wholesale) and bumps the
+   version.
+
+## Integrations & features
+
+- **LLM providers (pluggable)** — one factory, swapped by the `LLM_PROVIDER` env var:
+  **OpenAI `gpt-5.4` (default)**, **Anthropic Claude**, or **Google Gemini** — with a keyless heuristic
+  fallback when no key is set. Same inference + self-heal interface for all three.
+- **ElevenLabs voice** *(extension)* — talk to the side-panel agent and hear it back: **speech-to-text**
+  input (Scribe) and **text-to-speech** replies (multilingual v2), with optional auto-speak. Configured in
+  the extension settings.
+- **Solana on-chain registry** — generated servers can be published to an on-chain registry program
+  (`B6xe3XtwyokW7Nsud63otwagnJS4GMkAutWXwftMtCKh`) via the `@mcp/solana` client, giving each server a
+  verifiable, discoverable record.
+- **MongoDB Atlas** — a curated server catalog merged into the web library, detail pages, and downloads,
+  plus a **per-domain tool cache** so repeat generations of the same site are fast.
+- **Chrome extension** — see below.
+
+## The Chrome extension
+
+A **static MV3 extension — no build step**. Load `apps/extension` unpacked. Its side-panel chat (with voice)
+does two things against the tab you're already on:
+
+- **Drives the live page for you** — an in-browser agent loop reads the page, clicks, types, and navigates
+  as your real signed-in session. Every page-changing action and every off-origin navigation **asks you to
+  confirm first** (Confirm / Skip, inline).
+- **Turns the page into an MCP server** — generate, then copy/download `server.ts` +
+  `claude_desktop_config.json` straight from the chat.
+
+## Legal modes
+
+Generated code runs **locally** — this is a user-automation tool, not a server-side scraper. Three modes:
+
+| Mode | Behavior | Enforced in |
+|------|----------|-------------|
+| `safe` (default) | Respects robots.txt, public pages, no session | scraper |
+| `full_scrape` | Ignores robots.txt, public pages, user acknowledges ToS risk | scraper |
+| `session` | Acts inside your own logged-in browser session | extension |
+
+Never: store credentials server-side, scrape behind a login server-side, or bypass auth-wall CAPTCHAs.
 
 ## Monorepo
 
-| Package | Stack | What it is | Verified |
-|---------|-------|-----------|----------|
-| `packages/types` | TS + zod | **Keystone contracts** - every cross-component shape, one source | 12 unit |
-| `packages/db` | Drizzle/Postgres | Registry schema + migrations | 8 unit (+ real-PG apply) |
-| `services/scraper` | Python / Scrapling | 3-tier fetch -> `CaptureBundle` (load-time XHR capture) | 27 (+ **real Chromium**) |
-| `services/generator` | Node | Inference (+ keyless heuristic) + codegen + self-heal + **the worker** | 20 unit + 5 worker-integration |
-| `services/monitor` | Go | Health/drift detect -> enqueue jobs | pure + **real-PG** + Go->Node seam |
-| `apps/web` | Next.js | Landing page + library/app + API (`01 S7`) + CORS | builds + **live smoke (12)** + screenshot-verified |
-| `apps/extension` | Static MV3 (no build) | **Chat side panel** -> drive the live tab (agent loop) + generate MCP from the page; net-intercept | loads unpacked + capture & agent-loop units (15) |
+| Package | Stack | What it is |
+|---------|-------|-----------|
+| `packages/types` | TS + zod | **Keystone contracts** — every cross-component shape, one source |
+| `packages/db` | Drizzle / Postgres | Registry schema + migrations |
+| `packages/solana` | TS + web3.js | On-chain registry client (`publishServer` / `fetchRegistry`) |
+| `services/scraper` | Python / Scrapling | 3-tier fetch → `CaptureBundle` (real-Chromium XHR capture) |
+| `services/generator` | Node | LLM factory (OpenAI/Claude/Gemini) + codegen + self-heal + BullMQ worker |
+| `services/monitor` | Go | Health + drift detection → enqueue jobs |
+| `apps/web` | Next.js | Landing page + library / generate / monitor + API |
+| `apps/extension` | Static MV3 | Side-panel voice chat: drive the tab + generate a server from it |
+| `programs/server-registry` | Rust / Anchor | The Solana registry program |
 
-## Verification bar (honest)
+**Data flow:** `web → BullMQ → generator worker → scraper (real browser) → codegen → Postgres + artifact
+store → download`. The Go monitor feeds the same queue for self-heal.
 
-- **Behavioral (real infra):** scraper (real Chromium XHR capture), worker (real Redis+Postgres: atomic
-  writes, idempotency, self-heal row-level), monitor (real Postgres), web (live smoke: registry/generate/
-  legal-gate/jobs/pages), and the cross-process seams (Node<->Python scraper HTTP; Go->Node->BullMQ enqueue).
-- **Assembled Flow A (capstone):** `services/generator/test/integration/flow-a-assembled.sh` runs the
-  whole chain with real processes - web -> BullMQ -> worker -> scraper (real browser) -> codegen -> Postgres +
-  shared artifact root -> **downloads a real runnable MCP server**.
-- **Real-site robustness:** ran the capture->generate->codegen->server pipeline against a spread of real sites
-  (Wikipedia, GitHub, HN, JSON APIs, scraping-test sites, Amazon, plus hostile inputs: DNS failures, 500s,
-  redirects, long paths). Generated the Wikipedia server and called `fetch_page_content` against the live
-  site (real 2MB article). Fixes found & shipped from this: content sites now yield a usable server (not a
-  broken zero-tool one); **duplicate tool names deduped** (a list page firing the same templated endpoint
-  repeatedly no longer crashes the server); **bot walls detected and escalated to the stealth tiers**
-  (Amazon-style 200-captcha pages), with graceful best-effort if all tiers are blocked.
-- **Persistent-session browsing (real browser):** the generated server's browsing toolkit holds ONE Chromium
-  session across tool calls; verified against **real Chromium** (`codegen.test.ts`: snapshot -> click-by-ref ->
-  live DOM mutation), plus a fake-backend test proving state persists across separate tool calls. The session
-  is released on shutdown (SIGINT/SIGTERM) so servers don't leak Chromium.
-- **In-browser agent (extension):** the side-panel loop's CONTROL FLOW is unit-tested (`agent.test.ts`, 12
-  tests: confirm-gating blocks a declined action, off-origin navigation confirms, multi-step result
-  threading, step cap, abort). The live-tab executors and the `/api/assist` function-calling round-trip run
-  only in a **loaded extension with `OPENAI_API_KEY`** - see the extension caveat below.
-- **Builds + load:** web (`next build`), extension (loads unpacked - static MV3, no build step).
-- **NOT verified end-to-end:** the **live-Claude inference leg** (tests use a keyless heuristic - no API
-  key; the heuristic is a real no-LLM fallback); the **extension's live-tab executors + agent round-trip**
-  (loaded-extension only); Tier-3 (Camoufox) is code-complete but unexercised.
+## Configure
+
+Copy the example env and fill in whatever you want to use — everything is optional except a provider key (or
+none, for the heuristic fallback):
+
+```bash
+cp .env.example .env
+```
+
+Key surface: `LLM_PROVIDER` + `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`,
+`ELEVENLABS_API_KEY`, `MONGODB_URI`, `SOLANA_RPC_URL` / `SOLANA_REGISTRY_KEYPAIR`, and the Postgres/Redis
+infra URLs (defaults match docker-compose). See `.env.example` for the annotated list.
+
+### LLM providers
+
+| `LLM_PROVIDER` | Key | Default model |
+|----------------|-----|---------------|
+| `openai` (default) | `OPENAI_API_KEY` | `gpt-5.4` |
+| `claude` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` |
+| `gemini` | `GEMINI_API_KEY` | `gemini-3.1-pro-preview` |
+| *(none)* | — | keyless heuristic |
 
 ## Run it locally
 
+One command brings up the whole stack (infra → migrations → scraper → worker → web):
+
+```bash
+cp .env.example .env      # add a provider key (optional)
+./run.sh                  # ./run.sh --down to stop, --no-build for a fast restart
+# open the API base printed at the end (default http://localhost:3001)
+```
+
+<details><summary>Manual / step-by-step</summary>
+
 ```bash
 npm install
-# Phase 0 build
-npm run build --workspace=@mcp/types && npm run build --workspace=@mcp/db
-# Infra
+npm run build:phase0                         # build @mcp/types + @mcp/db
 docker compose -f infra/docker-compose.yml up -d
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/mcp node packages/db/scripts/apply-migrations.mjs
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/mcp \
+  node packages/db/scripts/apply-migrations.mjs
 
-# Scraper (Python)
 cd services/scraper && python3 -m venv .venv && .venv/bin/pip install -e '.[dev]' && \
   .venv/bin/python -m playwright install chromium && \
   .venv/bin/uvicorn scraper.service:app --port 8000 &
 
-# Worker (consumes jobs; no ANTHROPIC_API_KEY -> keyless heuristic inference)
 cd ../generator && npm run build && \
   DATABASE_URL=postgres://postgres:postgres@localhost:5432/mcp REDIS_URL=redis://127.0.0.1:6379 \
   SCRAPER_URL=http://127.0.0.1:8000 ARTIFACT_ROOT=/tmp/mcp-artifacts npm run worker &
 
-# Web (same DATABASE_URL/REDIS_URL/ARTIFACT_ROOT)
 cd ../../apps/web && npm run build && \
   DATABASE_URL=... REDIS_URL=... ARTIFACT_ROOT=/tmp/mcp-artifacts npm start
-# open http://localhost:3001 - paste a URL, generate, download.
 ```
 
-Set `ANTHROPIC_API_KEY` on the worker to use real Claude inference instead of the heuristic.
+</details>
 
-**Chrome extension:** `chrome://extensions` -> enable Developer mode -> **Load unpacked** -> select
-`apps/extension` (no build needed). The extension default API base is synced from `mcp.config.json`
-by `./run.sh` / `npm run sync:extension-config`. Click the icon -> **Open page chat** -> "Make MCP server for this page."
-See [`apps/extension/README.md`](./apps/extension/README.md).
+**Chrome extension:** `chrome://extensions` → enable Developer mode → **Load unpacked** → select
+`apps/extension` (no build). API base + ElevenLabs/Atlas config sync from `mcp.config.json` / the web app.
 
-## Deployment readiness (honest assessment)
+## Production stack
 
-**Vercel web deployment is configured.** Keep the Vercel project root at the repository root. The root
-`vercel.json` runs `npm run vercel-build`, which compiles the workspace dependencies first and then builds
-`apps/web`, avoiding missing `dist` imports like `@mcp/generator/dist/...`.
-
-Expected Vercel settings if the Vercel project root is the repo root:
+The full container stack (web, generator, scraper, monitor, nginx load balancer, Postgres, Redis,
+migrations, shared artifact volume) is in `infra/compose.prod.yml`:
 
 ```bash
-Root Directory: .
-Build Command: npm run vercel-build
-Output Directory: apps/web/.next
-Install Command: npm install
-```
-
-If you want the Vercel project root to be `apps/web`, use the checked-in `apps/web/vercel.json`:
-
-```bash
-Root Directory: apps/web
-Build Command: cd ../.. && npm run vercel-build
-Output Directory: .next
-Install Command: cd ../.. && npm install
-```
-
-Vercel can host the Next frontend/API routes. The long-running generator worker, scraper, monitor, Redis,
-Postgres, and nginx load-balancer still need the container stack below or managed equivalents. For real
-Vercel production use, point `DATABASE_URL` and `REDIS_URL` at external managed services; local Docker host
-URLs will not work from Vercel.
-
-**Container deployment is now scaffolded.** `infra/compose.prod.yml` builds Docker images for the Next web
-frontend, generator worker, Python scraper, Go monitor, nginx load balancer, Postgres, Redis, migrations,
-and shared artifact storage. Start the full stack with:
-
-```bash
-npm run deploy:up
-# open http://localhost:8080
-```
-
-Scale the frontend and microservices with Docker Compose:
-
-```bash
+npm run deploy:up        # open http://localhost:8080
 docker compose -f infra/compose.prod.yml up -d --scale web=3 --scale generator=2 --scale scraper=2
 ```
 
-`load-balancer` routes public traffic to scaled `web` containers. `generator` replicas share the BullMQ
-queue, `scraper` replicas are reached through Docker DNS, and `web`/`generator` share the `artifacts`
-volume so downloads still work after scaling.
+The Next frontend/API also deploys to Vercel (`npm run vercel-build`); the long-running services need the
+container stack or managed equivalents.
 
-**Works end-to-end locally - verified.** The assembled product runs: paste a URL in the web app -> job
-enqueues -> worker consumes -> real scraper captures real network traffic (real Chromium) -> codegen -> the UI
-job-result path returns the artifact -> download a runnable MCP server. Flow B (self-heal) is verified
-link-by-link (monitor produces jobs on real Postgres; Go->Node->BullMQ enqueue seam; worker self-heals on
-real Postgres) but not yet as one assembled 6-process chain.
-
-**Remaining production decisions:**
-
-| Gap | Why it matters | Needs |
-|-----|----------------|-------|
-| **Auth + rate-limiting on the web API** | `/api/generate` is an **open, unauthenticated enqueue** - an abuse vector | Auth model + rate-limit policy |
-| **Secrets management** | `ANTHROPIC_API_KEY`, DB/Redis creds | A secrets store for your target |
-| **Real R2/S3 artifact adapter** | Only `FsArtifactStore` exists (local FS); web+worker must share storage | Implement `ArtifactStore` for object storage |
-| **CI** | No automated gate | Wire the test commands below into CI |
-| **Live-Claude inference** | Tests use the keyless heuristic - real inference output is **unverified** | An API key + an eval pass |
-| **Legal posture** | `docs/04-legal-modes.md` raises real liability for a deployed scraper | Legal review of the scrape modes |
-| **Extension in a real browser** | Loads unpacked; CORS is handled (middleware); cross-origin `fetch` from the panel is verified only as a curl preflight, not in a loaded extension | Load it, confirm the chat->generate flow live |
-
-## Test everything
+## Test
 
 ```bash
-npm test                                                   # all Node unit suites (incl. extension agent-loop)
-# The generator's real-browser session test runs when Playwright+Chromium are present, else skips loudly:
-npm i -D playwright -w @mcp/generator && npx playwright install chromium
-cd services/scraper && .venv/bin/python -m pytest          # 27 (tier-2 needs Chromium, else skips loudly)
-cd services/monitor && go test ./internal/...              # pure logic
-# Integration (need Docker): each prints PASS/FAIL
-bash services/generator/test/integration/run.sh            # worker (Redis+Postgres)
-bash services/generator/test/integration/flow-a-assembled.sh  # capstone: assembled Flow A + download
-bash services/monitor/test/run-integration.sh              # monitor + Go->Node enqueue seam
-bash apps/web/test/smoke.sh                                 # web live smoke
+npm test                                                      # all Node unit suites (incl. extension agent loop + voice)
+cd services/scraper && .venv/bin/python -m pytest             # scraper (tier-2 needs Chromium, else skips)
+cd services/monitor && go test ./internal/...                 # monitor logic
+bash services/generator/test/integration/run.sh               # worker (needs Redis + Postgres)
+bash services/generator/test/integration/flow-a-assembled.sh  # capstone: assembled flow + real download
+bash apps/web/test/smoke.sh                                   # web live smoke
 ```

@@ -6,9 +6,11 @@ import { NextResponse } from "next/server";
 export const config = { matcher: "/api/:path*" };
 
 function withCors(res: NextResponse): NextResponse {
+  // Fully open: wildcard origin + headers, all methods (no credentials — the spec-safe "allow everything").
   res.headers.set("Access-Control-Allow-Origin", "*");
-  res.headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.headers.set("Access-Control-Allow-Headers", "content-type");
+  res.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  res.headers.set("Access-Control-Allow-Headers", "*");
+  res.headers.set("Access-Control-Expose-Headers", "*");
   res.headers.set("Access-Control-Max-Age", "86400");
   return res;
 }

@@ -22,7 +22,8 @@ async function main(): Promise<void> {
   const connection = { host: redisUrl.hostname, port: Number(redisUrl.port || 6379) };
   const scraperUrl = env("SCRAPER_URL", "http://127.0.0.1:8000");
   const artifactRoot = env("ARTIFACT_ROOT", "/tmp/mcp-artifacts");
-  const enqueuePort = Number(env("ENQUEUE_PORT", "8081"));
+  // Bind the platform-injected $PORT when present (Railway/Render/Fly), else ENQUEUE_PORT, else 8081.
+  const enqueuePort = Number(env("ENQUEUE_PORT", env("PORT", "8081")));
 
   const { inference, heal } = makeLLMClients();
 
