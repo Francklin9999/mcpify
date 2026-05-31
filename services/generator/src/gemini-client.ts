@@ -6,7 +6,7 @@ import type { HealClient } from "./self-heal.js";
 import { analyzeBundleHtml } from "./html-analysis.js";
 import { TOOL_SYSTEM_PROMPT, INCREMENTAL_NOTE, HEAL_SYSTEM_PROMPT } from "./llm-prompts.js";
 
-const DEFAULT_MODEL = process.env["GEMINI_MODEL"] ?? "gemini-2.0-flash";
+const DEFAULT_MODEL = process.env["GEMINI_MODEL"] ?? "gemini-3.1-pro-preview";
 
 /** Gemini-backed InferenceClient. Uses `responseMimeType: application/json` to force JSON output. */
 export class GeminiInferenceClient implements InferenceClient {

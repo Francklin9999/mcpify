@@ -27,7 +27,7 @@ export function activeLLMProvider(): LLMProvider {
 export function activeModelVersion(): string {
   const provider = activeLLMProvider();
   if (provider === "claude") return `claude/${process.env["CLAUDE_MODEL"] ?? "claude-sonnet-4-6"}`;
-  if (provider === "gemini") return `gemini/${process.env["GEMINI_MODEL"] ?? "gemini-2.0-flash"}`;
+  if (provider === "gemini") return `gemini/${process.env["GEMINI_MODEL"] ?? "gemini-3.1-pro-preview"}`;
   if (provider === "openai") return `openai/${process.env["OPENAI_MODEL"] ?? "gpt-4o"}`;
   return "heuristic/v1";
 }
@@ -40,7 +40,7 @@ export function makeLLMClients(): { inference: InferenceClient; heal: HealClient
       console.log(`[llm] provider=claude model=${process.env["CLAUDE_MODEL"] ?? "claude-sonnet-4-6"}`);
       return { inference: new ClaudeInferenceClient(), heal: new ClaudeHealClient(), provider };
     case "gemini":
-      console.log(`[llm] provider=gemini model=${process.env["GEMINI_MODEL"] ?? "gemini-2.0-flash"}`);
+      console.log(`[llm] provider=gemini model=${process.env["GEMINI_MODEL"] ?? "gemini-3.1-pro-preview"}`);
       return { inference: new GeminiInferenceClient(), heal: new GeminiHealClient(), provider };
     case "openai":
       console.log(`[llm] provider=openai model=${process.env["OPENAI_MODEL"] ?? "gpt-4o"}`);

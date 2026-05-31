@@ -31,7 +31,7 @@ function activeModel(forAgent = false): string {
   const override = forAgent ? process.env["AGENT_MODEL"] : undefined;
   const p = activeProvider();
   if (p === "claude") return override ?? process.env["CLAUDE_MODEL"] ?? "claude-sonnet-4-6";
-  if (p === "gemini") return override ?? process.env["GEMINI_MODEL"] ?? "gemini-2.0-flash";
+  if (p === "gemini") return override ?? process.env["GEMINI_MODEL"] ?? "gemini-3.1-pro-preview";
   return override ?? process.env["OPENAI_MODEL"] ?? "gpt-5.4";
 }
 
