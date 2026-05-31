@@ -9,6 +9,7 @@ export default async function ServerPage({ params }: { params: Promise<{ id: str
   const server = await getServerDetail(id);
   if (!server) notFound();
   const band = confidenceBand(server.confidence, server.status);
+  const tools = (server as typeof server & { tools?: { name: string; description: string; confidence?: number }[] }).tools ?? [];
 
   return (
     <section className="workspace">
@@ -46,6 +47,24 @@ export default async function ServerPage({ params }: { params: Promise<{ id: str
           ))}
         </div>
       </div>
+
+      {tools.length ? (
+        <div className="tool-panel">
+          <div className="snippet-head">
+            <h3>Tools</h3>
+            <span className="muted">{tools.length} available</span>
+          </div>
+          <div className="version-list">
+            {tools.map((tool) => (
+              <div key={tool.name}>
+                <span>{tool.name}</span>
+                <span>{tool.description}</span>
+                <span>{typeof tool.confidence === "number" ? `${Math.round(tool.confidence * 100)}%` : "verified"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

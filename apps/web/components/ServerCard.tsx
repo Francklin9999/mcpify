@@ -3,6 +3,7 @@ import { confidenceBand, pct } from "@/lib/confidence";
 
 export function ServerCard({ entry }: { entry: RegistryEntry }) {
   const band = confidenceBand(entry.confidence, entry.status);
+  const toolCount = (entry as RegistryEntry & { toolCount?: number }).toolCount;
   return (
     <article className="card">
       <div className="card-main">
@@ -17,6 +18,7 @@ export function ServerCard({ entry }: { entry: RegistryEntry }) {
         <div className="meta truncate">{entry.url}</div>
         <div className="card-footer">
           <span>{entry.installCount.toLocaleString()} installs</span>
+          {typeof toolCount === "number" ? <span>{toolCount} tools</span> : null}
           <span>{new Date(entry.lastParsedAt).toLocaleDateString()}</span>
           <span className={`status ${entry.status}`}>{entry.status}</span>
         </div>

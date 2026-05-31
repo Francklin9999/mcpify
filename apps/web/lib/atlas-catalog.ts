@@ -69,10 +69,11 @@ export function atlasDocToEntry(doc: AtlasDoc): RegistryEntry | null {
         ? doc.updatedAt
         : typeof doc?.createdAt === "string"
           ? doc.createdAt
-          : new Date(0).toISOString(),
+        : new Date(0).toISOString(),
     status: STATUSES.has(doc?.status) ? doc.status : "active",
     currentVersion: versionOf(doc),
-  };
+    toolCount: toolCountOf(doc),
+  } as RegistryEntry & { toolCount: number };
 }
 
 /** Merge Postgres registry entries with Atlas catalog entries, deduped by normalized url. Postgres wins. */

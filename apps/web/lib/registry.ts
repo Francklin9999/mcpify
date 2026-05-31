@@ -91,8 +91,15 @@ async function getAtlasServerDetail(serverId: string): Promise<(RegistryEntryT &
   const doc = await col.findOne(workingAtlasFilter({ serverId }), { projection: { _id: 0 } });
   const entry = doc ? atlasDocToEntry(doc) : null;
   const version = doc ? atlasDocToVersion(doc) : null;
-  if (!entry || !version) return null;
-  return { ...entry, versions: [version] };
+  if (!doc || !entry || !version) return null;
+  const tools = Array.isArray(doc.tools)
+    ? doc.tools.map((tool: any) => ({
+        name: String(tool?.name ?? ""),
+        description: String(tool?.description ?? ""),
+        confidence: typeof tool?.confidence === "number" ? tool.confidence : undefined,
+      }))
+    : [];
+  return { ...entry, versions: [version], tools } as RegistryEntryT & { versions: ServerVersionT[] };
 }
 
 export async function listRegistry(params: SearchParams = {}): Promise<RegistryEntryT[]> {
