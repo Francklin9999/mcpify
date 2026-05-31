@@ -1,17 +1,17 @@
-# 01 — Contracts (KEYSTONE)
+# 01 - Contracts (KEYSTONE)
 
 > Every cross-component data shape lives here, defined once. No other doc redefines a shape; they link
 > here. Freeze these first (Phase 0) and every service can be built in isolation against fixtures.
 >
 > Canonical home: `packages/types` (TypeScript + zod). Python (`scraper`) and Go (`monitor`) mirror
-> these — see §Cross-language sync.
+> these - see SCross-language sync.
 
 The shapes below are **structural intent**, not final field-by-field law. The implementer firms them up
 in `packages/types`, but the *boundaries* (who produces, who consumes) are fixed and must not drift.
 
 ---
 
-## 1. CaptureBundle — the big one
+## 1. CaptureBundle - the big one
 
 The single most important contract. It is the **input to generation**, and it is produced by **two
 different sources** that the generator must not distinguish between:
@@ -27,7 +27,7 @@ interface CaptureBundle {
   source: 'scraper' | 'extension';
   url: string;                 // canonical page URL
   capturedAt: string;          // ISO-8601
-  legalMode: LegalMode;        // see §6 and 04-legal-modes.md
+  legalMode: LegalMode;        // see S6 and 04-legal-modes.md
   tier?: 1 | 2 | 3;            // scraper fetch tier used (absent for extension)
 
   dom: {
@@ -36,7 +36,7 @@ interface CaptureBundle {
     selectorsOfInterest?: ElementRef[]; // adaptive-tracked elements (Scrapling)
   };
 
-  network: NetworkCapture[];   // XHR/fetch calls observed — the highest-signal input
+  network: NetworkCapture[];   // XHR/fetch calls observed - the highest-signal input
   meta: {
     title?: string;
     robotsAllowed?: boolean;  // scraper only
@@ -48,7 +48,7 @@ interface NetworkCapture {
   method: string;             // GET/POST/...
   urlPattern: string;         // templated: /api/items/{id}
   rawUrl: string;
-  requestHeaders: Record<string, string>;   // SANITIZED — see 04. FAIL-CLOSED: the zod schema REJECTS any
+  requestHeaders: Record<string, string>;   // SANITIZED - see 04. FAIL-CLOSED: the zod schema REJECTS any
                                              // secret-list header, so an un-scrubbed producer throws at parse().
   requestBodySchema?: JsonSchema;            // inferred shape, not raw values
   responseSchema?: JsonSchema;               // inferred shape of response
@@ -64,18 +64,18 @@ interface ElementRef {        // Scrapling adaptive tracking handle
 ```
 
 **Producers:** scraper, extension net-intercept. **Consumer:** generator (inference).
-**Fixture:** `fixtures/capture-bundles/*.json` — every other consumer test loads these, never a live fetch.
+**Fixture:** `fixtures/capture-bundles/*.json` - every other consumer test loads these, never a live fetch.
 
 ---
 
-## 2. ToolDefinition — output of inference, input to codegen
+## 2. ToolDefinition - output of inference, input to codegen
 
 ```ts
 interface InferenceResult {
   url: string;
   bundleId: string;
   tools: ToolDefinition[];
-  confidence: number;         // 0..1 — aggregate; see §5 confidence rules
+  confidence: number;         // 0..1 - aggregate; see S5 confidence rules
   modelVersion: string;       // Claude model id used
 }
 
@@ -91,12 +91,12 @@ type ExecutionStrategy =
   | { kind: 'http';   request: NetworkCapture; paramMapping: ParamMapping }   // call discovered API directly
   | { kind: 'browser'; steps: BrowserStep[] };                               // drive a headless page (Playwright)
 
-// ── v1 SCOPE DECISION (frozen) ────────────────────────────────────────────────
+// -- v1 SCOPE DECISION (frozen) ------------------------------------------------
 // v1 generates execution for PUBLIC tools only. There is intentionally NO runtime
 // auth-acquisition field on ExecutionStrategy. session-mode traffic is still
 // CAPTURED (for inference signal), but generated tools in v1 execute only against
 // public endpoints. Authenticated session-mode EXECUTION is post-v1 and will add a
-// runtime-auth field (e.g. browser_replay / local_broker) at that time — it is a
+// runtime-auth field (e.g. browser_replay / local_broker) at that time - it is a
 // breaking, deliberate contract extension, not an oversight. Do not invent it now.
 
 interface ParamMapping {       // how ToolDefinition.inputSchema fields fill the request
@@ -111,11 +111,11 @@ interface BrowserStep {
 ```
 
 **Producer:** generator (Claude inference). **Consumer:** generator (codegen). zod schema is the
-validation gate — inference output that fails zod is rejected before codegen.
+validation gate - inference output that fails zod is rejected before codegen.
 
 ---
 
-## 3. GeneratedServerArtifact — output of codegen
+## 3. GeneratedServerArtifact - output of codegen
 
 ```ts
 interface GeneratedServerArtifact {
@@ -132,7 +132,7 @@ interface GeneratedServerArtifact {
 
 ---
 
-## 4. Queue messages — Go produces, Node consumes
+## 4. Queue messages - Go produces, Node consumes
 
 BullMQ on Redis. Go enqueues, Node workers process. **This is the only coupling between monitor and
 generator**, and it is async. Queue name + payloads are frozen here.
@@ -152,13 +152,13 @@ interface ToolFailure {
 }
 ```
 
-- Queue: `mcp-jobs` (single queue, discriminated by `kind`) — or one queue per kind; implementer decides,
+- Queue: `mcp-jobs` (single queue, discriminated by `kind`) - or one queue per kind; implementer decides,
   but the **payload shapes above are fixed**.
 - Go monitor only ever produces `regenerate` and `self_heal`. `generate` comes from web/extension API.
 
 ---
 
-## 5. Registry / Version / Confidence — DB row shapes
+## 5. Registry / Version / Confidence - DB row shapes
 
 Read by web + monitor; written by generator. Full DDL in `02-data-model.md`; the logical shape:
 
@@ -185,16 +185,16 @@ interface ServerVersion {
 }
 ```
 
-**Confidence rules (single source of truth — referenced by generator + monitor + web):**
-- Per-tool confidence from inference (§2). Aggregate = mean of per-tool confidences, clamped to [0,1].
-  **Implemented once** as `aggregateConfidence()` in `packages/types` — generator/monitor/web import it,
+**Confidence rules (single source of truth - referenced by generator + monitor + web):**
+- Per-tool confidence from inference (S2). Aggregate = mean of per-tool confidences, clamped to [0,1].
+  **Implemented once** as `aggregateConfidence()` in `packages/types` - generator/monitor/web import it,
   never reimplement. (v1 equal weights; refine weighting in that one place if needed.)
-- Monitor adjusts confidence on health-check results (pass ↑, fail ↓). Bounds [0,1].
-- Curated tier is **always ≥ 0.95** by definition (hand-verified). Auto-gen displays live confidence.
+- Monitor adjusts confidence on health-check results (pass ^, fail v). Bounds [0,1].
+- Curated tier is **always >= 0.95** by definition (hand-verified). Auto-gen displays live confidence.
 
 ---
 
-## 6. LegalMode — cross-cutting enum (policy in 04)
+## 6. LegalMode - cross-cutting enum (policy in 04)
 
 ```ts
 type LegalMode = 'safe' | 'full_scrape' | 'session';
@@ -204,46 +204,46 @@ Carried on `CaptureBundle` and `GenerateJob`. Enforcement points are in `04-lega
 is fixed here** so scraper, extension, generator and web all agree on the value space.
 
 > **v1 scope:** all three modes are valid for **capture**. But `session`-mode **execution** is post-v1
-> (see `ExecutionStrategy` note in §2). In v1, a `session` capture improves inference; the generated tool
+> (see `ExecutionStrategy` note in S2). In v1, a `session` capture improves inference; the generated tool
 > still executes against public endpoints only.
 
 ---
 
-## 7. Web API surface — what web & extension call
+## 7. Web API surface - what web & extension call
 
 Frozen route list (full request/response in `apps/web.md`; shapes reference this doc):
 
 ```
-POST /api/generate        body { url, legalMode, acknowledgedFullScrape?, bundle? } → { jobId }   (enqueues GenerateJob)
-                            ─ acknowledgedFullScrape MUST be true when legalMode==='full_scrape' (04); schema-enforced
-                            ─ bundle is an optional extension CaptureBundle; if present the worker generates from it
+POST /api/generate        body { url, legalMode, acknowledgedFullScrape?, bundle? } -> { jobId }   (enqueues GenerateJob)
+                            - acknowledgedFullScrape MUST be true when legalMode==='full_scrape' (04); schema-enforced
+                            - bundle is an optional extension CaptureBundle; if present the worker generates from it
                               instead of a server-side scraper re-fetch
-GET  /api/jobs/:jobId      → { status: 'queued'|'running'|'done'|'failed', result?: GeneratedServerArtifact, error? }
-GET  /api/registry         query { tier?, q? } → RegistryEntry[]
-GET  /api/servers/:id      → RegistryEntry & { versions: ServerVersion[] }
+GET  /api/jobs/:jobId      -> { status: 'queued'|'running'|'done'|'failed', result?: GeneratedServerArtifact, error? }
+GET  /api/registry         query { tier?, q? } -> RegistryEntry[]
+GET  /api/servers/:id      -> RegistryEntry & { versions: ServerVersion[] }
 POST /api/servers/:id/contribute  body { bundle: CaptureBundle }   (extension passive contribution / community)
-GET  /api/servers/:id/download/:version → GeneratedServerArtifact
-POST /api/assist          body { messages, pageContext, availableTools } → streamed turn  (side panel; keeps Claude key server-side)
+GET  /api/servers/:id/download/:version -> GeneratedServerArtifact
+POST /api/assist          body { messages, pageContext, availableTools } -> streamed turn  (side panel; keeps Claude key server-side)
 ```
 
 > Canonical zod shapes for these live in `packages/types` (`api.ts`): `GenerateRequest` (with the
 > `full_scrape` acknowledgement refine), `GenerateResponse`, `JobStatusResponse`, `ContributeRequest`.
 
-The extension and web app **only** know these routes — they never call scraper/generator/monitor directly.
+The extension and web app **only** know these routes - they never call scraper/generator/monitor directly.
 
 ---
 
 ## Cross-language sync
 
-- TS is canonical in `packages/types` (zod schemas → can emit JSON Schema).
+- TS is canonical in `packages/types` (zod schemas -> can emit JSON Schema).
 - **Python (scraper):** consumes nothing inbound except a `GenerateJob`-like trigger; **produces**
   `CaptureBundle`. Keep a `pydantic` mirror of `CaptureBundle` + `NetworkCapture`.
-- **Go (monitor):** produces queue messages (§4), reads/writes registry rows (§5). Keep Go structs
-  mirroring §4 and §5 only.
-- **Open question:** auto-generate Python/Go mirrors from zod→JSON Schema, or hand-maintain with a
+- **Go (monitor):** produces queue messages (S4), reads/writes registry rows (S5). Keep Go structs
+  mirroring S4 and S5 only.
+- **Open question:** auto-generate Python/Go mirrors from zod->JSON Schema, or hand-maintain with a
   contract test that fails CI on drift? Recommend the latter for v1 (a golden-fixture round-trip test).
 
 ## Open questions
 - `JsonSchema` representation: full JSON Schema draft, or a trimmed subset? Pick one and validate with the
   same lib on both producer and consumer.
-- Header sanitization list (what counts as a secret) — defined in `04`, referenced by the `NetworkCapture` producer.
+- Header sanitization list (what counts as a secret) - defined in `04`, referenced by the `NetworkCapture` producer.

@@ -24,7 +24,7 @@ export interface VersionPersistence {
    *  1. insert the `server_versions` row + `tools`, and
    *  2. update the `servers` row pointer: `current_version = version`, `status`, `confidence`,
    *     `last_parsed_at`.
-   * (This is the "the row that makes it live" step — see the `current_version` decision in `02`.)
+   * (This is the "the row that makes it live" step - see the `current_version` decision in `02`.)
    */
   writeVersion(write: VersionWrite): Promise<void>;
 }

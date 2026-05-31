@@ -1,8 +1,8 @@
 import { CaptureBundle, scrubHeaders, type CaptureBundle as CaptureBundleT, type NetworkCapture, type PageSnapshot } from "@mcp/types";
 
 /**
- * Net-intercept → CaptureBundle (docs/apps/extension.md Module 3). Produces a bundle SHAPE-IDENTICAL to
- * the scraper's `source:'scraper'` output (01 §1) — the generator must not be able to tell them apart.
+ * Net-intercept -> CaptureBundle (docs/apps/extension.md Module 3). Produces a bundle SHAPE-IDENTICAL to
+ * the scraper's `source:'scraper'` output (01 S1) - the generator must not be able to tell them apart.
  * The build validates against the SAME @mcp/types contract the generator uses (fail-closed), and applies
  * the SAME shared `scrubHeaders` (04) so no credential/secret ever leaves the client.
  */
@@ -43,7 +43,7 @@ export function templateUrl(raw: string): string {
     .join("/");
 }
 
-/** Shallow JSON-Schema-ish inference (1 nested level). Schemas only — never raw values (04). */
+/** Shallow JSON-Schema-ish inference (1 nested level). Schemas only - never raw values (04). */
 export function inferSchema(value: unknown, depth = 0): Record<string, unknown> {
   if (typeof value === "boolean") return { type: "boolean" };
   if (typeof value === "number") return { type: Number.isInteger(value) ? "integer" : "number" };
@@ -64,7 +64,7 @@ export async function buildCaptureBundle(input: CaptureInput): Promise<CaptureBu
     method: c.method,
     urlPattern: templateUrl(c.url),
     rawUrl: c.url,
-    requestHeaders: scrubHeaders(c.requestHeaders), // SHARED scrub — strips secrets before anything leaves the client
+    requestHeaders: scrubHeaders(c.requestHeaders), // SHARED scrub - strips secrets before anything leaves the client
     requestBodySchema: c.requestBodySchema,
     responseSchema: c.responseBody !== undefined ? inferSchema(c.responseBody) : undefined,
     statusCode: c.status,

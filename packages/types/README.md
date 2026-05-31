@@ -23,7 +23,7 @@ const res = ToolDefinition.safeParse(maybeTool);  // { success, data | error }
 | `artifact` | `GeneratedServerArtifact`, `GeneratedFile` |
 | `queue` | `Job`, `GenerateJob`, `RegenerateJob`, `SelfHealJob`, `ToolFailure`, `QUEUE_NAME` |
 | `registry` | `RegistryEntry`, `ServerVersion`, `ServerTier`, `ServerStatus` |
-| `api` | `GenerateRequest`, `JobStatusResponse`, `ContributeRequest`, … |
+| `api` | `GenerateRequest`, `JobStatusResponse`, `ContributeRequest`, ... |
 
 ## Cross-language sync
 
@@ -31,11 +31,11 @@ const res = ToolDefinition.safeParse(maybeTool);  // { success, data | error }
   **exact file** (do not fork it). Re-implement `globToRegExp`/`scrubHeaders` against the same list.
 - **`/fixtures/`** (repo root) is a cross-language golden corpus: the TS tests here and the future
   Python/Go contract tests load the same JSON. Keeping them passing in all three runtimes is how the
-  hand-maintained mirrors are kept honest (`01 §Cross-language`).
+  hand-maintained mirrors are kept honest (`01 SCross-language`).
 
 ## Build / test
 
 ```bash
-npm run build --workspace=@mcp/types   # tsc → dist/ (+ copies secret-list.json)
+npm run build --workspace=@mcp/types   # tsc -> dist/ (+ copies secret-list.json)
 npm run test  --workspace=@mcp/types   # round-trip + REJECTION + scrub + legal-gate + confidence
 ```

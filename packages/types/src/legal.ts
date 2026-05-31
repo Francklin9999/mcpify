@@ -1,14 +1,14 @@
 import { z } from "zod";
 
 /**
- * LegalMode — frozen enum (`01 §6`, policy in `04-legal-modes.md`).
+ * LegalMode - frozen enum (`01 S6`, policy in `04-legal-modes.md`).
  * v1 scope: all three are valid for CAPTURE, but `session`-mode EXECUTION is post-v1 (see ExecutionStrategy).
  */
 export const LegalMode = z.enum(["safe", "full_scrape", "session"]);
 export type LegalMode = z.infer<typeof LegalMode>;
 
 /**
- * Secret-list. INLINED (not a JSON import) so every bundler — Next, Parcel/Plasmo — can consume this
+ * Secret-list. INLINED (not a JSON import) so every bundler - Next, Parcel/Plasmo - can consume this
  * package; the `with { type: "json" }` import attribute breaks Parcel. The canonical, language-neutral
  * source is `src/secret-list.json` (read by the Python scraper); a parity test (contracts.test.ts) asserts
  * these stay byte-for-byte in sync, so the cross-language single-source guarantee holds via CI.
@@ -25,7 +25,7 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Glob (`*` = any run) → anchored, case-insensitive RegExp. Mirror this exactly in the Python port. */
+/** Glob (`*` = any run) -> anchored, case-insensitive RegExp. Mirror this exactly in the Python port. */
 function globToRegExp(glob: string): RegExp {
   return new RegExp("^" + glob.split("*").map(escapeRegExp).join(".*") + "$", "i");
 }

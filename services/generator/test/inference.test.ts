@@ -12,7 +12,7 @@ const repoFixture = (rel: string): any =>
 const bundle = repoFixture("capture-bundles/sample-public.json") as CaptureBundle;
 const validTool = repoFixture("tool-definitions/sample-http-tool.json");
 
-/** A client that returns whatever raw string we hand it — stands in for Claude. */
+/** A client that returns whatever raw string we hand it - stands in for Claude. */
 const fakeClient = (raw: string): InferenceClient => ({ proposeTools: async () => raw });
 
 test("keeps valid tools and DROPS invalid ones (the gate)", async () => {
@@ -40,7 +40,7 @@ test("all-invalid response: invalid tools dropped, content-tool floor applied", 
   assert.equal(result.tools[0]!.name, "fetch_page_content");
 });
 
-test("non-JSON model output does not throw — falls back to the content tool", async () => {
+test("non-JSON model output does not throw - falls back to the content tool", async () => {
   const { result } = await inferTools(bundle, fakeClient("here are your tools: {oops"));
   assert.equal(result.tools.length, 1);
   assert.equal(result.tools[0]!.name, "fetch_page_content");

@@ -19,7 +19,7 @@ import {
 } from "../src/index.js";
 
 // Parity guard: the inlined SECRET_LIST (legal.ts, bundler-safe) must match the canonical
-// src/secret-list.json that the Python scraper reads — else the cross-language scrub silently diverges.
+// src/secret-list.json that the Python scraper reads - else the cross-language scrub silently diverges.
 test("inlined secret-list matches the canonical JSON (cross-language single source)", () => {
   const json = JSON.parse(
     readFileSync(fileURLToPath(new URL("../../src/secret-list.json", import.meta.url)), "utf8"),
@@ -32,7 +32,7 @@ test("inlined secret-list matches the canonical JSON (cross-language single sour
 const repoFixture = (rel: string): unknown =>
   JSON.parse(readFileSync(fileURLToPath(new URL(`../../../../fixtures/${rel}`, import.meta.url)), "utf8"));
 
-// ── Round-trip: valid fixtures parse ─────────────────────────────────────────
+// Round-trip: valid fixtures parse
 test("CaptureBundle accepts the golden public bundle", () => {
   const parsed = CaptureBundle.parse(repoFixture("capture-bundles/sample-public.json"));
   assert.equal(parsed.source, "scraper");
@@ -40,7 +40,7 @@ test("CaptureBundle accepts the golden public bundle", () => {
   assert.equal(parsed.dom.selectorsOfInterest?.length, 2);
 });
 
-// ── Rejection: the schema's real job is to REJECT malformed input ────────────
+// Rejection: the schema's real job is to REJECT malformed input
 test("CaptureBundle rejects a missing required field (domHash)", () => {
   const bad = repoFixture("capture-bundles/sample-public.json") as any;
   delete bad.dom.domHash;
@@ -99,7 +99,7 @@ test("Job discriminatedUnion parses self_heal and rejects an unknown kind", () =
   assert.equal(Job.safeParse({ kind: "nope" }).success, false);
 });
 
-// ── Legal enforcement encoded in the contract (04) ───────────────────────────
+// Legal enforcement encoded in the contract (04)
 test("GenerateRequest blocks full_scrape without acknowledgement", () => {
   assert.equal(
     GenerateRequest.safeParse({ url: "https://x.com", legalMode: "full_scrape" }).success,
@@ -133,7 +133,7 @@ test("GenerateRequest accepts a matching extension bundle and rejects a mismatch
   );
 });
 
-// ── Secret-list scrub: no secret header may survive (04) ─────────────────────
+// Secret-list scrub: no secret header may survive (04)
 test("scrubHeaders strips exactly the secret-list headers/fields (golden fixture)", () => {
   const fx = repoFixture("secret-scrub/headers.json") as {
     input: Record<string, string>;
@@ -147,7 +147,7 @@ test("scrubHeaders strips exactly the secret-list headers/fields (golden fixture
   }
 });
 
-// ── Fail-closed legal backstop: the CONTRACT rejects un-scrubbed secret headers (04) ──
+// Fail-closed legal backstop: the CONTRACT rejects un-scrubbed secret headers (04)
 test("NetworkCapture rejects a request carrying a secret-list header", () => {
   const leaky = {
     method: "GET",
@@ -163,7 +163,7 @@ test("NetworkCapture rejects a request carrying a secret-list header", () => {
   assert.equal(NetworkCapture.safeParse(clean).success, true);
 });
 
-// ── Confidence invariant [0,1] + centralized aggregation (01 §5) ─────────────
+// Confidence invariant [0,1] + centralized aggregation (01 S5)
 test("Confidence rejects out-of-range and clampConfidence clamps", () => {
   assert.equal(Confidence.safeParse(1.5).success, false);
   assert.equal(Confidence.safeParse(-0.1).success, false);

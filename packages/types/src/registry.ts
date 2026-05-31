@@ -8,7 +8,7 @@ export type ServerTier = z.infer<typeof ServerTier>;
 export const ServerStatus = z.enum(["active", "degraded", "broken", "regenerating"]);
 export type ServerStatus = z.infer<typeof ServerStatus>;
 
-/** RegistryEntry — read by web + monitor, written by generator (`01 §5`, `02-data-model.md`). */
+/** RegistryEntry - read by web + monitor, written by generator (`01 S5`, `02-data-model.md`). */
 export const RegistryEntry = z.object({
   serverId: z.string().uuid(),
   url: z.string().url(),

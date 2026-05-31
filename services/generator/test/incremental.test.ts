@@ -4,7 +4,7 @@ import type { CaptureBundle, ToolDefinition } from "@mcp/types";
 import { coverageOf, computeDelta, discoverMore, toolSig } from "../src/incremental.js";
 import type { InferenceClient } from "../src/inference.js";
 
-// ── builders ─────────────────────────────────────────────────────────────────────────────────────────
+// builders
 function netCapture(method: string, urlPattern: string, rawUrl: string) {
   return { method, urlPattern, rawUrl, requestHeaders: { accept: "application/json" }, statusCode: 200, contentType: "application/json" };
 }
@@ -55,7 +55,7 @@ function mockClient(opts: { more?: string; full?: string } = {}) {
   return { client, calls };
 }
 
-// ── coverage / sigs ──────────────────────────────────────────────────────────────────────────────────
+// coverage / sigs
 test("toolSig is templated and method-qualified; coverage collects names + sigs", () => {
   const search = httpTool("search_products", "GET", "/s", "https://shop.example.com/s");
   const item = httpTool("get_item", "GET", "/api/items/{id}", "https://shop.example.com/api/items/1");
@@ -67,7 +67,7 @@ test("toolSig is templated and method-qualified; coverage collects names + sigs"
   assert.ok(cov.sigs.has("GET /api/items/{id}"));
 });
 
-// ── computeDelta ─────────────────────────────────────────────────────────────────────────────────────
+// computeDelta
 test("first capture against empty coverage is all-new", () => {
   const b = bundle([netCapture("GET", "/api/items/{id}", "https://shop.example.com/api/items/1")]);
   const { delta, hasNew } = computeDelta(b, coverageOf([]));
@@ -125,8 +125,8 @@ test("already-covered action tools do not retrigger delta discovery", () => {
   assert.equal(delta.newActions.length, 0);
 });
 
-// ── discoverMore ─────────────────────────────────────────────────────────────────────────────────────
-test("no new material ⇒ NO model call (zero tokens), tools unchanged", async () => {
+// discoverMore
+test("no new material => NO model call (zero tokens), tools unchanged", async () => {
   const current = [httpTool("get_item", "GET", "/api/items/{id}", "https://shop.example.com/api/items/1")];
   const b = bundle([netCapture("GET", "/api/items/{id}", "https://shop.example.com/api/items/9")]);
   const { client, calls } = mockClient({ more: '{"tools":[]}' });
@@ -138,7 +138,7 @@ test("no new material ⇒ NO model call (zero tokens), tools unchanged", async (
   assert.equal(out.tools.length, 1);
 });
 
-test("new material ⇒ delta-only model call; dups by name AND by covered endpoint are dropped", async () => {
+test("new material => delta-only model call; dups by name AND by covered endpoint are dropped", async () => {
   const current = [httpTool("search_products", "GET", "/s", "https://shop.example.com/s")];
   const b = bundle([netCapture("POST", "/api/cart", "https://shop.example.com/api/cart")]);
   // model returns: a genuinely-new tool, a name-duplicate, and a same-endpoint capability dup

@@ -1,5 +1,5 @@
 /**
- * @mcp/types — keystone shared contracts. See docs/01-contracts.md.
+ * @mcp/types - keystone shared contracts. See docs/01-contracts.md.
  * Schemas are the source of truth; TS types are inferred via z.infer so runtime validation and
  * compile-time types cannot drift.
  */

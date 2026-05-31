@@ -1,4 +1,4 @@
-// Package store is the pgx-backed Store implementation over the @mcp/db schema (02). Postgres-only —
+// Package store is the pgx-backed Store implementation over the @mcp/db schema (02). Postgres-only -
 // the monitor reads the last dom_hash/content_length from health_events (no Redis dependency).
 package store
 
@@ -84,7 +84,7 @@ func (s *Store) LastSnapshot(ctx context.Context, serverID string) (string, int,
 		  WHERE server_id = $1 AND dom_hash IS NOT NULL
 		  ORDER BY observed_at DESC LIMIT 1`, serverID).Scan(&hash, &length)
 	if err != nil {
-		return "", 0, nil // no baseline yet (no rows) — treat as empty
+		return "", 0, nil // no baseline yet (no rows) - treat as empty
 	}
 	return hash, length, nil
 }

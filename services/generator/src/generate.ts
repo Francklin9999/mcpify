@@ -44,7 +44,7 @@ export async function generate(req: GenerateRequest, deps: GenerateDeps): Promis
   const { serverId, version } = await deps.persistence.nextServer(req.url);
   const title = bundle.meta.title ?? req.url;
   // Emit the snapshot-driven browsing toolkit (browser_navigate/click/type/...) when the page is
-  // interactive — JS-rendered, has on-page actions/forms, or inference already produced a browser tool.
+  // interactive - JS-rendered, has on-page actions/forms, or inference already produced a browser tool.
   // This is what lets an LLM drive the page turn-by-turn (paginate, add to cart, multi-step flows).
   const browsing =
     bundle.meta.renderedWithJs ||
@@ -53,7 +53,7 @@ export async function generate(req: GenerateRequest, deps: GenerateDeps): Promis
     result.tools.some((t) => t.execution.kind === "browser");
   const artifact = generateServer({ serverId, version, url: req.url, title, tools: result.tools, browsing });
 
-  // A server with zero usable tools is NOT active — surface it as broken (per generator.md), not a
+  // A server with zero usable tools is NOT active - surface it as broken (per generator.md), not a
   // healthy zero-tool server. Confidence is already 0 in that case (aggregateConfidence([]) === 0).
   const status: RegistryEntry["status"] = result.tools.length === 0 ? "broken" : "active";
 
@@ -71,7 +71,7 @@ export async function generate(req: GenerateRequest, deps: GenerateDeps): Promis
   };
   await deps.persistence.writeRegistry(entry, result.tools, artifactUrl);
 
-  // Publish to Solana on-chain registry (best-effort — never blocks generation).
+  // Publish to the on-chain registry; never blocks generation.
   void publishToSolana(entry, result.tools);
 
   return {

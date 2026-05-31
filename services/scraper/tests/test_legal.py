@@ -12,7 +12,7 @@ def test_scrub_matches_golden_fixture(repo_fixture):
 
 
 def test_field_pattern_catches_token_anywhere():
-    # `*token*` / `*session*` glob — case-insensitive, substring (a field pattern, not a literal header).
+    # `*token*` / `*session*` glob - case-insensitive, substring (a field pattern, not a literal header).
     assert is_secret_field("X-Session-Token")
     assert scrub_headers({"x-session-token": "t", "accept": "json"}) == {"accept": "json"}
 

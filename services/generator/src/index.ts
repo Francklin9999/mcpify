@@ -1,5 +1,5 @@
 /**
- * @mcp/generator — inference + codegen + (next: self-healer). See docs/services/generator.md.
+ * @mcp/generator - inference + codegen + (next: self-healer). See docs/services/generator.md.
  */
 export * from "./inference.js";
 export * from "./incremental.js";

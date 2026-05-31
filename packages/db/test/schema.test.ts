@@ -15,7 +15,7 @@ import {
   contributions,
 } from "../src/index.js";
 
-// ── Enum parity: DB enums must equal the @mcp/types contract value-spaces (drift guard) ──
+// Enum parity: DB enums must equal the @mcp/types contract value-spaces (drift guard)
 test("server_tier enum matches ServerTier contract", () => {
   assert.deepEqual([...serverTierEnum.enumValues], [...ServerTier.options]);
 });
@@ -28,7 +28,7 @@ test("execution_kind enum matches EXECUTION_KINDS contract", () => {
   assert.deepEqual([...executionKindEnum.enumValues], [...EXECUTION_KINDS]);
 });
 
-// ── Shape sanity ─────────────────────────────────────────────────────────────
+// Shape sanity
 test("schema exports the expected tables", () => {
   assert.deepEqual(Object.keys(schema).sort(), [
     "contributions",
@@ -40,7 +40,7 @@ test("schema exports the expected tables", () => {
   ]);
 });
 
-// ── Structural guards: codify the three hand-verified key decisions (offline) ──
+// Structural guards: codify the three hand-verified key decisions (offline)
 test("servers has NO foreign keys (current_version is a plain pointer, not a FK)", () => {
   // The highest-reasoning-cost decision (advisor #1): an FK here is impossible (version not unique) and
   // would create a circular insert dependency. This fails loudly if someone re-adds it.

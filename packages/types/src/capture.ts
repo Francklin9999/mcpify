@@ -2,7 +2,7 @@ import { z } from "zod";
 import { JsonSchema, IsoDateTime } from "./common.js";
 import { LegalMode, isSecretHeader, isSecretField } from "./legal.js";
 
-/** Scrapling adaptive-tracking handle: an element addressed by role with selector fallbacks (`01 §1`). */
+/** Scrapling adaptive-tracking handle: an element addressed by role with selector fallbacks (`01 S1`). */
 export const ElementRef = z.object({
   role: z.string(),
   selector: z.string(),
@@ -72,7 +72,7 @@ export const NetworkCapture = z
     contentType: z.string(),
   })
   // FAIL-CLOSED legal backstop (`04`): the contract REJECTS any un-scrubbed secret-list header. Producers
-  // must call `scrubHeaders` before constructing this — if they forget, parse() throws instead of leaking.
+  // must call `scrubHeaders` before constructing this - if they forget, parse() throws instead of leaking.
   .superRefine((cap, ctx) => {
     for (const key of Object.keys(cap.requestHeaders)) {
       if (isSecretHeader(key) || isSecretField(key)) {
@@ -87,7 +87,7 @@ export const NetworkCapture = z
 export type NetworkCapture = z.infer<typeof NetworkCapture>;
 
 /**
- * CaptureBundle — THE keystone shape (`01 §1`). Produced by BOTH the scraper (`source:'scraper'`) and the
+ * CaptureBundle - THE keystone shape (`01 S1`). Produced by BOTH the scraper (`source:'scraper'`) and the
  * extension net-intercept (`source:'extension'`); the generator must not distinguish between them.
  */
 export const CaptureBundle = z.object({

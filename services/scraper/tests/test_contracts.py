@@ -39,7 +39,7 @@ def test_rejects_non_url_uuid_datetime_matching_zod_constraints(repo_fixture):
 
 
 def test_network_capture_rejects_a_secret_list_header():
-    """Fail-closed backstop — mirror of the TS NetworkCapture.superRefine (04)."""
+    """Fail-closed backstop - mirror of the TS NetworkCapture.superRefine (04)."""
     leaky = {
         "method": "GET",
         "urlPattern": "/api/x",

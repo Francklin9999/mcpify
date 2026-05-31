@@ -17,6 +17,6 @@ export const redisKeys = {
 export const r2Keys = {
   /** Generated server artifact zip. */
   artifact: (serverId: string, version: number): string => `artifacts/${serverId}/${version}.zip`,
-  /** Stored capture bundle — only persisted when legalMode permits (`04`). */
+  /** Stored capture bundle - only persisted when legalMode permits (`04`). */
   bundle: (bundleId: string): string => `bundles/${bundleId}.json`,
 } as const;

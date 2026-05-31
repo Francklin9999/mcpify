@@ -2,7 +2,7 @@ import { z } from "zod";
 import { JsonSchema, Confidence } from "./common.js";
 import { NetworkCapture, ElementRef } from "./capture.js";
 
-/** Execution kinds — the `ExecutionStrategy` discriminants. Exported so the DB `execution_kind` enum can
+/** Execution kinds - the `ExecutionStrategy` discriminants. Exported so the DB `execution_kind` enum can
  *  parity-check against the contract (`packages/db`). Keep in sync with the union below. */
 export const EXECUTION_KINDS = ["http", "browser"] as const;
 export type ExecutionKind = (typeof EXECUTION_KINDS)[number];
@@ -26,9 +26,9 @@ export const BrowserStep = z.object({
 export type BrowserStep = z.infer<typeof BrowserStep>;
 
 /**
- * ExecutionStrategy — FROZEN v1: `http | browser` ONLY. Discriminated on `kind` so codegen can switch
+ * ExecutionStrategy - FROZEN v1: `http | browser` ONLY. Discriminated on `kind` so codegen can switch
  * cleanly and bad payloads fail with a clear tag error.
- * There is intentionally NO runtime-auth field: session-mode EXECUTION is post-v1 (`01 §2` decision).
+ * There is intentionally NO runtime-auth field: session-mode EXECUTION is post-v1 (`01 S2` decision).
  */
 export const ExecutionStrategy = z.discriminatedUnion("kind", [
   z.object({
@@ -53,7 +53,7 @@ export const ToolDefinition = z.object({
 });
 export type ToolDefinition = z.infer<typeof ToolDefinition>;
 
-/** Output of inference, input to codegen (`01 §2`). */
+/** Output of inference, input to codegen (`01 S2`). */
 export const InferenceResult = z.object({
   url: z.string().url(),
   bundleId: z.string().uuid(),

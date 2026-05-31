@@ -7,7 +7,7 @@ import (
 	"mcp/monitor/internal/contracts"
 )
 
-// ── Fakes ───────────────────────────────────────────────────────────────────
+// Fakes
 type fakePoller struct{ resp map[string]struct {
 	status   int
 	body     string
@@ -66,7 +66,7 @@ func srv() contracts.ServerRow {
 	return contracts.ServerRow{ServerID: "s1", URL: "https://src.example.com", Confidence: 0.8, Status: "active", CurrentVersion: 1}
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
+// Tests
 func TestFailingToolProducesExactlyOneSelfHealJob(t *testing.T) {
 	store := newFakeStore()
 	store.servers = []contracts.ServerRow{srv()}

@@ -4,7 +4,7 @@ import { Job, QUEUE_NAME } from "@mcp/types";
 
 /**
  * Thin enqueue shim (the cross-language producer path). The Go monitor POSTs jobs here; this validates
- * each through the `Job` contract (fail-closed on the Go→Node seam) and calls `queue.add`. Keeps BullMQ's
+ * each through the `Job` contract (fail-closed on the Go->Node seam) and calls `queue.add`. Keeps BullMQ's
  * Redis internals on the Node side so Go never has to replicate them.
  */
 export function startEnqueueServer(port: number, connection: { host: string; port: number }): { server: Server; queue: Queue } {

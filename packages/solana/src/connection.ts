@@ -44,5 +44,5 @@ export function loadKeypair(): Keypair | null {
     }
   }
 
-  throw new Error("SOLANA_REGISTRY_KEYPAIR: unrecognised format — expected JSON byte array '[1,2,...]' or a file path")
+  throw new Error("SOLANA_REGISTRY_KEYPAIR: unrecognised format - expected JSON byte array '[1,2,...]' or a file path")
 }

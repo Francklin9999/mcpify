@@ -33,7 +33,7 @@ def create_app(controller: Optional[EscalationController] = None) -> FastAPI:
 
     @app.post("/capture", response_model=CaptureBundle, response_model_exclude_none=True)
     def capture(req: CaptureRequest) -> CaptureBundle:
-        # session is extension-only — the server-side scraper never acts in a user's session.
+        # session is extension-only - the server-side scraper never acts in a user's session.
         if req.legalMode == "session":
             return empty_bundle(req.url, req.legalMode, robots_allowed=False)
         # full_scrape requires explicit acknowledgement (04); otherwise treat as safe.

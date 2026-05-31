@@ -1,11 +1,11 @@
-// MCP Forge — service worker.
+// MCP Forge - service worker.
 //  (1) Opens the side-panel chat when the toolbar icon is clicked.
 //  (2) Net-intercept: silently records XHR/fetch per tab via chrome.webRequest (Module 3 of
 //      docs/apps/extension.md). Secret-list headers are dropped here AND again in lib/capture.js before
 //      anything leaves the client. Never reads or transmits cookies/credentials.
 //
 // The canonical secret list lives in packages/types/src/secret-list.json (and @mcp/types legal.ts), guarded
-// by a parity test. This inline copy is the static-extension mirror — keep in sync if the list changes.
+// by a parity test. This inline copy is the static-extension mirror - keep in sync if the list changes.
 const SECRET_HEADERS = ["authorization", "cookie", "set-cookie", "x-api-key", "x-auth-token", "proxy-authorization"];
 const SECRET_FIELD = [/token/i, /secret/i, /password/i, /session/i];
 const isSecret = (name) => {

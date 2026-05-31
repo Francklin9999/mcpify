@@ -1,7 +1,7 @@
 import type { CaptureBundle, LegalMode, ToolDefinition } from "@mcp/types";
 import { DEFAULT_API_BASE } from "./config";
 
-// The extension talks ONLY to the Web API (01 §7) — never to scraper/generator/monitor directly.
+// The extension talks ONLY to the Web API (01 S7) - never to scraper/generator/monitor directly.
 export const API_BASE = process.env.PLASMO_PUBLIC_API ?? DEFAULT_API_BASE;
 
 export async function generateFromUrl(

@@ -1,7 +1,7 @@
 import type { ServerStatus } from "@mcp/types";
 
 /**
- * Confidence visual system (docs/apps/web-ui.md). The band derives SOLELY from confidence + status —
+ * Confidence visual system (docs/apps/web-ui.md). The band derives SOLELY from confidence + status -
  * no per-card hardcoding. `broken` forces the low treatment regardless of score; `regenerating` is a
  * transient self-healing state.
  */

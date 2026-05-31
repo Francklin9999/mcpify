@@ -11,7 +11,7 @@ import type { ArtifactStore } from "./artifact-store.js";
 /**
  * Real Postgres persistence over @mcp/db. The untested-with-fakes heart of the worker:
  *  - every multi-table write is ONE transaction (server_versions + tools + servers-pointer + idempotency
- *    marker land atomically — a partial failure can't leave current_version pointing at half-written tools);
+ *    marker land atomically - a partial failure can't leave current_version pointing at half-written tools);
  *  - the job's id is inserted into processed_jobs in that same tx, so an at-least-once retry is a no-op
  *    (self_heal's version+1 mints exactly one version per job);
  *  - loadCurrentServer reconstitutes ToolDefinition[] through the contract zod (fail-closed on a bad row).
@@ -35,7 +35,7 @@ export class PostgresStore {
       .select()
       .from(toolsTable)
       .where(and(eq(toolsTable.serverId, serverId), eq(toolsTable.version, srv.currentVersion)));
-    // Fail-closed: jsonb is not validated by the DB — parse each row through the contract.
+    // Fail-closed: jsonb is not validated by the DB - parse each row through the contract.
     const defs = rows.map((r) => ToolDefinition.parse(r.definition));
     return { url: srv.url, title: srv.title, version: srv.currentVersion, tools: defs };
   }
@@ -79,7 +79,7 @@ export class PostgresStore {
                 lastParsedAt: new Date(entry.lastParsedAt),
               },
             });
-          await insertVersionAndTools(tx, entry.serverId, entry.currentVersion, entry.confidence, "auto", defs, artifactUrl);
+          await insertVersionAndTools(tx, entry.serverId, entry.currentVersion, "auto", defs, artifactUrl);
         });
       },
     };
@@ -92,8 +92,8 @@ export class PostgresStore {
       writeVersion: async (w: VersionWrite) => {
         await this.db.transaction(async (tx) => {
           await tx.insert(processedJobs).values({ jobId, kind }).onConflictDoNothing();
-          await insertVersionAndTools(tx, w.serverId, w.version, w.confidence, w.createdBy, w.tools, w.artifactUrl);
-          // Repoint the server at the new version — this is what makes it LIVE (02 / version-write).
+          await insertVersionAndTools(tx, w.serverId, w.version, w.createdBy, w.tools, w.artifactUrl);
+          // Repoint the server at the new version - this is what makes it LIVE (02 / version-write).
           await tx
             .update(servers)
             .set({
@@ -113,7 +113,6 @@ async function insertVersionAndTools(
   tx: any,
   serverId: string,
   version: number,
-  confidence: number,
   createdBy: string,
   defs: ToolDefinition[],
   artifactUrl = "",

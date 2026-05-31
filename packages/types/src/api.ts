@@ -6,7 +6,7 @@ import { GeneratedServerArtifact } from "./artifact.js";
 import { ToolDefinition } from "./tools.js";
 
 /**
- * POST /api/generate (`01 §7`). `full_scrape` is UNREACHABLE without explicit acknowledgement (`04`).
+ * POST /api/generate (`01 S7`). `full_scrape` is UNREACHABLE without explicit acknowledgement (`04`).
  * The web app gates this behind a confirm dialog; the schema enforces the invariant server-side too.
  */
 export const GenerateRequest = z
@@ -46,7 +46,7 @@ export const JobStatusResponse = z.object({
 });
 export type JobStatusResponse = z.infer<typeof JobStatusResponse>;
 
-/** POST /api/servers/:id/contribute — extension passive contribution / community (`03` Flow C). */
+/** POST /api/servers/:id/contribute - extension passive contribution / community (`03` Flow C). */
 export const ContributeRequest = z.object({ bundle: CaptureBundle });
 export type ContributeRequest = z.infer<typeof ContributeRequest>;
 
@@ -59,7 +59,7 @@ export type AssistMessage = z.infer<typeof AssistMessage>;
 /**
  * A browsing tool the side-panel agent can ask the model to call (OpenAI function-calling shape). These are
  * the LIVE-TAB primitives (browser_navigate/click/type/snapshot/...), NOT a generated-server ExecutionStrategy
- * — the side panel executes them against the user's current tab. `availableTools` (above) stays the read-only
+ * - the side panel executes them against the user's current tab. `availableTools` (above) stays the read-only
  * list of a generated server's tools; `tools` (below) is the actionable set for the agent loop.
  */
 export const AssistToolSpec = z.object({
@@ -107,7 +107,7 @@ export const AssistRequest = z.object({
 export type AssistRequest = z.infer<typeof AssistRequest>;
 
 /**
- * POST /api/discover — SYNCHRONOUS incremental discovery for the side panel. Given the tools already known
+ * POST /api/discover - SYNCHRONOUS incremental discovery for the side panel. Given the tools already known
  * for the page and a fresh capture, return the genuinely-new tools (for live in-session use) + the merged
  * set. If `serverId` is present, the registry server is ALSO grown (a discover job is enqueued). The model is
  * sent only the delta (token-efficient); when nothing is new, `added` is empty and no model call happens.

@@ -1,6 +1,6 @@
 import { MongoClient, type Collection } from "mongodb";
 
-// Singleton connection — reused across requests in the same Next.js process.
+// Singleton connection - reused across requests in the same Next.js process.
 let client: MongoClient | null = null;
 
 function uri(): string | null {

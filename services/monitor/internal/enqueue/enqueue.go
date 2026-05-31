@@ -1,5 +1,5 @@
 // Package enqueue pushes jobs onto the queue. The monitor does NOT replicate BullMQ's Redis structures
-// from Go (fragile, version-coupled); it POSTs to a thin Node enqueue shim that calls queue.add() — the
+// from Go (fragile, version-coupled); it POSTs to a thin Node enqueue shim that calls queue.add() - the
 // doc's recommended alternative. The queue stays BullMQ/Redis; only the producer path is HTTP.
 package enqueue
 

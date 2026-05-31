@@ -1,4 +1,4 @@
-"""FastAPI /capture surface — legal-mode gating, with a fake controller (no browser)."""
+"""FastAPI /capture surface - legal-mode gating, with a fake controller (no browser)."""
 
 from fastapi.testclient import TestClient
 

@@ -1,7 +1,7 @@
 """Cross-language secret-list scrubbing (docs/04-legal-modes.md).
 
 Reads the SAME canonical packages/types/src/secret-list.json the TypeScript side imports, and reimplements
-the glob -> regex / scrub logic identically. Mirror of @mcp/types legal.ts. Keep these in lockstep — the
+the glob -> regex / scrub logic identically. Mirror of @mcp/types legal.ts. Keep these in lockstep - the
 golden fixture tests/fixtures parity test fails CI if they drift.
 """
 

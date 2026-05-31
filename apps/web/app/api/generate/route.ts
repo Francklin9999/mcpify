@@ -5,8 +5,8 @@ import { jobQueue } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-// POST /api/generate — validate { url, legalMode, acknowledgedFullScrape? } (full_scrape gated by the
-// contract refine, 04), enqueue a GenerateJob, return { jobId }. (01 §7)
+// POST /api/generate - validate { url, legalMode, acknowledgedFullScrape? } (full_scrape gated by the
+// contract refine, 04), enqueue a GenerateJob, return { jobId }. (01 S7)
 export async function POST(req: Request): Promise<Response> {
   const parsed = GenerateRequest.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {

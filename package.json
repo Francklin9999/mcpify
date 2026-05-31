@@ -13,6 +13,8 @@
   "scripts": {
     "sync:extension-config": "node scripts/sync-extension-config.mjs",
     "build": "npm run build --workspaces --if-present",
+    "build:phase0": "npm run build --workspace=@mcp/types && npm run build --workspace=@mcp/db",
+    "pretest": "npm run build:phase0",
     "test": "npm run test --workspaces --if-present",
     "vercel-build": "npm run build --workspace=@mcp/web",
     "deploy:build": "docker compose -f infra/compose.prod.yml build",

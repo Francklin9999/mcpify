@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 
-// ── On-chain account layout (must match programs/server-registry/src/lib.rs) ──
+// On-chain account layout (must match programs/server-registry/src/lib.rs)
 //
 //  [0]        discriminant  u8      magic = 0xAB
 //  [1..33]    authority     [u8;32]
@@ -104,7 +104,7 @@ export function decodeServerRecord(data: Buffer): ServerRecord | null {
   };
 }
 
-/** sha256 hex of sorted, comma-joined tool names — deterministic tool set fingerprint. */
+/** sha256 hex of sorted, comma-joined tool names - deterministic tool set fingerprint. */
 export function toolSignature(toolNames: string[]): string {
   return createHash("sha256")
     .update([...toolNames].sort().join(","))

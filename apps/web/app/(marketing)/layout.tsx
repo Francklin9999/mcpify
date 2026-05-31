@@ -7,7 +7,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
       <header className="mk-header">
         <div className="mk-header-inner">
           <a className="brand" href="/">
-            <span className="dot">◆</span> MCP Forge
+            <span className="dot">*</span> MCP Forge
           </a>
           <nav className="mk-nav">
             <a className="navlink" href="#how">How it works</a>
@@ -21,7 +21,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
       {children}
       <footer className="mk-footer">
         <div className="mk-footer-inner">
-          <span>◆ MCP Forge — generate, don't integrate.</span>
+          <span>* MCP Forge - generate, don't integrate.</span>
           <span>Generated servers run locally. Your machine, your credentials.</span>
         </div>
       </footer>

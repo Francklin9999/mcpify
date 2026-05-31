@@ -106,7 +106,7 @@ test("discover MERGES precomputed candidates WITHOUT a second inference (route a
   const persist = fakePersistence();
   const candidates = [
     httpTool("add_to_cart", "POST", "/api/cart", "https://shop.example.com/api/cart"),
-    httpTool("search_products", "GET", "/s", "https://shop.example.com/s"), // dup name — dropped by merge
+    httpTool("search_products", "GET", "/s", "https://shop.example.com/s"), // dup name, dropped by merge
   ];
   const out = await discover(job(bundle([]), candidates), current, { inference: client, persistence: persist.persistence });
 

@@ -10,7 +10,7 @@ const Params = z.object({
   version: z.coerce.number().int().positive(),
 });
 
-// GET /api/servers/:id/download/:version — return a local artifact JSON in dev, or redirect to object storage.
+// GET /api/servers/:id/download/:version - return a local artifact JSON in dev, or redirect to object storage.
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string; version: string }> }): Promise<Response> {
   const parsed = Params.safeParse(await params);
   if (!parsed.success) return NextResponse.json({ error: "invalid download params" }, { status: 400 });

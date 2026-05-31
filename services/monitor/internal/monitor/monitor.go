@@ -1,5 +1,5 @@
 // Package monitor orchestrates the two detectors over interfaces (Store/Poller/Enqueuer) so the logic is
-// testable with fakes. It NEVER opens a browser and NEVER calls an LLM — it only detects and enqueues.
+// testable with fakes. It NEVER opens a browser and NEVER calls an LLM - it only detects and enqueues.
 package monitor
 
 import (
@@ -56,7 +56,7 @@ func (m *Monitor) CheckAll(ctx context.Context) error {
 
 // CheckServer runs the change detector then (if the source is healthy) the tool health checker.
 func (m *Monitor) CheckServer(ctx context.Context, srv contracts.ServerRow) error {
-	// ── Change detector: fetch the SOURCE page (not user instances), hash + size, classify drift. ──
+ // Change detector: fetch the SOURCE page (not user instances), hash + size, classify drift.
 	status, body, timedOut := m.Poller.Fetch(ctx, srv.URL)
 	health := detect.ClassifyStatus(status, timedOut)
 	newHash := detect.DomHash(body)
@@ -83,7 +83,7 @@ func (m *Monitor) CheckServer(ctx context.Context, srv contracts.ServerRow) erro
 		}
 	}
 
-	// ── Tool health checker: replay each http tool's endpoint (read-only reachability probe, v1). ──
+ // Tool health checker: replay each http tool's endpoint (read-only reachability probe, v1).
 	tools, err := m.Store.ListHTTPTools(ctx, srv.ServerID, srv.CurrentVersion)
 	if err != nil {
 		return err

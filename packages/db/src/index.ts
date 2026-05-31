@@ -1,5 +1,5 @@
 /**
- * @mcp/db — Postgres schema + client factory. See docs/02-data-model.md.
+ * @mcp/db - Postgres schema + client factory. See docs/02-data-model.md.
  * Owns Postgres only; Redis/R2 key layout lives in `@mcp/types` (keys.ts).
  */
 import { drizzle } from "drizzle-orm/postgres-js";

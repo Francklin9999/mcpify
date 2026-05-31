@@ -99,7 +99,7 @@ function hideWelcome() {
 function message(role, html) {
   hideWelcome();
   const wrapper = el("div", `msg ${role}`);
-  const avatar = el("div", "avatar", role === "user" ? "You" : "◆");
+  const avatar = el("div", "avatar", role === "user" ? "You" : "AI");
   const body = el("div", "body", html);
   wrapper.append(avatar, body);
   log.appendChild(wrapper);
@@ -140,7 +140,7 @@ async function initTheme() {
 /**
  * Pull ElevenLabs + Atlas config from the web app's env and write it into
  * chrome.storage.local as defaults. Any key already set in storage (via the
- * options page) is left untouched — env values never override manual entries.
+ * options page) is left untouched - env values never override manual entries.
  */
 async function syncConfigFromServer() {
   try {
@@ -166,7 +166,7 @@ async function syncConfigFromServer() {
       await loadElevenLabsSettings();
     }
   } catch {
-    // Web app not running or endpoint unavailable — silently skip.
+    // Web app not running or endpoint unavailable - silently skip.
   }
 }
 
@@ -859,8 +859,8 @@ function toolActionLabel(call) {
     case "browser_snapshot": return "Read the page";
     case "browser_navigate": return `Navigate to ${a.url}`;
     case "browser_click": return `Click ${a.ref}`;
-    case "browser_type": return `Type “${a.text}”${a.submit ? " and submit" : ""} into ${a.ref}`;
-    case "browser_select_option": return `Select “${a.value}” in ${a.ref}`;
+    case "browser_type": return `Type "${a.text}"${a.submit ? " and submit" : ""} into ${a.ref}`;
+    case "browser_select_option": return `Select "${a.value}" in ${a.ref}`;
     case "browser_back": return "Go back";
     case "browser_read_page": return "Read page text";
     case "browser_extract": return `Extract ${a.mode || "metadata"}`;
@@ -880,7 +880,7 @@ function agentView(body) {
       scrollToBottom();
     },
     addTool(call) {
-      const row = el("div", "agent-tool", `<span class="agent-tool-label">${escapeHtml(toolActionLabel(call))}</span><span class="agent-tool-state">…</span>`);
+      const row = el("div", "agent-tool", `<span class="agent-tool-label">${escapeHtml(toolActionLabel(call))}</span><span class="agent-tool-state">...</span>`);
       steps.appendChild(row);
       scrollToBottom();
       return row;
@@ -926,10 +926,10 @@ function agentView(body) {
   };
 }
 
-// ── Continuous discovery: as the agent drives a reactive page, capture fresh structure and run the
+// Continuous discovery: as the agent drives a reactive page, capture fresh structure and run the
 // token-efficient incremental engine (server-side). New tools become callable BY THE AGENT this session
 // (sessionTools) and also grow the persisted server when one exists. Debounced + deduped by (url, XHR count)
-// so we don't spam the API; the server skips the model entirely when nothing's new. ──
+// so we don't spam the API; the server skips the model entirely when nothing's new.
 const discovery = { serverId: undefined, resolvedFor: undefined, lastSig: "", timer: null, busy: false, agentActive: false, sessionTools: [] };
 
 function bundleSignature(bundle) {
@@ -985,7 +985,7 @@ async function runDiscovery() {
     discovery.resolvedFor = url;
     discovery.serverId = undefined;
 
-    // Pull pre-cached tools from Atlas first — instant, no generation needed.
+    // Pull pre-cached tools from Atlas first - instant, no generation needed.
     {
       const record = await fetchToolsFromAtlas(url).catch(() => null);
       if (record?.serverId) discovery.serverId = record.serverId;
@@ -1036,9 +1036,9 @@ async function discoverInlineAfterAction(call, def, announce) {
   await discoverFromBundle(bundle, { allowDuringAgent: true, announce: true, announcer: announce });
 }
 
-// Execute a discovered generated-server tool live, ON THE PAGE THE USER IS LOOKING AT — not headless.
+// Execute a discovered generated-server tool live, ON THE PAGE THE USER IS LOOKING AT - not headless.
 // A GET tool (search, view a product, list results) NAVIGATES the current tab to that URL so the user
-// watches it happen. Only state-changing requests (POST/PUT/…) run as a background request against their
+// watches it happen. Only state-changing requests (POST/PUT/...) run as a background request against their
 // logged-in session (and those are confirmed first). Browser-step tools defer to the visible primitives.
 async function executeDiscovered(def, args, tabExecute) {
   if (def?.execution?.kind === "http") {
@@ -1051,7 +1051,7 @@ async function executeDiscovered(def, args, tabExecute) {
     try {
       const res = await fetch(url, init);
       const text = await res.text();
-      const body = text.length > 4000 ? `${text.slice(0, 4000)}\n…[truncated]` : text;
+      const body = text.length > 4000 ? `${text.slice(0, 4000)}\n...[truncated]` : text;
       return `Done (${res.status}) ${def.name}. ${body}`;
     } catch (err) {
       return `Request failed for ${def.name}: ${err?.message || err}`;
@@ -1280,7 +1280,7 @@ function applyServer(card, artifact, tab) {
 
   const applyBtn = card.querySelector('[data-act="apply"]');
   if (applyBtn) {
-    applyBtn.textContent = "Applied ✓";
+    applyBtn.textContent = "Applied";
     applyBtn.disabled = true;
   }
 

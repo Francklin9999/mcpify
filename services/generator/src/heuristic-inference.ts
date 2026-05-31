@@ -12,7 +12,7 @@ import { analyzeBundleHtml } from "./html-analysis.js";
  * never throws (a parse failure yields no tools, never a crashed worker).
  */
 
-// Query keys that are tracking/session noise, not real inputs — extracted tools shouldn't surface them.
+// Query keys that are tracking/session noise, not real inputs - extracted tools shouldn't surface them.
 const TRACKING = /^(utm_|pd_rd_|pf_rd_|_$|fbclid$|gclid$|ref_?$|mc_|igshid$|s_kwcid$)/i;
 const isTracking = (k: string) => TRACKING.test(k) || k === "_";
 const NOISY_HOST = /(google-analytics|doubleclick|newrelic|nr-data|segment|sentry|hotjar|amplitude|optimizely|facebook|bing|adsrvr|demdex|datadog)/i;
@@ -66,7 +66,7 @@ function actionableNetworkCapture(cap: CaptureBundle["network"][number]): boolea
     if (NOISY_PATH.test(url.pathname)) return false;
     if (STATIC_ASSET.test(url.pathname)) return false;
   } catch {
-    /* malformed rawUrl falls through to best-effort tool generation */
+    /* malformed rawUrl: fall through to tool generation */
   }
   return !/beacon|analytics|telemetry|tracking/i.test(cap.contentType || "");
 }
@@ -114,7 +114,7 @@ function inferTravelFieldMap(form: PageForm): Record<string, PageField> | null {
   return mapping.origin && mapping.destination ? mapping : null;
 }
 
-// ── Network captures → tools (path params required, query params optional) ──
+// Network captures -> tools (path params required, query params optional)
 function toolsFromNetwork(bundle: CaptureBundle): unknown[] {
   return bundle.network.filter(actionableNetworkCapture).flatMap((cap) => {
     const properties: Record<string, unknown> = {};
@@ -127,7 +127,7 @@ function toolsFromNetwork(bundle: CaptureBundle): unknown[] {
       paramMapping[p] = { in: "path", key: p };
       required.push(p);
     }
-    // Query params come from the rawUrl (urlPattern strips the query). Optional — so a caller never has to
+    // Query params come from the rawUrl (urlPattern strips the query). Optional - so a caller never has to
     // supply tracking junk; real inputs (q, page, ...) are available when wanted.
     try {
       const q = new URL(cap.rawUrl).searchParams;
@@ -137,7 +137,7 @@ function toolsFromNetwork(bundle: CaptureBundle): unknown[] {
         paramMapping[key] = { in: "query", key };
       }
     } catch {
-      /* malformed rawUrl — skip query extraction */
+      /* malformed rawUrl - skip query extraction */
     }
     const bodySchema = cap.requestBodySchema as { properties?: Record<string, unknown> } | undefined;
     for (const key of Object.keys(bodySchema?.properties ?? {}).slice(0, 12)) {
@@ -162,7 +162,7 @@ function toolsFromNetwork(bundle: CaptureBundle): unknown[] {
   });
 }
 
-// ── HTML <form>s → action tools (the high-signal static-page case: search boxes) ──
+// HTML <form>s -> action tools (the high-signal static-page case: search boxes)
 type FormField = { name: string; required: boolean };
 
 function parseForms(html: string, pageUrl: string): unknown[] {
@@ -173,7 +173,7 @@ function parseForms(html: string, pageUrl: string): unknown[] {
   while ((fm = formRe.exec(html)) && count < 6) {
     const attrs = fm[1] ?? "";
     const inner = fm[2] ?? "";
-    // Skip login/auth forms — a tool needing credentials violates the session/legal stance.
+    // Skip login/auth forms - a tool needing credentials violates the session/legal stance.
     if (/type\s*=\s*["']?password/i.test(inner)) continue;
 
     const method = (/method\s*=\s*["']?\s*post/i.test(attrs) ? "POST" : "GET") as "GET" | "POST";
@@ -185,7 +185,7 @@ function parseForms(html: string, pageUrl: string): unknown[] {
       continue;
     }
     // Only http(s) actions yield a usable tool. A `javascript:`/`mailto:`/`tel:` action (common on
-    // JS-driven forms) would fetch() to nothing — skip rather than emit a broken tool.
+    // JS-driven forms) would fetch() to nothing - skip rather than emit a broken tool.
     if (action.protocol !== "http:" && action.protocol !== "https:") continue;
 
     // Visible, named fields only. Exclude hidden/submit/button/image (incl. CSRF tokens the model can't supply).
@@ -243,7 +243,7 @@ function toolsFromForms(bundle: CaptureBundle): unknown[] {
   try {
     return parseForms(bundle.dom.html, bundle.url);
   } catch {
-    return []; // brittle HTML parsing must never crash the worker — fall back to content/network tools
+    return []; // brittle HTML parsing must never crash the worker; fall back to content/network tools
   }
 }
 
@@ -551,7 +551,7 @@ function contentTool(bundle: CaptureBundle): unknown {
   }
   return {
     name: "fetch_page_content",
-    description: `Fetch the page content (readable text) from ${bundle.url}${bundle.meta.title ? ` — ${bundle.meta.title}` : ""}.`,
+    description: `Fetch the page content (readable text) from ${bundle.url}${bundle.meta.title ? ` - ${bundle.meta.title}` : ""}.`,
     inputSchema: { type: "object", properties: {} },
     execution: {
       kind: "http",

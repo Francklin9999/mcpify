@@ -1,9 +1,9 @@
 /**
- * LLM factory — reads LLM_PROVIDER from env and returns the right inference + heal clients.
+ * LLM factory - reads LLM_PROVIDER from env and returns the right inference + heal clients.
  *
- * LLM_PROVIDER=openai  (default) → requires OPENAI_API_KEY
- * LLM_PROVIDER=claude             → requires ANTHROPIC_API_KEY
- * LLM_PROVIDER=gemini             → requires GEMINI_API_KEY
+ * LLM_PROVIDER=openai  (default) -> requires OPENAI_API_KEY
+ * LLM_PROVIDER=claude             -> requires ANTHROPIC_API_KEY
+ * LLM_PROVIDER=gemini             -> requires GEMINI_API_KEY
  *
  * Falls back to the keyless heuristic when no matching API key is set.
  */
@@ -46,7 +46,7 @@ export function makeLLMClients(): { inference: InferenceClient; heal: HealClient
       console.log(`[llm] provider=openai model=${process.env["OPENAI_MODEL"] || "gpt-5.4"}`);
       return { inference: new OpenAIInferenceClient(), heal: new OpenAIHealClient(), provider };
     default:
-      console.warn("[llm] no API key configured — using keyless heuristic inference");
+      console.warn("[llm] no API key configured - using keyless heuristic inference");
       return { inference: new HeuristicInferenceClient(), heal: new HeuristicHealClient(), provider };
   }
 }

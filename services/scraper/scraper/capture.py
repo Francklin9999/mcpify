@@ -1,6 +1,6 @@
 """Pure capture core: normalization, escalation, URL templating, schema inference, bundle assembly.
 
-No Scrapling / browser imports here — the tier fetchers (tiers.py) live behind the `Fetcher` protocol so
+No Scrapling / browser imports here - the tier fetchers (tiers.py) live behind the `Fetcher` protocol so
 this whole module is testable with fakes (docs/services/scraper.md "test in isolation").
 """
 
@@ -75,7 +75,7 @@ def template_url(raw_url: str) -> str:
 
 
 def infer_schema(value: Any, _depth: int = 0) -> dict[str, Any]:
-    """Shallow JSON-Schema-ish inference (1 nested level). Schemas only — never raw values (04)."""
+    """Shallow JSON-Schema-ish inference (1 nested level). Schemas only - never raw values (04)."""
     if isinstance(value, bool):
         return {"type": "boolean"}
     if isinstance(value, int):
@@ -158,13 +158,13 @@ def _visible_text_len(html: str) -> int:
 
 
 def looks_client_rendered(html: str) -> bool:
-    """A script-bearing page with little visible text — a JS shell whose real content/API calls only appear
+    """A script-bearing page with little visible text - a JS shell whose real content/API calls only appear
     after the browser runs it. Tier 1 can't see those; escalate to a browser tier. (Tunable heuristic.)"""
     return "<script" in html.lower() and _visible_text_len(html) < _SHELL_TEXT_THRESHOLD
 
 
 # Bot-wall / anti-bot challenge markers. A page can return HTTP 200 yet be a captcha/challenge (Amazon,
-# Cloudflare, PerimeterX, etc.) — so status alone won't catch it. Conservative set to avoid false positives.
+# Cloudflare, PerimeterX, etc.) - so status alone won't catch it. Conservative set to avoid false positives.
 _BOT_MARKERS = (
     "captcha",
     "enter the characters you see",
@@ -181,7 +181,7 @@ _BOT_MARKERS = (
 
 
 def looks_like_bot_wall(html: str, title: Optional[str] = None) -> bool:
-    """True if the page looks like an anti-bot challenge rather than real content. Conservative — used to
+    """True if the page looks like an anti-bot challenge rather than real content. Conservative - used to
     escalate a plain-HTTP (tier-1) hit to the stealthier browser tiers, which may pass the challenge."""
     hay = (html[:20000] + " " + (title or "")).lower()
     return any(m in hay for m in _BOT_MARKERS)
@@ -190,7 +190,7 @@ def looks_like_bot_wall(html: str, title: Optional[str] = None) -> bool:
 def is_sufficient(result: FetchResult) -> bool:
     """Whether a tier's result ends escalation. Tier 1 is the SSR fast path: it's sufficient only for
     genuinely static pages. A browser tier (rendered_with_js) or any captured network is always sufficient.
-    A bot-wall (even with content/JS) is NEVER sufficient from a weaker tier — escalate to stealth."""
+    A bot-wall (even with content/JS) is NEVER sufficient from a weaker tier - escalate to stealth."""
     if looks_like_bot_wall(result.html, result.title):
         return False  # try the next, stealthier tier; the controller keeps best-effort if all fail
     if result.network or result.rendered_with_js:
@@ -199,8 +199,8 @@ def is_sufficient(result: FetchResult) -> bool:
 
 
 class EscalationController:
-    """Try tiers in order; stop at the first SUFFICIENT result. A tier-1 200 shell is NOT sufficient —
-    escalate to a browser tier so XHR/network gets captured (docs §3-tier). Bounded, never loops."""
+    """Try tiers in order; stop at the first SUFFICIENT result. A tier-1 200 shell is NOT sufficient -
+    escalate to a browser tier so XHR/network gets captured (docs S3-tier). Bounded, never loops."""
 
     def __init__(self, tiers: list[Fetcher]):
         self._tiers = tiers
@@ -219,7 +219,7 @@ class EscalationController:
             if is_sufficient(result):
                 return assemble_bundle(url, legal_mode, fetcher.tier, result)
         # No tier was "sufficient": return the best we got (e.g. a tier-1 shell when browsers are
-        # unavailable) rather than nothing — the generator assesses low confidence. None at all -> empty.
+        # unavailable) rather than nothing - the generator assesses low confidence. None at all -> empty.
         if best is not None:
             return assemble_bundle(url, legal_mode, best[0], best[1])
         return empty_bundle(url, legal_mode, robots_allowed=True)

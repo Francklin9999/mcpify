@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/extension-config
  * Returns ElevenLabs settings from env so the extension can self-configure.
- * MongoDB Atlas is now server-side only (MONGODB_URI) — no credentials needed in the browser.
+ * MongoDB Atlas is now server-side only (MONGODB_URI) - no credentials needed in the browser.
  */
 export async function GET(): Promise<Response> {
   const config: Record<string, unknown> = {};

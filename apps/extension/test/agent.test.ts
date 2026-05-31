@@ -286,7 +286,7 @@ test("abort between steps stops the loop", async () => {
   assert.equal(out.stoppedReason, "aborted");
 });
 
-// ── discovered (generated-server) tools used live in-session ───────────────────────────────────────────
+// discovered (generated-server) tools used live in-session
 const cartTool = {
   name: "add_to_cart",
   description: "Add an item to the cart",

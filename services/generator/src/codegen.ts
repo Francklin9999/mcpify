@@ -1,7 +1,7 @@
 import type { ToolDefinition, GeneratedServerArtifact } from "@mcp/types";
 
 /**
- * Codegen: ToolDefinition[] -> a runnable MCP server artifact (`01 §3`, `services/generator.md`).
+ * Codegen: ToolDefinition[] -> a runnable MCP server artifact (`01 S3`, `services/generator.md`).
  * Emits `server.ts` against the verified @modelcontextprotocol/sdk API (McpServer.registerTool +
  * StdioServerTransport), a claude_desktop_config.json snippet, and a README. Deterministic.
  */
@@ -97,9 +97,9 @@ const TOOLKIT_NAMES = [
 ] as const;
 
 /**
- * The fixed browsing toolkit (NOT inferred tools — emitted directly so the frozen `01 §2` ExecutionStrategy
+ * The fixed browsing toolkit (NOT inferred tools - emitted directly so the frozen `01 S2` ExecutionStrategy
  * union stays untouched). Registered against the same persistent `browsing` session the shortcut tools use,
- * so the model can compose: snapshot → click(ref) → snapshot → … across many tool calls.
+ * so the model can compose: snapshot -> click(ref) -> snapshot -> ... across many tool calls.
  */
 function browsingToolkitRegistrations(input: CodegenInput): string {
   const emit = input.browsing ?? input.tools.some((t) => t.execution.kind === "browser");
@@ -116,7 +116,7 @@ function browsingToolkitRegistrations(input: CodegenInput): string {
     {
       name: "browser_snapshot",
       description:
-        "List the current page's interactive elements, each with a [ref] for browser_click/browser_type/browser_select_option, plus the page title, URL and a visible-text excerpt. Call this first, and again after any action — refs change whenever the page changes.",
+        "List the current page's interactive elements, each with a [ref] for browser_click/browser_type/browser_select_option, plus the page title, URL and a visible-text excerpt. Call this first, and again after any action - refs change whenever the page changes.",
       shape: "{}",
       call: "browsing.snapshot()",
     },
@@ -267,7 +267,7 @@ async function importBrowserDriver(): Promise<any> {
   }
 }
 
-// ── Persistent browser session ────────────────────────────────────────────────────────────────────
+// Persistent browser session
 // ONE lazily-created Chromium page, reused across EVERY browser tool call, so multi-step flows keep
 // state: search -> open a result -> add to cart -> view cart -> checkout. Loads the user's own
 // MCP_STORAGE_STATE when set, so actions run as whatever session the user is already signed into locally
@@ -290,7 +290,7 @@ function refSelector(ref: string): string {
   return '[data-__mcp_ref="' + String(ref).replace(/[^a-zA-Z0-9_-]/g, "") + '"]';
 }
 
-const STALE_REF = " — the page likely changed. Call browser_snapshot to get current refs.";
+const STALE_REF = " - the page likely changed. Call browser_snapshot to get current refs.";
 
 async function settle(page: any): Promise<void> {
   try { await page.waitForLoadState("domcontentloaded", { timeout: 8000 }); } catch { /* SPA: no full nav */ }
@@ -367,7 +367,14 @@ class PlaywrightBrowsing implements Browsing {
         await settle(page);
         continue;
       }
-      if (step.action === "extract") { extracted = await extractData(page, step.value || ""); }
+      if (step.action === "extract") {
+        // Honor the inference's explicit card selector (+ fallbacks) so listing extraction works on ANY
+        // site, not just product-URL pages. Falls back to the heuristic when no selector was provided.
+        const selectors = step.target?.selector
+          ? [step.target.selector, ...(step.target.fallbackSelectors || [])]
+          : undefined;
+        extracted = await extractData(page, step.value || "", selectors);
+      }
     }
     if (extracted === undefined) extracted = htmlToText(await page.content());
     return extracted;
@@ -529,9 +536,11 @@ async function snapshotText(page: any): Promise<string> {
   );
 }
 
-async function extractData(page: any, mode: string): Promise<unknown> {
+async function extractData(page: any, mode: string, selectors?: string[]): Promise<unknown> {
   if (mode === "json:metadata" || mode === "json:product" || mode === "json:listing") {
-    return evalWithRetry(page, (extractMode: string) => {
+    return evalWithRetry(page, (params: { extractMode: string; selectors?: string[] }) => {
+      const extractMode = params.extractMode;
+      const cardSelectors = params.selectors || [];
       const doc = (globalThis as any).document;
       const loc = (globalThis as any).location;
       const clean = (value: string | null | undefined) => String(value || "").replace(/\\s+/g, " ").trim();
@@ -595,12 +604,45 @@ async function extractData(page: any, mode: string): Promise<unknown> {
           url: loc.href,
         };
       }
+      // Preferred path: the inference identified the repeated card selector (e.g. "div.quote", ".product").
+      // Extract one record per matching card: works for quotes/articles/listings, not just product links.
+      for (const sel of cardSelectors) {
+        let cards: any[] = [];
+        try { cards = Array.from(doc.querySelectorAll(sel) as any[]); } catch { cards = []; }
+        if (cards.length) {
+          const seenCards = new Set<string>();
+          return cards
+            .slice(0, 40)
+            .map((card: any) => {
+              const cardText = clean(card.textContent);
+              const link = card.querySelector("a[href]");
+              const heading = card.querySelector("h1,h2,h3,h4,h5,.title,[class*='title'],[itemprop='name']");
+              const price = cardText.match(/(?:\\$|\\u00A3|\\u20AC|CAD\\s?)[\\d,.]+/)?.[0] || "";
+              const rating = cardText.match(/\\b\\d(?:\\.\\d)?\\s*(?:out of 5|\\/5|stars?)\\b/i)?.[0] || "";
+              return {
+                title: clean(heading?.textContent) || (link ? clean(link.textContent) : "") || cardText.slice(0, 80),
+                url: link ? link.href : loc.href,
+                price,
+                rating,
+                text: cardText.slice(0, 500),
+              };
+            })
+            .filter((entry: any) => {
+              const key = entry.title + "|" + entry.text;
+              if (!entry.title && !entry.text) return false;
+              if (seenCards.has(key)) return false;
+              seenCards.add(key);
+              return true;
+            })
+            .slice(0, 24);
+        }
+      }
       const seen = new Set<string>();
       return listingCandidates
         .map((entry) => {
           const card = entry.node.closest("article,li,div");
           const cardText = clean(card?.textContent || "");
-          const price = cardText.match(/(?:\\$|£|€|CAD\\s?)[\\d,.]+/)?.[0] || "";
+          const price = cardText.match(/(?:\\$|\\u00A3|\\u20AC|CAD\\s?)[\\d,.]+/)?.[0] || "";
           const rating = cardText.match(/\\b\\d(?:\\.\\d)?\\s*(?:out of 5|\\/5|stars?)\\b/i)?.[0] || "";
           return {
             title: entry.text,
@@ -615,7 +657,7 @@ async function extractData(page: any, mode: string): Promise<unknown> {
           return true;
         })
         .slice(0, 24);
-    }, mode);
+    }, { extractMode: mode, selectors });
   }
   return htmlToText(await page.content());
 }
@@ -638,7 +680,7 @@ function htmlToText(html: string): string {
     .replace(/\\n\\s*\\n\\s*\\n+/g, "\\n\\n")
     .split("\\n").map((l) => l.trim()).join("\\n")
     .trim();
-  return text.length > MAX_CONTENT ? text.slice(0, MAX_CONTENT) + "\\n\\n…[truncated]" : text;
+  return text.length > MAX_CONTENT ? text.slice(0, MAX_CONTENT) + "\\n\\n...[truncated]" : text;
 }
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
@@ -653,7 +695,7 @@ export function createServer(deps: CreateServerDeps = {}): McpServer {
   (server as unknown as { browsing: Browsing }).browsing = browsing;
 
   // registerTool's full generic deep-instantiates over zod 4's types (TS2589). Bind it to a faithful,
-  // simplified signature — the runtime method is identical; this only changes the static view.
+  // simplified signature; the runtime method is identical, this only changes the static view.
   const register = server.registerTool.bind(server) as unknown as (
     name: string,
     config: { description?: string; inputSchema?: z.ZodRawShape },
@@ -742,9 +784,152 @@ export function tsconfigJson(): string {
   );
 }
 
+/**
+ * Shared JSON-merge helper, emitted beside the install scripts. Both install.sh and install.ps1 just set
+ * env vars and run `node mcp-register.mjs`, keeping the actual config merge in one place (Node, which is
+ * already required to run the server) instead of duplicating brittle jq/PowerShell JSON surgery.
+ * It is idempotent and PRESERVES any existing mcpServers entries; it creates the config file + parent dir.
+ */
+export function registerHelperMjs(): string {
+  // Built with string concatenation (no JS template literals) so codegen's own template literal below
+  // doesn't try to interpolate the helper's ${...} expressions.
+  return [
+    `// Merge this server into an MCP client config (Claude Desktop), preserving existing entries.`,
+    `// Driven by env: MCP_REG_CONFIG (config path), MCP_REG_NAME, MCP_REG_NODE (node bin), MCP_REG_JS (server.js).`,
+    `import { readFileSync, writeFileSync, mkdirSync } from "node:fs";`,
+    `import { dirname } from "node:path";`,
+    ``,
+    `const path = process.env.MCP_REG_CONFIG;`,
+    `if (!path) { console.error("MCP_REG_CONFIG not set"); process.exit(1); }`,
+    ``,
+    `let cfg = {};`,
+    `try { cfg = JSON.parse(readFileSync(path, "utf8") || "{}"); } catch { cfg = {}; }`,
+    `if (!cfg || typeof cfg !== "object") cfg = {};`,
+    `if (!cfg.mcpServers || typeof cfg.mcpServers !== "object") cfg.mcpServers = {};`,
+    ``,
+    `cfg.mcpServers[process.env.MCP_REG_NAME] = {`,
+    `  command: process.env.MCP_REG_NODE,`,
+    `  args: [process.env.MCP_REG_JS],`,
+    `};`,
+    ``,
+    `mkdirSync(dirname(path), { recursive: true });`,
+    `writeFileSync(path, JSON.stringify(cfg, null, 2) + "\\n");`,
+    `console.log("Registered \\"" + process.env.MCP_REG_NAME + "\\" in " + path);`,
+    ``,
+  ].join("\n");
+}
+
+/**
+ * POSIX installer (macOS/Linux). Run with `bash install.sh`. Installs deps, builds server.js, then
+ * registers the server in the Claude Desktop config so the client launches it over stdio by absolute path.
+ * Honors MCP_CONFIG_PATH to target a different client/config; `--no-register` builds only and prints the snippet.
+ * Resolves an ABSOLUTE node path at install time (GUI-launched clients don't inherit your shell PATH).
+ */
+export function installSh(input: CodegenInput): string {
+  const name = slugFromUrl(input.url);
+  return `#!/usr/bin/env bash
+# install.sh - build this generated MCP server and register it with your MCP client (Claude Desktop).
+#   bash install.sh                 install deps, build, and register
+#   bash install.sh --no-register   build only, print the config snippet
+#   MCP_CONFIG_PATH=/path/to/config.json bash install.sh   target a specific client config
+set -eo pipefail
+
+SERVER_NAME="${name}"
+SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+command -v node >/dev/null 2>&1 || { echo "ERROR: node (>=20) is required" >&2; exit 1; }
+command -v npm  >/dev/null 2>&1 || { echo "ERROR: npm is required" >&2; exit 1; }
+
+# Absolute node path - GUI-launched Claude Desktop often does not inherit your shell PATH.
+NODE_BIN="$(command -v node)"
+SERVER_JS="$SCRIPT_DIR/server.js"
+
+echo "==> Installing dependencies (npm install) ..."
+npm install
+echo "==> Building (npm run build) ..."
+npm run build
+
+REGISTER=1
+for arg in "$@"; do
+  [ "$arg" = "--no-register" ] && REGISTER=0
+done
+
+if [ "$REGISTER" = "0" ]; then
+  echo "Build complete. Add this to your MCP client config under \\"mcpServers\\":"
+  echo "  \\"$SERVER_NAME\\": { \\"command\\": \\"$NODE_BIN\\", \\"args\\": [\\"$SERVER_JS\\"] }"
+  exit 0
+fi
+
+# Resolve the Claude Desktop config path for this OS (override with MCP_CONFIG_PATH).
+if [ -n "$MCP_CONFIG_PATH" ]; then
+  CONFIG_PATH="$MCP_CONFIG_PATH"
+elif [ "$(uname)" = "Darwin" ]; then
+  CONFIG_PATH="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+else
+  CONFIG_PATH="$HOME/.config/Claude/claude_desktop_config.json"
+fi
+
+MCP_REG_CONFIG="$CONFIG_PATH" MCP_REG_NAME="$SERVER_NAME" MCP_REG_NODE="$NODE_BIN" MCP_REG_JS="$SERVER_JS" \\
+  node "$SCRIPT_DIR/mcp-register.mjs"
+
+echo "==> Done. Restart Claude Desktop (or your MCP client) to load \\"$SERVER_NAME\\"."
+`;
+}
+
+/**
+ * Windows installer (PowerShell). Run with `powershell -ExecutionPolicy Bypass -File install.ps1`.
+ * Same behavior as install.sh; targets %APPDATA%\\Claude\\claude_desktop_config.json (override: $env:MCP_CONFIG_PATH).
+ */
+export function installPs1(input: CodegenInput): string {
+  const name = slugFromUrl(input.url);
+  return `# install.ps1 - build this generated MCP server and register it with Claude Desktop on Windows.
+#   powershell -ExecutionPolicy Bypass -File install.ps1
+#   powershell -ExecutionPolicy Bypass -File install.ps1 --no-register   (build only)
+#   $env:MCP_CONFIG_PATH = "C:\\path\\to\\config.json"   (target a specific client config)
+$ErrorActionPreference = "Stop"
+
+$ServerName = "${name}"
+$ScriptDir = $PSScriptRoot
+Set-Location $ScriptDir
+
+$node = Get-Command node -ErrorAction SilentlyContinue
+if (-not $node) { Write-Error "node (>=20) is required"; exit 1 }
+$NodeBin = $node.Source
+$ServerJs = Join-Path $ScriptDir "server.js"
+
+Write-Host "==> Installing dependencies (npm install) ..."
+npm install
+if ($LASTEXITCODE -ne 0) { Write-Error "npm install failed"; exit 1 }
+Write-Host "==> Building (npm run build) ..."
+npm run build
+if ($LASTEXITCODE -ne 0) { Write-Error "npm run build failed"; exit 1 }
+
+if ($args -contains "--no-register") {
+  Write-Host "Build complete. Register manually: command=$NodeBin args=$ServerJs"
+  exit 0
+}
+
+if ($env:MCP_CONFIG_PATH) {
+  $ConfigPath = $env:MCP_CONFIG_PATH
+} else {
+  $ConfigPath = Join-Path $env:APPDATA "Claude\\claude_desktop_config.json"
+}
+
+$env:MCP_REG_CONFIG = $ConfigPath
+$env:MCP_REG_NAME = $ServerName
+$env:MCP_REG_NODE = $NodeBin
+$env:MCP_REG_JS = $ServerJs
+node (Join-Path $ScriptDir "mcp-register.mjs")
+if ($LASTEXITCODE -ne 0) { Write-Error "registration failed"; exit 1 }
+
+Write-Host "==> Done. Restart Claude Desktop (or your MCP client) to load $ServerName."
+`;
+}
+
 export function generateServer(input: CodegenInput): GeneratedServerArtifact {
   const snippet = configSnippet(input);
-  const readme = `# ${input.title} — MCP server\n\nAuto-generated from ${input.url} (v${input.version}). Runs locally and may use public HTTP calls plus Playwright-driven browser steps.\n\n## Run\n\n\`\`\`bash\nnpm install\nnpm run build\nnpm start\n\`\`\`\n\nBrowser tools use Playwright. Set \`MCP_BROWSER_PATH\` or \`MCP_BROWSER_CHANNEL=chrome\` if your local Chrome install is not auto-detected.\n\nThen add the snippet from \`claude_desktop_config.json\` to your MCP client config (fix the absolute path).\n`;
+  const readme = `# ${input.title} - MCP server\n\nAuto-generated from ${input.url} (v${input.version}). Runs locally and may use public HTTP calls plus Playwright-driven browser steps.\n\n## Install (one step)\n\nThis builds the server and registers it with your MCP client (Claude Desktop), then restart the client.\n\n\`\`\`bash\n# macOS / Linux\nbash install.sh\n\`\`\`\n\`\`\`powershell\n# Windows\npowershell -ExecutionPolicy Bypass -File install.ps1\n\`\`\`\n\nThe installer registers the server with an absolute \`node\` path (GUI clients don't inherit your shell PATH).\nTarget a different client config with \`MCP_CONFIG_PATH=/path/to/config.json\`, or pass \`--no-register\` to build only.\n\n## Run manually\n\n\`\`\`bash\nnpm install\nnpm run build\nnpm start\n\`\`\`\n\nBrowser tools use Playwright. Run \`npx playwright install chromium\` once if you use the \`browser_*\` tools, and set \`MCP_BROWSER_PATH\` or \`MCP_BROWSER_CHANNEL=chrome\` if your local Chrome install is not auto-detected.\n\nThe \`claude_desktop_config.json\` snippet is also included if you prefer to wire it up by hand (fix the absolute path).\n`;
   return {
     serverId: input.serverId,
     version: input.version,
@@ -753,11 +938,14 @@ export function generateServer(input: CodegenInput): GeneratedServerArtifact {
       { path: "package.json", content: packageJson(input) },
       { path: "tsconfig.json", content: tsconfigJson() },
       { path: "claude_desktop_config.json", content: snippet },
+      { path: "mcp-register.mjs", content: registerHelperMjs() },
+      { path: "install.sh", content: installSh(input) },
+      { path: "install.ps1", content: installPs1(input) },
       { path: "README.md", content: readme },
     ],
     entrypoint: "server.ts",
     configSnippet: snippet,
-    // Carried so a client can Apply + use the tools directly (the toolkit primitives are NOT here — they're
+    // Carried so a client can Apply + use the tools directly (the toolkit primitives are NOT here, they're
     // emitted into server.ts only; these are the inferred site tools, e.g. search_products/get_product_page).
     tools: input.tools,
   };

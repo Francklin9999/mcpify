@@ -1,9 +1,9 @@
-# 02 — Data Model (Postgres / Redis / R2)
+# 02 - Data Model (Postgres / Redis / R2)
 
 Storage layer. Built in Phase 0 right after contracts, before any service. Lives in `packages/db`
-(Drizzle schema + migrations). All row shapes mirror the logical contracts in `01-contracts.md §5`.
+(Drizzle schema + migrations). All row shapes mirror the logical contracts in `01-contracts.md S5`.
 
-## Postgres — registry of record
+## Postgres - registry of record
 
 Tables (Drizzle). DDL intent below; implementer writes migrations.
 
@@ -14,10 +14,10 @@ Tables (Drizzle). DDL intent below; implementer writes migrations.
 | url | text unique | canonical |
 | title | text | |
 | tier | enum('curated','auto_gen') | curated hand-verified |
-| confidence | real | 0..1, see `01 §5` confidence rules |
+| confidence | real | 0..1, see `01 S5` confidence rules |
 | install_count | int default 0 | |
 | status | enum('active','degraded','broken','regenerating') | monitor updates |
-| current_version | int null | **Plain nullable pointer, NOT a FK** — `server_versions` PK is composite `(server_id, version)`, so `version` alone isn't referenceable, and an FK would create a circular insert dependency. Generator maintains it (insert server → insert version → set pointer). |
+| current_version | int null | **Plain nullable pointer, NOT a FK** - `server_versions` PK is composite `(server_id, version)`, so `version` alone isn't referenceable, and an FK would create a circular insert dependency. Generator maintains it (insert server -> insert version -> set pointer). |
 | last_parsed_at | timestamptz | |
 | created_at | timestamptz | |
 
@@ -40,9 +40,9 @@ Tables (Drizzle). DDL intent below; implementer writes migrations.
 | name | text | snake_case |
 | confidence | real | per-tool |
 | execution_kind | enum('http','browser') | |
-| definition | jsonb | the `ToolDefinition` (01 §2). jsonb `$type<>` is compile-time only — the generator MUST `ToolDefinition.parse()` before insert (fail-closed, like `NetworkCapture`). |
+| definition | jsonb | the `ToolDefinition` (01 S2). jsonb `$type<>` is compile-time only - the generator MUST `ToolDefinition.parse()` before insert (fail-closed, like `NetworkCapture`). |
 
-PK `(server_id, name, version)`; composite FK `(server_id, version)` → `server_versions`.
+PK `(server_id, name, version)`; composite FK `(server_id, version)` -> `server_versions`.
 
 ### `health_events` (monitor writes, append-only)
 | col | type | notes |
@@ -51,7 +51,7 @@ PK `(server_id, name, version)`; composite FK `(server_id, version)` → `server
 | server_id | uuid FK | |
 | tool_name | text null | null = whole-server check |
 | result | enum('pass','fail') | |
-| error_class | text null | matches `ToolFailure.errorClass` (01 §4) |
+| error_class | text null | matches `ToolFailure.errorClass` (01 S4) |
 | dom_hash | text null | for change detection |
 | observed_at | timestamptz | |
 
@@ -60,7 +60,7 @@ PK `(server_id, name, version)`; composite FK `(server_id, version)` → `server
 |-----|------|-------|
 | id | uuid PK | |
 | server_id | uuid FK null | null if new site |
-| bundle_ref | text | R2 key to a stored `CaptureBundle` (only if legalMode permits — see 04) |
+| bundle_ref | text | R2 key to a stored `CaptureBundle` (only if legalMode permits - see 04) |
 | contributed_by | text | |
 | status | enum('pending','accepted','rejected') | |
 
@@ -69,16 +69,16 @@ PK `(server_id, name, version)`; composite FK `(server_id, version)` → `server
 - `monitor` writes `health_events`, updates `servers.status` + `servers.confidence`.
 - `web` reads all; writes `install_count`, `contributions`.
 
-## Redis — cache + queue + rate limiting
+## Redis - cache + queue + rate limiting
 
 | Use | Key pattern | TTL |
 |-----|-------------|-----|
 | BullMQ job queue | `bull:mcp-jobs:*` | managed by BullMQ |
-| DOM snapshot cache | `dom:{serverId}` → latest domHash + small snapshot | hours |
+| DOM snapshot cache | `dom:{serverId}` -> latest domHash + small snapshot | hours |
 | Rate limit (per host) | `rl:{host}` | sliding window |
 | Job status cache (for `GET /api/jobs/:id`) | `job:{jobId}` | minutes |
 
-## R2 (object storage) — code artifacts & large blobs
+## R2 (object storage) - code artifacts & large blobs
 
 | Object | Key | Producer |
 |--------|-----|----------|

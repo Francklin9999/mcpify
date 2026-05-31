@@ -1,9 +1,9 @@
-// lib/agent.js — the side-panel browsing AGENT loop, kept PURE (no chrome/DOM/network here) so it is unit-
+// lib/agent.js - the side-panel browsing AGENT loop, kept PURE (no chrome/DOM/network here) so it is unit-
 // testable offline. The side panel injects three effects: `step` (POST /api/assist with tools → next move),
 // `execute` (run a tool against the LIVE tab), and `confirm` (ask the user). This file owns only the control
 // flow: when to confirm, how tool results thread back into the conversation, and when to stop.
 //
-// Tool results are fed back as plain `TOOL_RESULT <name>:` user messages (not OpenAI tool-role threading) —
+// Tool results are fed back as plain `TOOL_RESULT <name>:` user messages (not OpenAI tool-role threading) -
 // simpler and robust across the stateless /api/assist boundary. The model emits structured tool calls; we
 // hand back results as text it can read.
 
@@ -85,7 +85,7 @@ export const BROWSER_TOOL_SPECS = [
   },
 ];
 
-/** Tools that change page/account state — always confirmed with the user before running. */
+/** Tools that change page/account state - always confirmed with the user before running. */
 export const MUTATING_TOOLS = new Set(["browser_click", "browser_type", "browser_select_option"]);
 
 const MAX_RESULT_CHARS = 8000;
@@ -136,8 +136,8 @@ export function sameOrigin(targetUrl, currentUrl) {
 /**
  * Whether a tool call must be confirmed by the user before it runs:
  *   - any mutating action (click / type / select), and
- *   - any OFF-ORIGIN navigation (a bare GET to another origin is consequential on a logged-in session —
- *     e.g. /logout, /cart/add — so it isn't auto-run). Same-origin navigation and reads run freely.
+ *   - any OFF-ORIGIN navigation (a bare GET to another origin is consequential on a logged-in session -
+ *     e.g. /logout, /cart/add - so it isn't auto-run). Same-origin navigation and reads run freely.
  */
 export function needsConfirm(call, currentUrl) {
   if (MUTATING_TOOLS.has(call.name)) return true;
@@ -152,7 +152,7 @@ export function needsConfirm(call, currentUrl) {
 /**
  * Keep only the LATEST tool result full; collapse every earlier `TOOL_RESULT …` message to its first line.
  * Older snapshots are stale (the page has moved on) and re-sending all of them grows the prompt ~quadratically
- * over a multi-step turn — the main cause of the loop getting slow AND confused about what's on screen now.
+ * over a multi-step turn - the main cause of the loop getting slow AND confused about what's on screen now.
  * Returns a pruned COPY; the real transcript keeps full history.
  */
 export function pruneForModel(messages) {
@@ -187,7 +187,7 @@ export function parseStepResponse(data) {
   return { text, toolCalls };
 }
 
-// ── Discovered (generated-server) tools usable live in-session ───────────────────────────────────────
+// Discovered (generated-server) tools usable live in-session
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 /** Turn generated-server ToolDefinitions into model function-specs the agent can call alongside the primitives. */
@@ -204,7 +204,7 @@ export function discoveredToolSpecs(toolDefs) {
     }));
 }
 
-/** A discovered HTTP tool that changes state (POST/PUT/PATCH/DELETE) — confirmed before running, like clicks. */
+/** A discovered HTTP tool that changes state (POST/PUT/PATCH/DELETE) - confirmed before running, like clicks. */
 export function isMutatingHttpTool(toolDef) {
   return (
     toolDef &&
@@ -236,7 +236,7 @@ export function needsConfirmDiscoveredTool(toolDef, currentUrl, args = {}) {
 }
 
 /**
- * Build a fetch {url, init} for a discovered HTTP tool from its execution + args — mirrors the generated
+ * Build a fetch {url, init} for a discovered HTTP tool from its execution + args - mirrors the generated
  * server's callHttp param mapping. Runs with `credentials: "include"` so it acts as the user's live session.
  */
 export function httpRequestFromTool(execution, args) {
@@ -301,7 +301,7 @@ export async function runAgent(initial, deps) {
   for (let stepIndex = 0; stepIndex < maxSteps; stepIndex++) {
     if (aborted()) return { messages, finalText, stoppedReason: "aborted" };
 
-    // Send a pruned view (latest snapshot full, older ones collapsed) — smaller, faster, less stale-state confusion.
+    // Send a pruned view (latest snapshot full, older ones collapsed) - smaller, faster, less stale-state confusion.
     const res = (await deps.step(pruneForModel(messages))) || {};
     if (res.text && String(res.text).trim()) {
       finalText = String(res.text).trim();
@@ -313,7 +313,7 @@ export async function runAgent(initial, deps) {
     if (!calls.length) return { messages, finalText, stoppedReason: "done" };
 
     // Loop guard: the same batch of calls twice in a row means the model is stuck (the plain-text feedback
-    // makes an occasional repeat more likely) — stop and hand back to the user instead of spinning.
+    // makes an occasional repeat more likely) - stop and hand back to the user instead of spinning.
     const signature = JSON.stringify(calls.map((call) => [call.name, call.arguments]));
     repeats = signature === lastSignature ? repeats + 1 : 0;
     lastSignature = signature;
@@ -329,7 +329,7 @@ export async function runAgent(initial, deps) {
         repeats = 0;
         continue;
       }
-      const note = "Stopping — I repeated the same action without progress. Tell me how you'd like to proceed.";
+      const note = "Stopping - I repeated the same action without progress. Tell me how you'd like to proceed.";
       deps.onText && deps.onText(note);
       return { messages, finalText: finalText || note, stoppedReason: "done" };
     }

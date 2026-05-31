@@ -8,9 +8,9 @@ export const dynamic = "force-dynamic";
 
 const ServerIdParam = z.string().uuid();
 
-// POST /api/servers/:id/contribute — accept an extension/community CaptureBundle, store it, and enqueue a
+// POST /api/servers/:id/contribute - accept an extension/community CaptureBundle, store it, and enqueue a
 // `discover` job. The worker runs INCREMENTAL discovery: a reactive page that revealed new structure grows
-// the server by exactly the new tools (token-efficient — only the delta reaches the model), or no-ops when
+// the server by exactly the new tools (token-efficient - only the delta reaches the model), or no-ops when
 // nothing is new. This is the trigger for "continuous" generation (the extension contributes as it browses).
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await params;

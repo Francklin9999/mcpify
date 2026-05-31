@@ -5,37 +5,81 @@
     <title>MCP Forge Settings</title>
     <link rel="stylesheet" href="ui.css" />
   </head>
-  <body class="popup">
-    <div class="logo">◆ Settings</div>
-    <p class="sub">Where the web app is running. The extension only talks to this API.</p>
-    <label class="sub" for="api">API base URL</label>
-    <input id="api" class="input" placeholder="http://localhost:3001" style="width:100%;margin:6px 0 12px" />
-    <p class="sub" style="margin:0 0 10px">Optional voice features use ElevenLabs directly from this extension. The API key is stored only in this browser.</p>
-    <label class="sub" for="elevenApiKey">ElevenLabs API key</label>
-    <input id="elevenApiKey" class="input" type="password" placeholder="xi-..." style="width:100%;margin:6px 0 12px" />
-    <label class="sub" for="elevenVoiceId">Voice ID</label>
-    <input id="elevenVoiceId" class="input" placeholder="JBFqnCBsd6RMkjVDRZzb" style="width:100%;margin:6px 0 12px" />
-    <label class="sub" for="elevenTtsModel">Text-to-speech model</label>
-    <input id="elevenTtsModel" class="input" placeholder="eleven_multilingual_v2" style="width:100%;margin:6px 0 12px" />
-    <label class="sub" for="elevenSttModel">Speech-to-text model</label>
-    <input id="elevenSttModel" class="input" placeholder="scribe_v2" style="width:100%;margin:6px 0 12px" />
-    <label class="sub" style="display:flex;align-items:center;gap:8px;margin:0 0 12px">
-      <input id="elevenAutoSpeak" type="checkbox" />
-      <span>Auto-play assistant answers</span>
-    </label>
-    <p class="sub" style="margin:16px 0 10px">MongoDB Atlas (optional). Generated tools are stored per domain so they load instantly on repeat visits — no regeneration needed.</p>
-    <label class="sub" for="atlasEndpoint">Data API endpoint</label>
-    <input id="atlasEndpoint" class="input" placeholder="https://data.mongodb-api.com/app/myapp-xxxxx/endpoint/data/v1" style="width:100%;margin:6px 0 12px" />
-    <label class="sub" for="atlasApiKey">API key</label>
-    <input id="atlasApiKey" class="input" type="password" placeholder="..." style="width:100%;margin:6px 0 12px" />
-    <label class="sub" for="atlasDataSource">Cluster name</label>
-    <input id="atlasDataSource" class="input" placeholder="Cluster0" style="width:100%;margin:6px 0 12px" />
-    <label class="sub" for="atlasDatabase">Database</label>
-    <input id="atlasDatabase" class="input" placeholder="mcp_forge" style="width:100%;margin:6px 0 12px" />
-    <label class="sub" for="atlasCollection">Collection</label>
-    <input id="atlasCollection" class="input" placeholder="tools" style="width:100%;margin:6px 0 12px" />
-    <button id="save" class="chip primary wide">Save</button>
-    <div id="status" class="status"></div>
+  <body class="popup options-page">
+    <div class="settings-shell">
+      <div class="settings-top">
+        <div class="settings-title">
+          <div class="logo"><span class="diamond">&#9670;</span> MCP Forge Settings</div>
+          <p class="sub">Where the web app is running. The extension only talks to this API.</p>
+        </div>
+        <button id="theme" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 7.5A9 9 0 1 1 12 3Z"/></svg>
+        </button>
+      </div>
+
+      <section class="settings-card settings-grid">
+        <div class="settings-section">
+          <p class="eyebrow">Connection</p>
+          <label class="field-group" for="api">
+            <span class="field-label">API base URL</span>
+            <input id="api" class="input" placeholder="http://localhost:3001" />
+          </label>
+        </div>
+
+        <div class="settings-section">
+          <p class="eyebrow">Voice</p>
+          <p class="sub">Optional voice features use ElevenLabs directly from this extension. The API key is stored only in this browser.</p>
+          <label class="field-group" for="elevenApiKey">
+            <span class="field-label">ElevenLabs API key</span>
+            <input id="elevenApiKey" class="input" type="password" placeholder="xi-..." />
+          </label>
+          <label class="field-group" for="elevenVoiceId">
+            <span class="field-label">Voice ID</span>
+            <input id="elevenVoiceId" class="input" placeholder="JBFqnCBsd6RMkjVDRZzb" />
+          </label>
+          <label class="field-group" for="elevenTtsModel">
+            <span class="field-label">Text-to-speech model</span>
+            <input id="elevenTtsModel" class="input" placeholder="eleven_multilingual_v2" />
+          </label>
+          <label class="field-group" for="elevenSttModel">
+            <span class="field-label">Speech-to-text model</span>
+            <input id="elevenSttModel" class="input" placeholder="scribe_v2" />
+          </label>
+          <label class="row-check">
+            <input id="elevenAutoSpeak" type="checkbox" />
+            <span>Auto-play assistant answers</span>
+          </label>
+        </div>
+
+        <div class="settings-section">
+          <p class="eyebrow">Storage</p>
+          <p class="sub">MongoDB Atlas is optional. Generated tools can be stored per domain so repeat visits load instantly.</p>
+          <label class="field-group" for="atlasEndpoint">
+            <span class="field-label">Data API endpoint</span>
+            <input id="atlasEndpoint" class="input" placeholder="https://data.mongodb-api.com/app/myapp-xxxxx/endpoint/data/v1" />
+          </label>
+          <label class="field-group" for="atlasApiKey">
+            <span class="field-label">API key</span>
+            <input id="atlasApiKey" class="input" type="password" placeholder="..." />
+          </label>
+          <label class="field-group" for="atlasDataSource">
+            <span class="field-label">Cluster name</span>
+            <input id="atlasDataSource" class="input" placeholder="Cluster0" />
+          </label>
+          <label class="field-group" for="atlasDatabase">
+            <span class="field-label">Database</span>
+            <input id="atlasDatabase" class="input" placeholder="mcp_forge" />
+          </label>
+          <label class="field-group" for="atlasCollection">
+            <span class="field-label">Collection</span>
+            <input id="atlasCollection" class="input" placeholder="tools" />
+          </label>
+        </div>
+
+        <button id="save" class="chip primary wide">Save settings</button>
+        <div id="status" class="status"></div>
+      </section>
+    </div>
     <script type="module" src="options.js"></script>
   </body>
 </html>

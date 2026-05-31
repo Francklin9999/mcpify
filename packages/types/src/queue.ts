@@ -4,8 +4,8 @@ import { LegalMode } from "./legal.js";
 import { CaptureBundle } from "./capture.js";
 import { ToolDefinition } from "./tools.js";
 
-/** Redis/BullMQ queue name. Go (monitor) produces; Node (generator) consumes (`01 §4`).
- *  No `:` — BullMQ reserves it for Redis key namespacing (`bull:mcp-jobs:*`) and rejects it in the name. */
+/** Redis/BullMQ queue name. Go (monitor) produces; Node (generator) consumes (`01 S4`).
+ *  No `:` - BullMQ reserves it for Redis key namespacing (`bull:mcp-jobs:*`) and rejects it in the name. */
 export const QUEUE_NAME = "mcp-jobs";
 
 export const ToolFailure = z.object({
@@ -47,8 +47,8 @@ export type SelfHealJob = z.infer<typeof SelfHealJob>;
 /**
  * `discover` is produced by the WEB/EXTENSION (like `generate`, never the monitor): a new capture of an
  * EXISTING server's page after a reactive page revealed new structure. The worker runs INCREMENTAL discovery
- * — merges only genuinely-new tools and bumps the version, or no-ops when nothing is new (`incremental.ts`).
- * Additive extension of the frozen `01 §4` union; the Go monitor still only produces `regenerate`/`self_heal`.
+ * - merges only genuinely-new tools and bumps the version, or no-ops when nothing is new (`incremental.ts`).
+ * Additive extension of the frozen `01 S4` union; the Go monitor still only produces `regenerate`/`self_heal`.
  */
 export const DiscoverJob = z.object({
   kind: z.literal("discover"),
@@ -56,14 +56,14 @@ export const DiscoverJob = z.object({
   bundle: CaptureBundle,
   /**
    * Pre-computed new tools from a SYNCHRONOUS /api/discover pass. When present the worker MERGES them
-   * model-free (no second inference for the same material — the route already paid for it) and writes the
-   * version. Absent (e.g. a plain /contribute) ⇒ the worker runs incremental discovery itself.
+   * model-free (no second inference for the same material - the route already paid for it) and writes the
+   * version. Absent (e.g. a plain /contribute) => the worker runs incremental discovery itself.
    */
   candidates: z.array(ToolDefinition).optional(),
 });
 export type DiscoverJob = z.infer<typeof DiscoverJob>;
 
-/** The full job space, discriminated on `kind` — the entire Go→Node decoupling contract (`01 §4`). */
+/** The full job space, discriminated on `kind` - the entire Go->Node decoupling contract (`01 S4`). */
 export const Job = z.discriminatedUnion("kind", [GenerateJob, RegenerateJob, SelfHealJob, DiscoverJob]);
 export type Job = z.infer<typeof Job>;
 export type JobKind = Job["kind"];

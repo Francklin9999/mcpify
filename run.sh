@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
-# run.sh — bring up the whole MCP Forge stack locally.
+# run.sh - bring up the whole MCP Forge stack locally.
 #
 # Sequence (mirrors README "Run it locally"):
 #   1. npm install + build phase-0 packages (@mcp/types, @mcp/db)
 #   2. infra: docker compose up postgres + redis, wait until healthy
 #   3. apply DB migrations
-#   4. scraper  (Python/uvicorn)  — background
-#   5. worker   (Node/BullMQ)     — background
-#   6. web      (Next.js)         — foreground (Ctrl-C stops everything)
+#   4. scraper  (Python/uvicorn)  - background
+#   5. worker   (Node/BullMQ)     - background
+#   6. web      (Next.js)         - foreground (Ctrl-C stops everything)
 #
 # Usage:
 #   ./run.sh            # build + start the full stack, then open the API base from mcp.config.json
@@ -16,7 +16,7 @@
 #   ./run.sh --no-build # skip npm install / builds (faster restart)
 #
 # Put OPENAI_API_KEY (and optionally OPENAI_MODEL) in a .env file at the repo
-# root — copy .env.example to .env and fill in your key. With no key the worker
+# root - copy .env.example to .env and fill in your key. With no key the worker
 # falls back to the keyless heuristic (real servers, no live inference).
 
 set -euo pipefail
@@ -145,7 +145,7 @@ for i in $(seq 1 30); do
     break
   fi
   sleep 1
-  [ "$i" = 30 ] && warn "scraper not responding yet — continuing anyway"
+  [ "$i" = 30 ] && warn "scraper not responding yet - continuing anyway"
 done
 
 # --- 5. worker (Node) -----------------------------------------------------
@@ -155,7 +155,7 @@ npm run build --workspace=@mcp/generator
 PIDS+=($!)
 
 if [ -z "${OPENAI_API_KEY:-}" ]; then
-  warn "OPENAI_API_KEY not set — worker uses the keyless heuristic (no live inference). Add it to .env."
+  warn "OPENAI_API_KEY not set - worker uses the keyless heuristic (no live inference). Add it to .env."
 fi
 
 # --- 6. web (Next.js) -----------------------------------------------------
