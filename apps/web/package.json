@@ -12,6 +12,7 @@
   "dependencies": {
     "@mcp/db": "0.0.0",
     "@mcp/generator": "0.0.0",
+    "@mcp/solana": "0.0.0",
     "@mcp/types": "0.0.0",
     "bullmq": "^5.77.6",
     "drizzle-orm": "^0.45.2",

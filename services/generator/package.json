@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@mcp/db": "0.0.0",
+    "@mcp/solana": "0.0.0",
     "@mcp/types": "0.0.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "bullmq": "^5.77.6",

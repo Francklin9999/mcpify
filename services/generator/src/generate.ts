@@ -1,6 +1,7 @@
 import type { CaptureBundle, GenerateRequest, GeneratedServerArtifact, LegalMode, RegistryEntry, ToolDefinition } from "@mcp/types";
 import { inferTools, type InferenceClient } from "./inference.js";
 import { generateServer } from "./codegen.js";
+import { publishToSolana } from "./solana-publish.js";
 
 /**
  * `generate` use-case (`03` Flow A): scraper -> inference -> codegen -> persist.
@@ -69,6 +70,9 @@ export async function generate(req: GenerateRequest, deps: GenerateDeps): Promis
     currentVersion: version,
   };
   await deps.persistence.writeRegistry(entry, result.tools, artifactUrl);
+
+  // Publish to Solana on-chain registry (best-effort — never blocks generation).
+  void publishToSolana(entry, result.tools);
 
   return {
     serverId,
