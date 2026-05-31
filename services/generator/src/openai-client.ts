@@ -17,7 +17,7 @@ import { TOOL_SYSTEM_PROMPT, INCREMENTAL_NOTE, HEAL_SYSTEM_PROMPT } from "./llm-
  */
 // gpt-5.4: stronger tool/structured-output inference than gpt-4o. Override via OPENAI_MODEL.
 // NOTE: gpt-5.x uses max_completion_tokens (rejects max_tokens).
-const DEFAULT_MODEL = process.env["OPENAI_MODEL"] ?? "gpt-5.4";
+const DEFAULT_MODEL = process.env["OPENAI_MODEL"] || "gpt-5.4";
 const REASONING = process.env["OPENAI_REASONING"];
 
 export class OpenAIInferenceClient implements InferenceClient {

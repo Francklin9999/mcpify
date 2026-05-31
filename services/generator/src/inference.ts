@@ -111,9 +111,9 @@ export function validateCandidates(candidates: unknown[], opts: ValidateOptions 
 
 function activeModelVersion(): string {
   const p = (process.env["LLM_PROVIDER"] ?? "openai").toLowerCase();
-  if (p === "claude") return `claude/${process.env["CLAUDE_MODEL"] ?? "claude-sonnet-4-6"}`;
-  if (p === "gemini") return `gemini/${process.env["GEMINI_MODEL"] ?? "gemini-2.0-flash"}`;
-  return `openai/${process.env["OPENAI_MODEL"] ?? "gpt-5.4"}`;
+  if (p === "claude") return `claude/${process.env["CLAUDE_MODEL"] || "claude-sonnet-4-6"}`;
+  if (p === "gemini") return `gemini/${process.env["GEMINI_MODEL"] || "gemini-3.1-pro-preview"}`;
+  return `openai/${process.env["OPENAI_MODEL"] || "gpt-5.4"}`;
 }
 
 export async function inferTools(

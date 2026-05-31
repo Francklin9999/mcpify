@@ -6,7 +6,7 @@ import type { HealClient } from "./self-heal.js";
 import { analyzeBundleHtml } from "./html-analysis.js";
 import { TOOL_SYSTEM_PROMPT, INCREMENTAL_NOTE, HEAL_SYSTEM_PROMPT } from "./llm-prompts.js";
 
-const DEFAULT_MODEL = process.env["GEMINI_MODEL"] ?? "gemini-3.1-pro-preview";
+const DEFAULT_MODEL = process.env["GEMINI_MODEL"] || "gemini-3.1-pro-preview";
 
 /** Gemini-backed InferenceClient. Uses `responseMimeType: application/json` to force JSON output. */
 export class GeminiInferenceClient implements InferenceClient {
@@ -18,7 +18,7 @@ export class GeminiInferenceClient implements InferenceClient {
 
   async proposeTools(bundle: CaptureBundle): Promise<string> {
     const model = this.genAI.getGenerativeModel({
-      model: process.env["GEMINI_MODEL"] ?? DEFAULT_MODEL,
+      model: process.env["GEMINI_MODEL"] || DEFAULT_MODEL,
       systemInstruction: TOOL_SYSTEM_PROMPT,
       generationConfig: { responseMimeType: "application/json", maxOutputTokens: 16000 },
     });
@@ -36,7 +36,7 @@ export class GeminiInferenceClient implements InferenceClient {
 
   async proposeMoreTools(delta: DiscoveryDelta): Promise<string> {
     const model = this.genAI.getGenerativeModel({
-      model: process.env["GEMINI_MODEL"] ?? DEFAULT_MODEL,
+      model: process.env["GEMINI_MODEL"] || DEFAULT_MODEL,
       systemInstruction: `${TOOL_SYSTEM_PROMPT}\n\n${INCREMENTAL_NOTE}`,
       generationConfig: { responseMimeType: "application/json", maxOutputTokens: 8000 },
     });
@@ -55,7 +55,7 @@ export class GeminiHealClient implements HealClient {
 
   async proposeHeal(failingTool: ToolDefinition, bundle: CaptureBundle, failure: ToolFailure): Promise<string> {
     const model = this.genAI.getGenerativeModel({
-      model: process.env["GEMINI_MODEL"] ?? DEFAULT_MODEL,
+      model: process.env["GEMINI_MODEL"] || DEFAULT_MODEL,
       systemInstruction: HEAL_SYSTEM_PROMPT,
       generationConfig: { responseMimeType: "application/json", maxOutputTokens: 8000 },
     });

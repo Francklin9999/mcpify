@@ -6,7 +6,7 @@ import type { HealClient } from "./self-heal.js";
 import { analyzeBundleHtml } from "./html-analysis.js";
 import { TOOL_SYSTEM_PROMPT, INCREMENTAL_NOTE, HEAL_SYSTEM_PROMPT } from "./llm-prompts.js";
 
-const DEFAULT_MODEL = process.env["CLAUDE_MODEL"] ?? "claude-sonnet-4-6";
+const DEFAULT_MODEL = process.env["CLAUDE_MODEL"] || "claude-sonnet-4-6";
 
 // Prompt caching: mark the stable system prompt so repeated calls hit the cache.
 const CACHED_SYSTEM: Anthropic.Messages.TextBlockParam & { cache_control: { type: "ephemeral" } } = {

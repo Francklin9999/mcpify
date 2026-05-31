@@ -26,9 +26,9 @@ export function activeLLMProvider(): LLMProvider {
 
 export function activeModelVersion(): string {
   const provider = activeLLMProvider();
-  if (provider === "claude") return `claude/${process.env["CLAUDE_MODEL"] ?? "claude-sonnet-4-6"}`;
-  if (provider === "gemini") return `gemini/${process.env["GEMINI_MODEL"] ?? "gemini-3.1-pro-preview"}`;
-  if (provider === "openai") return `openai/${process.env["OPENAI_MODEL"] ?? "gpt-5.4"}`;
+  if (provider === "claude") return `claude/${process.env["CLAUDE_MODEL"] || "claude-sonnet-4-6"}`;
+  if (provider === "gemini") return `gemini/${process.env["GEMINI_MODEL"] || "gemini-3.1-pro-preview"}`;
+  if (provider === "openai") return `openai/${process.env["OPENAI_MODEL"] || "gpt-5.4"}`;
   return "heuristic/v1";
 }
 
@@ -37,13 +37,13 @@ export function makeLLMClients(): { inference: InferenceClient; heal: HealClient
 
   switch (provider) {
     case "claude":
-      console.log(`[llm] provider=claude model=${process.env["CLAUDE_MODEL"] ?? "claude-sonnet-4-6"}`);
+      console.log(`[llm] provider=claude model=${process.env["CLAUDE_MODEL"] || "claude-sonnet-4-6"}`);
       return { inference: new ClaudeInferenceClient(), heal: new ClaudeHealClient(), provider };
     case "gemini":
-      console.log(`[llm] provider=gemini model=${process.env["GEMINI_MODEL"] ?? "gemini-3.1-pro-preview"}`);
+      console.log(`[llm] provider=gemini model=${process.env["GEMINI_MODEL"] || "gemini-3.1-pro-preview"}`);
       return { inference: new GeminiInferenceClient(), heal: new GeminiHealClient(), provider };
     case "openai":
-      console.log(`[llm] provider=openai model=${process.env["OPENAI_MODEL"] ?? "gpt-5.4"}`);
+      console.log(`[llm] provider=openai model=${process.env["OPENAI_MODEL"] || "gpt-5.4"}`);
       return { inference: new OpenAIInferenceClient(), heal: new OpenAIHealClient(), provider };
     default:
       console.warn("[llm] no API key configured — using keyless heuristic inference");
