@@ -30,7 +30,7 @@ async function main(): Promise<void> {
   const deps = { store, scraper: new HttpScraper(scraperUrl), inference, heal };
 
   const worker = startWorker(connection, deps);
-  const { server } = startEnqueueServer(enqueuePort, connection);
+  const { server } = await startEnqueueServer(enqueuePort, connection);
   console.log(`[worker] consuming mcp-jobs; enqueue shim on :${enqueuePort}; scraper=${scraperUrl}; artifacts=${artifactRoot}`);
 
   const shutdown = async () => {

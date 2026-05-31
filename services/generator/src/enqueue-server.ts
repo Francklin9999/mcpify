@@ -7,7 +7,7 @@ import { Job, QUEUE_NAME } from "@mcp/types";
  * each through the `Job` contract (fail-closed on the Go->Node seam) and calls `queue.add`. Keeps BullMQ's
  * Redis internals on the Node side so Go never has to replicate them.
  */
-export function startEnqueueServer(port: number, connection: { host: string; port: number }): { server: Server; queue: Queue } {
+export async function startEnqueueServer(port: number, connection: { host: string; port: number }): Promise<{ server: Server; queue: Queue }> {
   const queue = new Queue(QUEUE_NAME, { connection });
   const server = createServer((req, res) => {
     if (req.method !== "POST" || req.url !== "/enqueue") {
@@ -29,6 +29,12 @@ export function startEnqueueServer(port: number, connection: { host: string; por
       }
     });
   });
-  server.listen(port);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
   return { server, queue };
 }
