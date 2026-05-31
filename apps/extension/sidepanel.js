@@ -1,6 +1,6 @@
-import { generate, waitForArtifact, assistAgentStep, findServerForUrl, discoverTools } from "./lib/api.js";
+import { generate, waitForArtifact, assistAgentStep, findServerForUrl, discoverTools, API_BASE } from "./lib/api.js";
 import { buildCaptureBundle } from "./lib/capture.js";
-import { getElevenLabsSettings, synthesizeWithElevenLabs, transcribeWithElevenLabs } from "./lib/elevenlabs.js";
+import { ELEVENLABS_STORAGE_KEYS, getElevenLabsSettings, synthesizeWithElevenLabs, transcribeWithElevenLabs } from "./lib/elevenlabs.js";
 import { renderMarkdown } from "./lib/markdown.js";
 import { zipBlob } from "./lib/zip.js";
 import {
@@ -13,7 +13,7 @@ import {
   httpRequestFromTool,
 } from "./lib/agent.js";
 import { makeTabExecutor, executeBrowserStepsOnActiveTab } from "./lib/tab-tools.js";
-import { getAtlasSettings, fetchToolsFromAtlas, saveToolsToAtlas } from "./lib/atlas.js";
+import { ATLAS_STORAGE_KEYS, getAtlasSettings, fetchToolsFromAtlas, saveToolsToAtlas } from "./lib/atlas.js";
 
 const log = document.getElementById("log");
 const form = document.getElementById("form");
@@ -135,6 +135,46 @@ async function initTheme() {
   const stored = await chrome.storage.sync.get("sidePanelTheme").catch(() => ({}));
   const preferred = stored.sidePanelTheme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
   applyTheme(preferred, false);
+}
+
+/**
+ * Pull ElevenLabs + Atlas config from the web app's env and write it into
+ * chrome.storage.local as defaults. Any key already set in storage (via the
+ * options page) is left untouched — env values never override manual entries.
+ */
+async function syncConfigFromServer() {
+  try {
+    const res = await fetch(`${API_BASE}/api/extension-config`);
+    if (!res.ok) return;
+    const config = await res.json();
+
+    const allKeys = [...Object.values(ELEVENLABS_STORAGE_KEYS), ...Object.values(ATLAS_STORAGE_KEYS)];
+    const stored = await chrome.storage.local.get(allKeys).catch(() => ({}));
+    const updates = {};
+
+    if (config.elevenLabs) {
+      const el = config.elevenLabs;
+      if (el.apiKey   && !stored[ELEVENLABS_STORAGE_KEYS.apiKey])   updates[ELEVENLABS_STORAGE_KEYS.apiKey]   = el.apiKey;
+      if (el.voiceId  && !stored[ELEVENLABS_STORAGE_KEYS.voiceId])  updates[ELEVENLABS_STORAGE_KEYS.voiceId]  = el.voiceId;
+      if (el.ttsModel && !stored[ELEVENLABS_STORAGE_KEYS.ttsModel]) updates[ELEVENLABS_STORAGE_KEYS.ttsModel] = el.ttsModel;
+      if (el.sttModel && !stored[ELEVENLABS_STORAGE_KEYS.sttModel]) updates[ELEVENLABS_STORAGE_KEYS.sttModel] = el.sttModel;
+    }
+    if (config.atlas) {
+      const at = config.atlas;
+      if (at.endpoint   && !stored[ATLAS_STORAGE_KEYS.endpoint])   updates[ATLAS_STORAGE_KEYS.endpoint]   = at.endpoint;
+      if (at.apiKey     && !stored[ATLAS_STORAGE_KEYS.apiKey])     updates[ATLAS_STORAGE_KEYS.apiKey]     = at.apiKey;
+      if (at.dataSource && !stored[ATLAS_STORAGE_KEYS.dataSource]) updates[ATLAS_STORAGE_KEYS.dataSource] = at.dataSource;
+      if (at.database   && !stored[ATLAS_STORAGE_KEYS.database])   updates[ATLAS_STORAGE_KEYS.database]   = at.database;
+      if (at.collection && !stored[ATLAS_STORAGE_KEYS.collection]) updates[ATLAS_STORAGE_KEYS.collection] = at.collection;
+    }
+
+    if (Object.keys(updates).length) {
+      await chrome.storage.local.set(updates);
+      await Promise.all([loadElevenLabsSettings(), loadAtlasSettings()]);
+    }
+  } catch {
+    // Web app not running or endpoint unavailable — silently skip.
+  }
 }
 
 async function loadElevenLabsSettings() {
@@ -1353,8 +1393,10 @@ chrome.storage.onChanged?.addListener((changes, area) => {
 
 initPageTitle();
 initTheme();
-loadElevenLabsSettings();
-loadAtlasSettings();
+syncConfigFromServer().finally(() => {
+  loadElevenLabsSettings();
+  loadAtlasSettings();
+});
 initChatMemory();
 autoGrowInput();
 updateVoiceUi();
