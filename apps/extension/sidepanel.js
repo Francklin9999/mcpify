@@ -1,4 +1,4 @@
-import { generate, waitForArtifact, assistAgentStep, findServerForUrl, discoverTools, API_BASE } from "./lib/api.js";
+import { generate, waitForArtifact, assistAgentStep, findServerForUrl, discoverTools, apiBase } from "./lib/api.js";
 import { buildCaptureBundle } from "./lib/capture.js";
 import { ELEVENLABS_STORAGE_KEYS, getElevenLabsSettings, synthesizeWithElevenLabs, transcribeWithElevenLabs } from "./lib/elevenlabs.js";
 import { renderMarkdown } from "./lib/markdown.js";
@@ -144,7 +144,8 @@ async function initTheme() {
  */
 async function syncConfigFromServer() {
   try {
-    const res = await fetch(`${API_BASE}/api/extension-config`);
+    const base = await apiBase();
+    const res = await fetch(`${base}/api/extension-config`);
     if (!res.ok) return;
     const config = await res.json();
 
