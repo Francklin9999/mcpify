@@ -315,6 +315,18 @@ async function settle(page: any): Promise<void> {
   try { await page.waitForTimeout(350); } catch { /* ignore */ }
 }
 
+function sameUrl(a: string, b: string): boolean {
+  try {
+    const left = new URL(String(a));
+    const right = new URL(String(b));
+    left.hash = "";
+    right.hash = "";
+    return left.toString() === right.toString();
+  } catch {
+    return String(a || "") === String(b || "");
+  }
+}
+
 class PlaywrightBrowsing implements Browsing {
   private started?: Promise<{ browser: any; context: any; page: any }>;
   private stepExecutor?: StepExecutor;
@@ -361,7 +373,10 @@ class PlaywrightBrowsing implements Browsing {
         // looks "missing" here and we silently stay put instead of erroring. The base navigate (when present)
         // still lands on the right listing, so this favors a useful result over a loud failure.
         if (templateMissingParam(step.value, args)) continue;
-        await page.goto(interpolate(step.value, args, true), { waitUntil: "domcontentloaded" });
+        const targetUrl = interpolate(step.value, args);
+        if (!sameUrl(targetUrl, page.url())) {
+          await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+        }
         continue;
       }
       if (step.action === "waitFor") {
@@ -411,7 +426,9 @@ class PlaywrightBrowsing implements Browsing {
     const page = await this.page();
     let target = url;
     try { target = /^https?:/i.test(url) ? url : new URL(url, SITE_URL || page.url()).toString(); } catch { /* use raw */ }
-    await page.goto(target, { waitUntil: "domcontentloaded" });
+    if (!sameUrl(target, page.url())) {
+      await page.goto(target, { waitUntil: "domcontentloaded" });
+    }
     return this.snapshot();
   }
 

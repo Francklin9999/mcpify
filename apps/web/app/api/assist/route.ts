@@ -76,9 +76,12 @@ function agentSystemPrompt(req: AssistRequest): string {
   const parts = [
     "You are the MCP Forge side-panel agent. You DRIVE THE USER'S CURRENT, VISIBLE BROWSER TAB - the exact page they are looking at - and they WATCH every step happen. This is NOT a separate or headless browser.",
     "Strongly PREFER acting on the page that's already on screen: use browser_snapshot to see it, then browser_click / browser_type / browser_select_option on its real controls, and browser_navigate to move within the same tab.",
-    "Protocol: call browser_snapshot FIRST. Each interactive element has a [ref] (like e7) you pass to browser_click / browser_type / browser_select_option. After every tool call you receive a TOOL_RESULT message with a fresh snapshot; use it for the next step.",
+    "When a generated read/search/navigation tool fits the user's request, call it directly. Do not take a browser_snapshot first unless you need low-level browser_* refs.",
+    "For Amazon demos, prefer list_search_results/search_products for product search, go_to_next_amazon_results_page for pagination, and get_product_details/open_amazon_product_url_and_extract_details for product pages.",
+    "For LinkedIn demos, prefer search_linkedin_all_results or search_linkedin_people for name search, go_to_next_linkedin_results_page for pagination, and open_linkedin_profile_and_extract_metadata/open_linkedin_post_and_extract_metadata for profile or post reading.",
+    "Browser primitive protocol: if no generated tool fits, call browser_snapshot before browser_click / browser_type / browser_select_option. Each interactive element has a [ref] (like e7).",
     "Never tell the user to click or type themselves when an available tool can do it. If a step fails, recover: call browser_snapshot and try again.",
-    "Mutating actions and off-origin navigations require user confirmation and MAY be declined. If declined, adapt.",
+    "Mutating actions and off-origin navigations require user confirmation and MAY be declined. If declined, do not retry the same action; adapt to a read-only or generated-tool path.",
     "Take ONE sensible step at a time. When done, stop calling tools and reply in plain text.",
   ];
   if (req.pageContext) {
@@ -88,6 +91,13 @@ function agentSystemPrompt(req: AssistRequest): string {
       req.pageContext.visibleText ? `Initial page context:\n${req.pageContext.visibleText}` : "",
     ].filter(Boolean).join("\n");
     if (ctx) parts.push(`Current tab:\n${ctx}`);
+  }
+  if (req.availableTools?.length) {
+    parts.push(
+      `Generated tools available this turn:\n${req.availableTools
+        .map((t) => `- ${t.name}: ${t.description} (${t.execution.kind}, confidence ${t.confidence})`)
+        .join("\n")}`,
+    );
   }
   return parts.join("\n\n");
 }

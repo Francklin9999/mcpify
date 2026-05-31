@@ -78,4 +78,23 @@ test("site recipes add deterministic Amazon tools even when model emits nothing"
   const { result } = await inferTools(amazonBundle, fakeClient(JSON.stringify({ tools: [] })));
   assert.ok(result.tools.some((tool) => tool.name === "search_products"));
   assert.ok(result.tools.some((tool) => tool.name === "get_product_page"));
+  assert.ok(result.tools.some((tool) => tool.name === "list_search_results"));
+  assert.ok(result.tools.some((tool) => tool.name === "go_to_next_amazon_results_page"));
+  assert.ok(result.tools.some((tool) => tool.name === "open_amazon_product_url_and_extract_details"));
+});
+
+test("site recipes add deterministic LinkedIn tools even when model emits nothing", async () => {
+  const linkedinBundle: CaptureBundle = {
+    ...bundle,
+    source: "extension",
+    url: "https://www.linkedin.com/in/franck-fongang/",
+    legalMode: "session",
+    meta: { ...bundle.meta, title: "Franck Fongang | LinkedIn" },
+  };
+  const { result } = await inferTools(linkedinBundle, fakeClient(JSON.stringify({ tools: [] })));
+  assert.ok(result.tools.some((tool) => tool.name === "search_linkedin_all_results"));
+  assert.ok(result.tools.some((tool) => tool.name === "search_linkedin_people"));
+  assert.ok(result.tools.some((tool) => tool.name === "go_to_next_linkedin_results_page"));
+  assert.ok(result.tools.some((tool) => tool.name === "open_linkedin_profile_and_extract_metadata"));
+  assert.ok(result.tools.some((tool) => tool.name === "open_linkedin_post_and_extract_metadata"));
 });

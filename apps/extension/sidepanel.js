@@ -92,6 +92,40 @@ function scrollToBottom() {
   log.scrollTop = log.scrollHeight;
 }
 
+function shouldAnimateAssistantText(text) {
+  if (globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return false;
+  if (/^\s*Notification:/i.test(String(text || ""))) return false;
+  if (String(text || "").length < 24) return false;
+  return true;
+}
+
+function animateMarkdown(node, text) {
+  const full = String(text ?? "");
+  if (!shouldAnimateAssistantText(full)) {
+    node.innerHTML = renderMarkdown(full);
+    scrollToBottom();
+    return Promise.resolve();
+  }
+  let index = 0;
+  node.classList.add("streaming");
+  return new Promise((resolve) => {
+    const tick = () => {
+      const remaining = full.length - index;
+      const step = remaining > 240 ? 10 : remaining > 80 ? 6 : 3;
+      index = Math.min(full.length, index + step);
+      node.innerHTML = renderMarkdown(full.slice(0, index));
+      scrollToBottom();
+      if (index < full.length) {
+        setTimeout(tick, 18);
+        return;
+      }
+      node.classList.remove("streaming");
+      resolve();
+    };
+    tick();
+  });
+}
+
 function hideWelcome() {
   if (welcome) welcome.hidden = true;
 }
@@ -359,11 +393,11 @@ function setHistoryPanel(open) {
 function updateAutoApproveUi() {
   if (!autoApproveBtn) return;
   autoApproveBtn.classList.toggle("active", autoApprove);
-  autoApproveBtn.title = autoApprove ? "Auto-approve actions on" : "Auto-approve actions off";
-  autoApproveBtn.setAttribute("aria-label", autoApprove ? "Auto-approve actions on" : "Auto-approve actions off");
+  autoApproveBtn.title = autoApprove ? "Bypass all confirmations on" : "Bypass all confirmations off";
+  autoApproveBtn.setAttribute("aria-label", autoApprove ? "Bypass all confirmations on" : "Bypass all confirmations off");
   if (composerHint) {
     composerHint.textContent = autoApprove
-      ? "Auto-approve is on. The agent will act without asking first."
+      ? "Bypass is on. The agent will run page actions without confirmation."
       : "Works best on public pages. You review every action before it runs.";
   }
 }
@@ -872,12 +906,32 @@ function toolActionLabel(call) {
 function agentView(body) {
   body.innerHTML = '<div class="agent-steps"></div>';
   const steps = body.querySelector(".agent-steps");
+  let textQueue = Promise.resolve();
   return {
     addText(text) {
       const node = el("div", "agent-say");
-      node.innerHTML = renderMarkdown(text);
       steps.appendChild(node);
       scrollToBottom();
+      textQueue = textQueue.then(() => animateMarkdown(node, text)).catch(() => {
+        node.innerHTML = renderMarkdown(text);
+        scrollToBottom();
+      });
+    },
+    startStream() {
+      const node = el("div", "agent-say streaming");
+      steps.appendChild(node);
+      scrollToBottom();
+      return {
+        update(full) {
+          node.innerHTML = renderMarkdown(full);
+          scrollToBottom();
+        },
+        finish(full) {
+          node.classList.remove("streaming");
+          node.innerHTML = renderMarkdown(full);
+          scrollToBottom();
+        },
+      };
     },
     addTool(call) {
       const row = el("div", "agent-tool", `<span class="agent-tool-label">${escapeHtml(toolActionLabel(call))}</span><span class="agent-tool-state">...</span>`);
@@ -926,11 +980,19 @@ function agentView(body) {
   };
 }
 
-// Continuous discovery: as the agent drives a reactive page, capture fresh structure and run the
-// token-efficient incremental engine (server-side). New tools become callable BY THE AGENT this session
-// (sessionTools) and also grow the persisted server when one exists. Debounced + deduped by (url, XHR count)
-// so we don't spam the API; the server skips the model entirely when nothing's new.
-const discovery = { serverId: undefined, resolvedFor: undefined, lastSig: "", timer: null, busy: false, agentActive: false, sessionTools: [] };
+// Continuous discovery is deliberately LOW PRIORITY. The agent's visible page action and answer should never
+// wait for capture/incremental discovery; we queue it and drain after the active turn settles.
+const discovery = {
+  serverId: undefined,
+  resolvedFor: undefined,
+  lastSig: "",
+  timer: null,
+  busy: false,
+  agentActive: false,
+  pending: false,
+  pendingAnnouncer: null,
+  sessionTools: [],
+};
 
 function bundleSignature(bundle) {
   return [
@@ -944,10 +1006,11 @@ function bundleSignature(bundle) {
 }
 
 function scheduleDiscovery() {
+  discovery.pending = true;
   if (discovery.timer) clearTimeout(discovery.timer);
   discovery.timer = setTimeout(() => {
     runDiscovery().catch(() => {});
-  }, 1600);
+  }, discovery.agentActive ? 3200 : 900);
 }
 
 async function discoverFromBundle(bundle, { allowDuringAgent = false, announce = true, announcer } = {}) {
@@ -961,9 +1024,9 @@ async function discoverFromBundle(bundle, { allowDuringAgent = false, announce =
     const { added, tools } = await discoverTools(discovery.sessionTools, bundle, discovery.serverId);
     if (Array.isArray(tools)) discovery.sessionTools = tools;
     if (Array.isArray(added) && added.length && announce) {
-      const note = `Found ${added.length} new tool${added.length === 1 ? "" : "s"} for this page: ${added.map((t) => `\`${t.name}\``).join(", ")}. I can use ${added.length === 1 ? "it" : "them"} now.`;
+      const note = `Notification: ${added.length} new tool${added.length === 1 ? "" : "s"} became accessible: ${added.map((t) => `\`${t.name}\``).join(", ")}. I can use ${added.length === 1 ? "it" : "them"} now.`;
       if (typeof announcer === "function") announcer(note, added);
-      else message("bot", `<p class="sub">${added.length} new tool${added.length === 1 ? "" : "s"}: ${added.map((t) => `<code>${escapeHtml(t.name)}</code>`).join(", ")}.</p>`);
+      else message("bot", `<p class="sub">Notification: ${added.length} new tool${added.length === 1 ? "" : "s"} became accessible: ${added.map((t) => `<code>${escapeHtml(t.name)}</code>`).join(", ")}.</p>`);
     }
     return { added: Array.isArray(added) ? added : [], tools: discovery.sessionTools };
   } catch {
@@ -976,7 +1039,15 @@ async function discoverFromBundle(bundle, { allowDuringAgent = false, announce =
 async function runDiscovery() {
   // Don't compete with the agent mid-turn (extra /api/discover + model calls slow the loop). It re-runs
   // once the turn ends.
-  if (discovery.busy || discovery.agentActive) return;
+  if (discovery.busy) {
+    scheduleDiscovery();
+    return;
+  }
+  if (discovery.agentActive) {
+    scheduleDiscovery();
+    return;
+  }
+  discovery.pending = false;
   const tab = await activeTab().catch(() => null);
   if (!isHttpUrl(tab?.url)) return;
   const url = sanitizedUrl(tab.url);
@@ -994,7 +1065,7 @@ async function runDiscovery() {
         const fresh = record.tools.filter((t) => t && t.name && t.execution && !known.has(t.name));
         if (fresh.length) {
           discovery.sessionTools = [...discovery.sessionTools, ...fresh];
-          message("bot", `<p class="sub">${fresh.length} tool${fresh.length === 1 ? "" : "s"} loaded from Atlas for <strong>${escapeHtml(new URL(url).hostname)}</strong>.</p>`);
+          message("bot", `<p class="sub">Notification: ${fresh.length} tool${fresh.length === 1 ? "" : "s"} became accessible from Atlas for <strong>${escapeHtml(new URL(url).hostname)}</strong>.</p>`);
         }
       }
     }
@@ -1006,7 +1077,9 @@ async function runDiscovery() {
 
   const bundle = await buildExtensionBundle(tab).catch(() => null);
   if (!bundle) return;
-  await discoverFromBundle(bundle);
+  const announcer = discovery.pendingAnnouncer;
+  discovery.pendingAnnouncer = null;
+  await discoverFromBundle(bundle, { announce: true, announcer });
 }
 
 function toolMayExposeNewPageState(call, def) {
@@ -1022,18 +1095,76 @@ function toolMayExposeNewPageState(call, def) {
   ]).has(call?.name);
 }
 
-async function discoverInlineAfterAction(call, def, announce) {
-  if (discovery.busy || !toolMayExposeNewPageState(call, def)) return;
-  const tab = await activeTab().catch(() => null);
-  if (!isHttpUrl(tab?.url)) return;
-  const url = sanitizedUrl(tab.url);
-  if (discovery.resolvedFor !== url) {
-    discovery.resolvedFor = url;
-    discovery.serverId = await findServerForUrl(url).catch(() => undefined);
+function scheduleDiscoveryAfterAction(call, def, announce) {
+  if (!toolMayExposeNewPageState(call, def)) return;
+  if (typeof announce === "function") discovery.pendingAnnouncer = announce;
+  scheduleDiscovery();
+}
+
+function toolResultLooksBroken(result) {
+  return /No element for selector|No element for ref|Unsupported tool execution|Request failed for|failed to fetch|NetworkError|ERR_|current tab isn't a web page/i.test(
+    String(result ?? ""),
+  );
+}
+
+function mergeRepairedTools(baseTools, candidateTools, failedName) {
+  if (!Array.isArray(candidateTools) || !candidateTools.length) return { tools: baseTools, repaired: undefined, added: [] };
+  const byName = new Map((baseTools || []).map((tool) => [tool.name, tool]));
+  const added = [];
+  let repaired;
+  for (const tool of candidateTools) {
+    if (!tool?.name || !tool.execution) continue;
+    const existed = byName.has(tool.name);
+    if (tool.name === failedName) repaired = tool;
+    byName.set(tool.name, tool);
+    if (!existed && tool.name !== failedName) added.push(tool);
   }
+  return { tools: Array.from(byName.values()), repaired, added };
+}
+
+async function repairDiscoveredTool(def, announce) {
+  const tab = await activeTab().catch(() => null);
+  if (!isHttpUrl(tab?.url)) return undefined;
   const bundle = await buildExtensionBundle(tab).catch(() => null);
-  if (!bundle) return;
-  await discoverFromBundle(bundle, { allowDuringAgent: true, announce: true, announcer: announce });
+  if (!bundle) return undefined;
+
+  const baselineWithoutFailed = discovery.sessionTools.filter((tool) => tool?.name !== def.name);
+  let response;
+  discovery.busy = true;
+  try {
+    response = await discoverTools(baselineWithoutFailed, bundle, undefined);
+  } catch {
+    return undefined;
+  } finally {
+    discovery.busy = false;
+  }
+
+  const { tools, repaired, added } = mergeRepairedTools(discovery.sessionTools, response?.tools || response?.added || [], def.name);
+  discovery.sessionTools = tools;
+  if (repaired && typeof announce === "function") {
+    announce(`Notification: rebuilt \`${repaired.name}\` after it failed. Trying the repaired tool now.`, [repaired]);
+  }
+  if (added.length && typeof announce === "function") {
+    announce(
+      `Notification: ${added.length} new fallback tool${added.length === 1 ? "" : "s"} became accessible: ${added.map((t) => `\`${t.name}\``).join(", ")}.`,
+      added,
+    );
+  }
+  return repaired;
+}
+
+function scheduleToolRepair(def, announce) {
+  if (!def?.name || discovery.busy) return;
+  setTimeout(async () => {
+    if (discovery.agentActive || discovery.busy) {
+      setTimeout(() => scheduleToolRepair(def, announce), 1800);
+      return;
+    }
+    const repaired = await repairDiscoveredTool(def, announce);
+    if (!repaired && typeof announce === "function") {
+      announce(`Notification: repair for \`${def.name}\` did not find a better version yet.`);
+    }
+  }, 1200);
 }
 
 // Execute a discovered generated-server tool live, ON THE PAGE THE USER IS LOOKING AT - not headless.
@@ -1099,8 +1230,13 @@ async function sendChat(text) {
         ).then(parseStepResponse),
       execute: async (call) => {
         const def = findDiscovered(call.name);
-        const result = def ? await executeDiscovered(def, call.arguments, tabExecute) : await tabExecute(call);
-        await discoverInlineAfterAction(call, def, (html) => view.addText(html));
+        let result = def ? await executeDiscovered(def, call.arguments, tabExecute) : await tabExecute(call);
+        if (def && toolResultLooksBroken(result)) {
+          view.addText(`Notification: \`${def.name}\` did not work. I will rebuild it in the background while continuing with another path.`);
+          scheduleToolRepair(def, (html) => view.addText(html));
+          result = `${result}\n\nBackground repair queued for ${def.name}; continue with another available path instead of waiting.`;
+        }
+        scheduleDiscoveryAfterAction(call, def, (html) => view.addText(html));
         return result;
       },
       confirm: (call) => view.confirm(call, controller.signal),
@@ -1288,7 +1424,7 @@ function applyServer(card, artifact, tab) {
   const toolList = names.length ? names.map((n) => `<code>${escapeHtml(n)}</code>`).join(", ") + ", plus " : "";
   message(
     "bot",
-    `<p class="ok">Ready. You can use these tools right here by chatting.</p><p class="sub">I can now use ${toolList}navigate, click, type, and read on the page. Try: <em>"search for wireless headphones and open the first result"</em>. I'll ask you to confirm before anything that changes your account, like add to cart.</p>`,
+    `<p class="ok">Notification: tools became accessible in this chat.</p><p class="sub">I can now use ${toolList}navigate, click, type, and read on the page. Try: <em>"search for wireless headphones and open the first result"</em>. I'll ask you to confirm before anything that changes your account, like add to cart, unless Bypass is on.</p>`,
   );
   input.focus();
 }

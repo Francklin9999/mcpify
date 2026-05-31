@@ -222,7 +222,7 @@ function browserStepNavigatesOffOrigin(step, currentUrl, args) {
   if (!step || step.action !== "navigate" || !step.value) return false;
   const target = String(step.value).replace(/\{\{(\w+)\}\}/g, (_m, key) => {
     const value = args && Object.prototype.hasOwnProperty.call(args, key) ? args[key] : "";
-    return encodeURIComponent(value == null ? "" : String(value));
+    return value == null ? "" : String(value);
   });
   return target ? !sameOrigin(target, currentUrl) : false;
 }
@@ -297,6 +297,7 @@ export async function runAgent(initial, deps) {
   let lastSignature = "";
   let repeats = 0;
   let recoveryNudges = 0;
+  const declinedSignatures = new Set();
 
   for (let stepIndex = 0; stepIndex < maxSteps; stepIndex++) {
     if (aborted()) return { messages, finalText, stoppedReason: "aborted" };
@@ -342,13 +343,20 @@ export async function runAgent(initial, deps) {
       let result;
       let skipped = false;
       if (gate(call, url)) {
-        const ok = await deps.confirm(call);
-        if (aborted()) return { messages, finalText, stoppedReason: "aborted" };
-        if (!ok) {
+        const confirmSignature = JSON.stringify([call.name, call.arguments]);
+        if (declinedSignatures.has(confirmSignature)) {
           skipped = true;
-          result = `User declined to run ${call.name}. Consider a different approach or ask the user.`;
+          result = `User already declined to run ${call.name} with these arguments in this turn. Do not ask again; choose a different, preferably read-only or generated-tool approach.`;
         } else {
-          result = await deps.execute(call);
+          const ok = await deps.confirm(call);
+          if (aborted()) return { messages, finalText, stoppedReason: "aborted" };
+          if (!ok) {
+            skipped = true;
+            declinedSignatures.add(confirmSignature);
+            result = `User declined to run ${call.name}. Do not retry the same action; choose a different, preferably read-only or generated-tool approach.`;
+          } else {
+            result = await deps.execute(call);
+          }
         }
       } else {
         result = await deps.execute(call);

@@ -204,6 +204,20 @@ a {
   color: var(--accent);
 }
 
+.bypass-btn {
+  display: inline-flex;
+  width: auto;
+  min-width: 82px;
+  padding: 0 10px;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.bypass-btn span {
+  line-height: 1;
+}
+
 .chip,
 .mini-btn {
   display: inline-flex;
@@ -902,6 +916,24 @@ body.popup.options-page {
 
 .agent-say > :last-child {
   margin-bottom: 0;
+}
+
+.agent-say.streaming::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: stream-cursor 0.9s steps(2, start) infinite;
+}
+
+@keyframes stream-cursor {
+  50% {
+    opacity: 0;
+  }
 }
 
 .agent-tool {

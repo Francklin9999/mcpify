@@ -28,6 +28,18 @@ function resolveUrl(target, baseUrl) {
   }
 }
 
+function sameUrl(a, b) {
+  try {
+    const left = new URL(String(a));
+    const right = new URL(String(b));
+    left.hash = "";
+    right.hash = "";
+    return left.toString() === right.toString();
+  } catch {
+    return String(a || "") === String(b || "");
+  }
+}
+
 /** Wait until the tab finishes loading (status 'complete'), with a hard timeout so we never hang the loop. */
 function waitForLoad(tabId, timeoutMs = 15000) {
   return new Promise((resolve) => {
@@ -437,8 +449,11 @@ export function makeTabExecutor() {
       case "browser_extract":
         return JSON.stringify(await runInPage(tab.id, extractInPage, String(a.mode || "metadata")), null, 2);
       case "browser_navigate": {
-        await chrome.tabs.update(tab.id, { url: resolveUrl(a.url, tab.url) });
-        await waitForLoad(tab.id);
+        const targetUrl = resolveUrl(a.url, tab.url);
+        if (!sameUrl(targetUrl, tab.url)) {
+          await chrome.tabs.update(tab.id, { url: targetUrl });
+          await waitForLoad(tab.id);
+        }
         return snapshot();
       }
       case "browser_back": {
@@ -497,9 +512,11 @@ export async function executeBrowserStepsOnActiveTab(steps, args = {}) {
     if (!step || !step.action) continue;
     switch (step.action) {
       case "navigate": {
-        const targetUrl = resolveUrl(interpolate(step.value, args, true), tab.url || "");
-        await chrome.tabs.update(tab.id, { url: targetUrl });
-        await waitForLoad(tab.id);
+        const targetUrl = resolveUrl(interpolate(step.value, args), tab.url || "");
+        if (!sameUrl(targetUrl, tab.url)) {
+          await chrome.tabs.update(tab.id, { url: targetUrl });
+          await waitForLoad(tab.id);
+        }
         break;
       }
       case "waitFor": {

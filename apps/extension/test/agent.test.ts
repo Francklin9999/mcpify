@@ -88,6 +88,24 @@ test("needsConfirmDiscoveredTool gates browser-step tools that mutate or leave o
     ),
     true,
   );
+  assert.equal(
+    needsConfirmDiscoveredTool(
+      { execution: { kind: "browser", steps: [{ action: "navigate", value: "{{profile_url}}" }] } },
+      "https://www.linkedin.com/feed/",
+      { profile_url: "https://www.linkedin.com/in/rayen-bouriel/" },
+    ),
+    false,
+    "same-origin full URL args should not be treated as encoded relative paths",
+  );
+  assert.equal(
+    needsConfirmDiscoveredTool(
+      { execution: { kind: "browser", steps: [{ action: "navigate", value: "{{profile_url}}" }] } },
+      "https://www.linkedin.com/feed/",
+      { profile_url: "https://evil.example.net/in/rayen-bouriel/" },
+    ),
+    true,
+    "off-origin full URL args still require confirmation",
+  );
 });
 
 test("multi-step: a tool call result threads back as TOOL_RESULT, then the model finishes", async () => {
@@ -147,6 +165,36 @@ test("declined mutating action: execute is NOT called and the loop CONTINUES inf
   assert.match(declineMsg.content, /TOOL_RESULT browser_click/);
   assert.match(declineMsg.content, /declined/i);
   assert.match(declineMsg.content, /RECOVERY_HINT/);
+});
+
+test("repeated declined action is not confirmed again in the same turn", async () => {
+  const step = scriptedStep([
+    { toolCalls: [{ name: "browser_type", arguments: { ref: "e8", text: "Rayen Bouriel", submit: true } }] },
+    { toolCalls: [{ name: "browser_type", arguments: { ref: "e8", text: "Rayen Bouriel", submit: true } }] },
+    { text: "I will use a different path." },
+  ]);
+  let confirmCalls = 0;
+  let executeCalls = 0;
+  const out = await runAgent([{ role: "user", content: "look for Rayen Bouriel" }], {
+    step,
+    execute: async () => {
+      executeCalls++;
+      return "typed";
+    },
+    confirm: async () => {
+      confirmCalls++;
+      return false;
+    },
+    currentUrl: () => ORIGIN,
+    maxSteps: 5,
+  });
+
+  assert.equal(out.stoppedReason, "done");
+  assert.equal(confirmCalls, 1);
+  assert.equal(executeCalls, 0);
+  const thirdCallMessages = step.seen[2];
+  assert.match(thirdCallMessages.at(-1).content, /already declined/i);
+  assert.match(thirdCallMessages.at(-1).content, /Do not ask again/i);
 });
 
 test("confirmed mutating action executes", async () => {
