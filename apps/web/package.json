@@ -10,6 +10,8 @@
     "test": "node --test --experimental-strip-types test/*.test.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.54.0",
+    "@google/generative-ai": "^0.24.0",
     "@mcp/db": "0.0.0",
     "@mcp/generator": "0.0.0",
     "@mcp/solana": "0.0.0",

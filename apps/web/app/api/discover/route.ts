@@ -6,8 +6,7 @@ import { servers, tools as toolsTable } from "@mcp/db";
 // Deep imports: pull ONLY the incremental engine + inference clients (not codegen/worker), so this route
 // stays lean and doesn't drag the MCP SDK / BullMQ worker into the request path.
 import { discoverMore } from "@mcp/generator/dist/src/incremental.js";
-import { OpenAIInferenceClient } from "@mcp/generator/dist/src/openai-client.js";
-import { HeuristicInferenceClient } from "@mcp/generator/dist/src/heuristic-inference.js";
+import { makeLLMClients } from "@mcp/generator/dist/src/llm-factory.js";
 import { db, jobQueue } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -54,8 +53,8 @@ export async function POST(req: Request): Promise<Response> {
   // Baseline = the server's known tools (authoritative) ∪ whatever the client already had.
   const baseline = serverId ? unionByName(await loadServerTools(serverId), currentTools) : currentTools;
 
-  // No key ⇒ the free heuristic still finds new tools from the delta (just lower-confidence).
-  const client = process.env.OPENAI_API_KEY ? new OpenAIInferenceClient() : new HeuristicInferenceClient();
+  // Provider is controlled by LLM_PROVIDER env; falls back to heuristic when no key is set.
+  const { inference: client } = makeLLMClients();
 
   let outcome;
   try {

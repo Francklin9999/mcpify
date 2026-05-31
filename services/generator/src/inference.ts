@@ -109,10 +109,17 @@ export function validateCandidates(candidates: unknown[], opts: ValidateOptions 
   return { tools, droppedCount };
 }
 
+function activeModelVersion(): string {
+  const p = (process.env["LLM_PROVIDER"] ?? "openai").toLowerCase();
+  if (p === "claude") return `claude/${process.env["CLAUDE_MODEL"] ?? "claude-sonnet-4-6"}`;
+  if (p === "gemini") return `gemini/${process.env["GEMINI_MODEL"] ?? "gemini-2.0-flash"}`;
+  return `openai/${process.env["OPENAI_MODEL"] ?? "gpt-4o"}`;
+}
+
 export async function inferTools(
   bundle: CaptureBundle,
   client: InferenceClient,
-  modelVersion = process.env.OPENAI_MODEL ?? "gpt-5.4",
+  modelVersion = activeModelVersion(),
 ): Promise<InferenceOutcome> {
   const raw = await client.proposeTools(bundle);
   // Site recipes are merged first so a bot-walled / weak snapshot still yields the obvious deterministic tools.
