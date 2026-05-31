@@ -35,11 +35,11 @@ export default async function ServerPage({ params }: { params: Promise<{ id: str
       <div className="tool-panel">
         <div className="snippet-head">
           <h3>Versions</h3>
-          <a className="primary-btn" href={`/api/servers/${server.serverId}/download/${server.currentVersion}`}>Install current</a>
+          <a className="primary-btn" href={`/api/servers/${server.serverId}/download/${server.currentVersion}?format=zip`}>Download current</a>
         </div>
         <div className="version-list">
           {server.versions.map((version) => (
-            <a href={`/api/servers/${server.serverId}/download/${version.version}`} key={version.version}>
+            <a href={`/api/servers/${server.serverId}/download/${version.version}?format=zip`} key={version.version}>
               <span>v{version.version}</span>
               <span>{version.toolCount} tools</span>
               <span>{version.createdBy}</span>

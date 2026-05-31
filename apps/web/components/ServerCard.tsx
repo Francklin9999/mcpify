@@ -24,7 +24,7 @@ export function ServerCard({ entry }: { entry: RegistryEntry }) {
         </div>
         <div className="actions">
           <a className="quiet-btn" href={`/servers/${entry.serverId}`}>Details</a>
-          <a className="primary-btn" href={`/api/servers/${entry.serverId}/download/${entry.currentVersion}`}>Install</a>
+          <a className="primary-btn" href={`/api/servers/${entry.serverId}/download/${entry.currentVersion}?format=zip`}>Download</a>
         </div>
       </div>
       <div className="band" style={{ background: `var(${band.colorVar})` }}>
