@@ -267,10 +267,11 @@ test("generated server registers tools and executes an http call mapped from par
     "browser_back",
     "browser_read_page",
     "browser_extract",
+    "browser_resume",
   ]) {
     assert.ok(names.includes(kit), `missing browsing toolkit tool ${kit}`);
   }
-  assert.equal(tools.length, 12);
+  assert.equal(tools.length, 13);
 
   const realFetch = globalThis.fetch;
   let captured: { url: string; method?: string; headers?: any; body?: any } | undefined;
@@ -694,5 +695,95 @@ test("real browser session: single-brace {page} fills, and missing page stays on
     }
   } finally {
     rmSync(genDir5, { recursive: true, force: true });
+  }
+});
+
+// The human-handoff state machine's FAILURE-RECOVERY path: when a gate (sign-in/CAPTCHA) is detected the
+// session tries to relaunch a VISIBLE window. On a display-less host that headed relaunch can fail. The bug
+// this guards against: a rejected relaunch promise getting cached in `started`, so EVERY later tool call
+// re-awaits the rejection and the session is bricked for the rest of the process. We force the failure with
+// a bogus MCP_BROWSER_PATH (so no real window ever pops) and prove (a) the gate returns a PAUSED handoff
+// rather than throwing, and (b) the VERY NEXT tool call recovers a working session. REAL Chromium, local files.
+test("real browser session: a failed headed handoff degrades gracefully and never bricks the session", async (t) => {
+  let chromiumPath: string | undefined;
+  let pw: any;
+  try {
+    const dynamicImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
+    pw = await dynamicImport("playwright");
+    chromiumPath = pw.chromium.executablePath?.();
+  } catch {
+    /* playwright not installed */
+  }
+  if (!chromiumPath || !existsSync(chromiumPath)) {
+    t.skip("playwright + chromium not installed - skipping the handoff-recovery test");
+    return;
+  }
+  try {
+    const browser = await pw.chromium.launch({ executablePath: chromiumPath, chromiumSandbox: false });
+    await browser.close();
+  } catch (err) {
+    t.skip(`playwright chromium launch is unavailable in this environment: ${String(err)}`);
+    return;
+  }
+
+  const genDir6 = `${packageRoot}.gen-test-handoff`;
+  const homeHtml = `<!doctype html><html><head><title>Fixture Shop</title></head><body><h1>Welcome to the shop</h1><p>Browse the catalog.</p></body></html>`;
+  // A sign-in wall: login URL + a visible password field => classifyGate -> "auth".
+  const loginHtml = `<!doctype html><html><head><title>Sign in</title></head><body><h1>Sign in to continue</h1><form><input name="user"><input type="password" name="pw"></form></body></html>`;
+  const homeUrl = pathToFileURL(`${genDir6}/home.html`).href;
+  const loginUrl = pathToFileURL(`${genDir6}/login.html`).href;
+
+  const serverTs = generateServer({
+    serverId: "77777777-7777-4777-8777-777777777777",
+    version: 1,
+    url: homeUrl,
+    title: "Fixture Shop",
+    tools: [],
+    browsing: true,
+  }).files.find((f) => f.path === "server.ts")!.content;
+  const jsPath = compileServer(genDir6, serverTs);
+  writeFileSync(`${genDir6}/home.html`, homeHtml);
+  writeFileSync(`${genDir6}/login.html`, loginHtml);
+
+  const priorBrowserPath = process.env.MCP_BROWSER_PATH;
+  try {
+    const mod = await import(jsPath);
+    const server = mod.createServer(); // REAL PlaywrightBrowsing, no injection
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await server.connect(st);
+    const client = new Client({ name: "handoff-recovery-test", version: "1.0.0" });
+    await client.connect(ct);
+
+    try {
+      // 1. A normal page works (headless session launches with bundled Chromium).
+      const home: any = await client.callTool({ name: "browser_navigate", arguments: { url: homeUrl } });
+      assert.equal(home.isError, false, `home navigate errored: ${home.content[0].text}`);
+      assert.match(home.content[0].text, /Welcome to the shop/);
+
+      // 2. Force the upcoming HEADED relaunch to fail (bogus executable => no window can ever open here).
+      process.env.MCP_BROWSER_PATH = `${genDir6}/no-such-chrome-binary`;
+
+      // 3. Navigating into a sign-in wall detects the gate and tries to pop a window; the relaunch fails.
+      //    It must return a PAUSED handoff message, NOT throw / NOT error out.
+      const gated: any = await client.callTool({ name: "browser_navigate", arguments: { url: loginUrl } });
+      assert.equal(gated.isError, false, `gated navigate should be a soft handoff, not an error: ${gated.content[0].text}`);
+      assert.match(gated.content[0].text, /PAUSED - human action needed/);
+      assert.match(gated.content[0].text, /browser_resume/);
+
+      // 4. Recovery: clear the bogus path; the NEXT tool call must rebuild a working session. With the bug
+      //    (a cached rejected launch promise) this re-awaits the rejection and errors -> the session is dead.
+      delete process.env.MCP_BROWSER_PATH;
+      const recovered: any = await client.callTool({ name: "browser_navigate", arguments: { url: homeUrl } });
+      assert.equal(recovered.isError, false, `session did not recover after a failed handoff: ${recovered.content[0].text}`);
+      assert.match(recovered.content[0].text, /Welcome to the shop/, "recovered session should load real content again");
+    } finally {
+      await (server as unknown as { browsing?: { close?: () => Promise<void> } }).browsing?.close?.();
+      await client.close();
+      await server.close();
+    }
+  } finally {
+    if (priorBrowserPath === undefined) delete process.env.MCP_BROWSER_PATH;
+    else process.env.MCP_BROWSER_PATH = priorBrowserPath;
+    rmSync(genDir6, { recursive: true, force: true });
   }
 });

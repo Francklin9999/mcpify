@@ -1,4 +1,5 @@
 import type { ToolDefinition, GeneratedServerArtifact } from "@mcp/types";
+import { emitGateRuntime } from "./browser-gate.js";
 
 /**
  * Codegen: ToolDefinition[] -> a runnable MCP server artifact (`01 S3`, `services/generator.md`).
@@ -94,6 +95,7 @@ const TOOLKIT_NAMES = [
   "browser_back",
   "browser_read_page",
   "browser_extract",
+  "browser_resume",
 ] as const;
 
 /**
@@ -165,6 +167,13 @@ function browsingToolkitRegistrations(input: CodegenInput): string {
         "Extract structured JSON from the current page. mode = 'product' (price/availability/rating/...), 'listing' (search-result cards), 'linkedin_jobs' (LinkedIn job cards/details), or 'metadata' (title/headings/links, the default).",
       shape: "{ mode: z.string().optional() }",
       call: 'browsing.extract(String(args.mode || "metadata"))',
+    },
+    {
+      name: "browser_resume",
+      description:
+        "Resume after a PAUSED handoff. If a previous browser tool returned 'PAUSED - human action needed' (a sign-in wall or CAPTCHA), the user completes it in the opened browser window, then you call this to continue. Re-runs the paused action and returns its result - or tells you it's still blocked.",
+      shape: "{}",
+      call: '(browsing.resume ? browsing.resume() : Promise.resolve("Resume is not available in this session."))',
     },
   ];
   return defs
@@ -296,11 +305,15 @@ function templateMissingPathParam(template: string | undefined, args: Record<str
 
 async function importBrowserDriver(): Promise<any> {
   const dynamicImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
-  try {
-    return await dynamicImport("playwright");
-  } catch {
-    throw new Error("browser tools require the generated server's playwright dependency");
+  // MCP_BROWSER_DRIVER lets a user opt into a stealth-patched, drop-in Playwright (e.g. "patchright" or
+  // "rebrowser-playwright") for max anti-bot evasion - tried first, then plain playwright. Zero extra
+  // dependency by default: the strongest stealth here is a real Chrome channel + a persistent profile.
+  const preferred = process.env.MCP_BROWSER_DRIVER;
+  for (const mod of [preferred, "playwright"]) {
+    if (!mod) continue;
+    try { return await dynamicImport(mod); } catch { /* try the next driver */ }
   }
+  throw new Error("browser tools require playwright (or set MCP_BROWSER_DRIVER to an installed driver)");
 }
 
 // Persistent browser session
@@ -319,6 +332,7 @@ interface Browsing {
   back(): Promise<string>;
   read(): Promise<string>;
   extract(mode: string): Promise<unknown>;
+  resume?(): Promise<unknown>;
   close?(): Promise<void>;
 }
 
@@ -345,29 +359,163 @@ function sameUrl(a: string, b: string): boolean {
   }
 }
 
+${emitGateRuntime()}
+
+// Probe the live page and decide whether the automated session is blocked (sign-in wall / CAPTCHA). A text
+// pass (title + visible text) short-circuits ONLY on a positive captcha-text hit; otherwise - i.e. on every
+// normal navigation - it also probes the DOM for a password field and the challenge widgets (cheap in-page
+// locator counts, no network), since a sign-in/challenge often has no give-away text.
+async function classifyGateLive(page: any, requestedUrl?: string): Promise<{ kind: string; reason: string }> {
+  let landedUrl = "", title = "", text = "";
+  try { landedUrl = page.url(); } catch { /* ignore */ }
+  try { title = await page.title(); } catch { /* ignore */ }
+  try {
+    const body = await page.evaluate(() => { const d = (globalThis as any).document; return d && d.body ? d.body.innerText : ""; });
+    text = String(body || "").slice(0, 20000);
+  } catch { /* ignore */ }
+  const quick = classifyGate({ requestedUrl, landedUrl, title, text });
+  if (quick.kind === "captcha") return quick;
+  let hasPasswordField = false;
+  try { hasPasswordField = (await page.locator("input[type=password]").count()) > 0; } catch { /* ignore */ }
+  let hasChallengeFrame = false;
+  for (const sel of CHALLENGE_FRAME_SELECTORS) {
+    try { if ((await page.locator(sel).first().count()) > 0) { hasChallengeFrame = true; break; } } catch { /* ignore */ }
+  }
+  return classifyGate({ requestedUrl, landedUrl, title, text, hasPasswordField, hasChallengeFrame });
+}
+
+// The message handed back to the calling agent when a human must act; the agent relays it to its user.
+function handoffMessage(kind: string, url: string, opened: boolean): string {
+  const what = kind === "auth"
+    ? "This page requires you to SIGN IN"
+    : "This page is showing a HUMAN-VERIFICATION challenge (CAPTCHA / bot check)";
+  const act = kind === "auth" ? "sign-in" : "challenge";
+  const where = opened
+    ? "A browser window has opened on this machine."
+    : "Open the page in a visible browser (set MCP_BROWSER_HEADLESS=0 and retry, or run this server on a machine with a display).";
+  return [
+    "PAUSED - human action needed.",
+    what + ": " + url,
+    where + " Complete the " + act + " there, then call browser_resume to continue.",
+    "The browser session is preserved - nothing was lost. Tip: set MCP_BROWSER_PROFILE=<dir> to stay signed in across runs.",
+  ].join("\\n");
+}
+
+// A dedicated, non-default Chrome profile dir (NEVER the user's live profile - Chrome locks it while open).
+// When set, the session uses a persistent context so a one-time sign-in / challenge solve sticks across
+// restarts. Mutually exclusive with MCP_STORAGE_STATE (Playwright forbids both), so this branch ignores it.
+const BROWSER_PROFILE = process.env.MCP_BROWSER_PROFILE || "";
+// "on" (default): on a detected gate, pop a VISIBLE window and hand off to the human. "off": detect-only
+// (legacy behavior - never pops a window, just returns the page snapshot).
+const HANDOFF_MODE = (process.env.MCP_HANDOFF || "on").toLowerCase();
+
 class PlaywrightBrowsing implements Browsing {
   private started?: Promise<{ browser: any; context: any; page: any }>;
   private stepExecutor?: StepExecutor;
+  // Forced visible on the next (re)launch - set when a gate hands off to a human.
+  private forceHeaded = false;
+  // Whether the live session is currently a visible window.
+  private headed = false;
+  // The action paused on a gate; browser_resume re-runs it once the human is done.
+  private pending?: { kind: string; run: () => Promise<unknown> };
   constructor(stepExecutor?: StepExecutor) { this.stepExecutor = stepExecutor; }
 
   private async ensure(): Promise<{ browser: any; context: any; page: any }> {
-    if (!this.started) {
-      this.started = (async () => {
-        const { chromium } = await importBrowserDriver();
-        const browser = await chromium.launch({
-          headless: process.env.MCP_BROWSER_HEADLESS === "0" ? false : true,
-          chromiumSandbox: false,
-          channel: process.env.MCP_BROWSER_CHANNEL || undefined,
-          executablePath: process.env.MCP_BROWSER_PATH || chromium.executablePath(),
-        });
-        const context = await browser.newContext({ storageState: process.env.MCP_STORAGE_STATE || undefined });
-        const page = await context.newPage();
-        page.setDefaultTimeout(20000);
-        if (SITE_URL) { try { await page.goto(SITE_URL, { waitUntil: "domcontentloaded" }); } catch { /* first snapshot still works */ } }
-        return { browser, context, page };
-      })();
-    }
+    if (!this.started) this.started = this.launch();
     return this.started;
+  }
+
+  // Launch (or relaunch) the ONE persistent session. Stealth defaults cost nothing: a real Chrome channel +
+  // a persistent profile + the AutomationControlled flag off + navigator.webdriver stripped. With a profile
+  // dir, login/clearance persists on disk; otherwise seedState carries cookies across an in-process relaunch.
+  private async launch(seedState?: any): Promise<{ browser: any; context: any; page: any }> {
+    const { chromium } = await importBrowserDriver();
+    const headless = !this.forceHeaded && process.env.MCP_BROWSER_HEADLESS !== "0";
+    const channel = process.env.MCP_BROWSER_CHANNEL || undefined;
+    const args = ["--disable-blink-features=AutomationControlled"];
+    // An explicit channel/path wins; otherwise fall back to Playwright's bundled Chromium.
+    const executablePath = process.env.MCP_BROWSER_PATH || (channel ? undefined : chromium.executablePath());
+    let browser: any, context: any;
+    if (BROWSER_PROFILE) {
+      context = await chromium.launchPersistentContext(BROWSER_PROFILE, { headless, channel, executablePath, args, chromiumSandbox: false, viewport: null });
+      browser = context.browser();
+    } else {
+      browser = await chromium.launch({ headless, channel, executablePath, args, chromiumSandbox: false });
+      context = await browser.newContext({ storageState: seedState ?? (process.env.MCP_STORAGE_STATE || undefined) });
+    }
+    this.headed = !headless;
+    try { await context.addInitScript(() => { try { Object.defineProperty(navigator, "webdriver", { get: () => undefined }); } catch (e) { /* ignore */ } }); } catch { /* ignore */ }
+    const existing = (context.pages && context.pages()) || [];
+    const page = existing.length ? existing[0] : await context.newPage();
+    page.setDefaultTimeout(20000);
+    if (SITE_URL) { try { await page.goto(SITE_URL, { waitUntil: "domcontentloaded" }); } catch { /* first snapshot still works */ } }
+    return { browser, context, page };
+  }
+
+  // Swap the live session to a VISIBLE window so a human can sign in / solve a challenge. The new context
+  // BECOMES the session (every later tool call uses it). Cookies carry across (profile dir persists on disk;
+  // otherwise seed from the old context's storageState), then re-navigate so the human lands on the gated page.
+  private async ensureHeaded(gatedUrl?: string): Promise<void> {
+    const cur = await this.ensure();
+    if (this.headed) { try { await cur.page.bringToFront(); } catch { /* ignore */ } return; }
+    let seed: any;
+    if (!BROWSER_PROFILE) { try { seed = await cur.context.storageState(); } catch { /* ignore */ } }
+    await this.close();
+    this.forceHeaded = true;
+    this.started = this.launch(seed);
+    let next: { browser: any; context: any; page: any };
+    try {
+      next = await this.started;
+    } catch (err) {
+      // A headed relaunch can fail on a display-less host (the headless-server case). NEVER leave a rejected
+      // promise cached in this.started - ensure() reuses it, so that would brick every later tool call in
+      // this process. Reset so the next call rebuilds a normal headless session; rethrow so raiseHandoff
+      // reports "couldn't open a window" (pending stays set -> the session is still recoverable).
+      this.started = undefined;
+      this.forceHeaded = false;
+      throw err;
+    }
+    const target = gatedUrl || SITE_URL || "";
+    if (target) { try { await next.page.goto(target, { waitUntil: "domcontentloaded" }); } catch { /* ignore */ } }
+    try { await next.page.bringToFront(); } catch { /* ignore */ }
+  }
+
+  // Detect a gate on the current page (fail-soft: any probe error => "ok", never block a legitimate action).
+  private async checkGate(requestedUrl?: string): Promise<{ kind: string; reason: string }> {
+    try { return await classifyGateLive(await this.page(), requestedUrl); }
+    catch { return { kind: "ok", reason: "" }; }
+  }
+
+  // Begin a human handoff: stash the action to resume, pop a visible window, return the instruction message.
+  private async raiseHandoff(gate: { kind: string; reason: string }, gatedUrl: string, rerun: () => Promise<unknown>): Promise<string> {
+    if (HANDOFF_MODE === "off") return snapshotText(await this.page());
+    this.pending = { kind: gate.kind, run: rerun };
+    let opened = false;
+    try { await this.ensureHeaded(gatedUrl); opened = true; } catch { opened = false; }
+    return handoffMessage(gate.kind, gatedUrl, opened);
+  }
+
+  // After resume, re-observe: if the gate cleared, return a fresh snapshot; if not, hand off again.
+  private async observeAfterResume(): Promise<string> {
+    const gate = await this.checkGate(undefined);
+    if (gate.kind !== "ok") return this.raiseHandoff(gate, (await this.page()).url(), () => this.observeAfterResume());
+    this.pending = undefined;
+    return this.snapshot();
+  }
+
+  // Interaction primitives (click/type/...) end here: a fresh snapshot, unless the action revealed a gate.
+  private async snapshotOrGate(): Promise<string> {
+    const gate = await this.checkGate(undefined);
+    if (gate.kind !== "ok") return this.raiseHandoff(gate, (await this.page()).url(), () => this.observeAfterResume());
+    this.pending = undefined;
+    return this.snapshot();
+  }
+
+  // browser_resume: the human finished in the popped window; re-run the paused action. Self-correcting -
+  // if still blocked it simply re-pauses with a fresh message.
+  async resume(): Promise<unknown> {
+    if (!this.pending) return "Nothing is paused. The session isn't waiting on a sign-in or challenge; use browser_navigate or a tool to continue.";
+    return this.pending.run();
   }
 
   private async page(): Promise<any> { return (await this.ensure()).page; }
@@ -433,6 +581,9 @@ class PlaywrightBrowsing implements Browsing {
         extracted = await extractData(page, step.value || "", selectors);
       }
     }
+    const gate = await this.checkGate(undefined);
+    if (gate.kind !== "ok") return this.raiseHandoff(gate, page.url(), () => this.runSteps(spec, args));
+    this.pending = undefined;
     if (extracted === undefined) extracted = htmlToText(await page.content());
     return extracted;
   }
@@ -444,6 +595,9 @@ class PlaywrightBrowsing implements Browsing {
     if (!sameUrl(target, page.url())) {
       await page.goto(target, { waitUntil: "domcontentloaded" });
     }
+    const gate = await this.checkGate(target);
+    if (gate.kind !== "ok") return this.raiseHandoff(gate, target, () => this.navigate(url));
+    this.pending = undefined;
     return this.snapshot();
   }
 
@@ -454,7 +608,7 @@ class PlaywrightBrowsing implements Browsing {
     if (!loc) return "No element for ref " + ref + STALE_REF;
     await loc.click();
     await settle(await this.page());
-    return this.snapshot();
+    return this.snapshotOrGate();
   }
 
   async type(ref: string, text: string, submit?: boolean): Promise<string> {
@@ -462,7 +616,7 @@ class PlaywrightBrowsing implements Browsing {
     if (!loc) return "No element for ref " + ref + STALE_REF;
     await loc.fill(text);
     if (submit) { await loc.press("Enter"); await settle(await this.page()); }
-    return this.snapshot();
+    return this.snapshotOrGate();
   }
 
   async pressKey(key: string, ref?: string): Promise<string> {
@@ -474,7 +628,7 @@ class PlaywrightBrowsing implements Browsing {
     }
     await page.keyboard.press(key);
     await settle(page);
-    return this.snapshot();
+    return this.snapshotOrGate();
   }
 
   async selectOption(ref: string, value: string): Promise<string> {
@@ -482,13 +636,13 @@ class PlaywrightBrowsing implements Browsing {
     if (!loc) return "No element for ref " + ref + STALE_REF;
     try { await loc.selectOption(value); } catch { await loc.selectOption({ label: value }); }
     await settle(await this.page());
-    return this.snapshot();
+    return this.snapshotOrGate();
   }
 
   async back(): Promise<string> {
     const page = await this.page();
     try { await page.goBack({ waitUntil: "domcontentloaded" }); } catch { /* nothing to go back to */ }
-    return this.snapshot();
+    return this.snapshotOrGate();
   }
 
   async read(): Promise<string> { return htmlToText(await (await this.page()).content()); }
@@ -1153,7 +1307,7 @@ Write-Host "==> Done. Restart Claude Code or run /mcp to load $ServerName."
 
 export function generateServer(input: CodegenInput): GeneratedServerArtifact {
   const snippet = configSnippet(input);
-  const readme = `# ${input.title} - MCP server\n\nAuto-generated from ${input.url} (v${input.version}). Runs locally and may use public HTTP calls plus Playwright-driven browser steps.\n\n## Install (one step)\n\nThis builds the server and registers it with Claude Code user MCPs, then restart Claude Code or run \`/mcp\`.\n\n\`\`\`bash\n# macOS / Linux\nbash install.sh\n\`\`\`\n\`\`\`powershell\n# Windows\npowershell -ExecutionPolicy Bypass -File install.ps1\n\`\`\`\n\nThe installer registers the server with an absolute \`node\` path in \`~/.claude.json\`, removes duplicate project-scoped Claude Code entries for the same server, and removes stale Claude Desktop entries for the same server. Set \`MCP_TARGET=desktop\` if you intentionally want the legacy Claude Desktop config path, or pass \`--no-register\` to build only.\n\n## Run manually\n\n\`\`\`bash\nnpm install\nnpm run build\nnpm start\n\`\`\`\n\nBrowser tools use Playwright. Run \`npx playwright install chromium\` once if you use the \`browser_*\` tools, and set \`MCP_BROWSER_PATH\` or \`MCP_BROWSER_CHANNEL=chrome\` if your local Chrome install is not auto-detected.\n\nThe \`claude_code_config.json\` snippet is also included if you prefer to wire it up by hand (fix the absolute path).\n`;
+  const readme = `# ${input.title} - MCP server\n\nAuto-generated from ${input.url} (v${input.version}). Runs locally and may use public HTTP calls plus Playwright-driven browser steps.\n\n## Install (one step)\n\nThis builds the server and registers it with Claude Code user MCPs, then restart Claude Code or run \`/mcp\`.\n\n\`\`\`bash\n# macOS / Linux\nbash install.sh\n\`\`\`\n\`\`\`powershell\n# Windows\npowershell -ExecutionPolicy Bypass -File install.ps1\n\`\`\`\n\nThe installer registers the server with an absolute \`node\` path in \`~/.claude.json\`, removes duplicate project-scoped Claude Code entries for the same server, and removes stale Claude Desktop entries for the same server. Set \`MCP_TARGET=desktop\` if you intentionally want the legacy Claude Desktop config path, or pass \`--no-register\` to build only.\n\n## Run manually\n\n\`\`\`bash\nnpm install\nnpm run build\nnpm start\n\`\`\`\n\nBrowser tools use Playwright. Run \`npx playwright install chromium\` once if you use the \`browser_*\` tools, and set \`MCP_BROWSER_PATH\` or \`MCP_BROWSER_CHANNEL=chrome\` if your local Chrome install is not auto-detected.\n\n## Signed-in & bot-protected pages (stealth + human handoff)\n\nThe browser session runs with light stealth (real Chrome flags, \`navigator.webdriver\` stripped). When a tool hits a sign-in wall or a CAPTCHA it does NOT fail - it returns \`PAUSED - human action needed\`, opens a visible browser window, and waits. Complete the sign-in/challenge in that window, then call \`browser_resume\` to continue.\n\n- \`MCP_BROWSER_PROFILE=<dir>\`: a dedicated Chrome profile dir so a one-time sign-in/clearance STICKS across restarts (recommended; never point at your live Chrome profile).\n- \`MCP_BROWSER_HEADLESS=0\`: stay headed the whole time (best for multi-step authenticated flows).\n- \`MCP_BROWSER_CHANNEL=chrome\`: drive your real installed Chrome instead of bundled Chromium (stronger stealth).\n- \`MCP_BROWSER_DRIVER=patchright\`: opt into a stealth-patched Playwright drop-in (install it yourself) for hard bot walls.\n- \`MCP_HANDOFF=off\`: disable the popup/handoff (detect-only).\n\nThe \`claude_code_config.json\` snippet is also included if you prefer to wire it up by hand (fix the absolute path).\n`;
   return {
     serverId: input.serverId,
     version: input.version,
