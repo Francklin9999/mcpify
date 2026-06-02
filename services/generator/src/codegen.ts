@@ -1142,86 +1142,149 @@ export function tsconfigJson(): string {
  */
 export function registerHelperMjs(): string {
   // Built with string concatenation (no JS template literals) so codegen's own template literal below
-  // doesn't try to interpolate the helper's ${...} expressions.
+  // doesn't try to interpolate the helper's ${...} expressions. Helper code uses SINGLE quotes throughout
+  // so the surrounding double-quoted codegen strings need almost no escaping.
   return [
-    `// Register this server in Claude Code user MCPs, preserving existing entries.`,
-    `// Driven by env: MCP_REG_NAME, MCP_REG_NODE (node bin), MCP_REG_JS (server.js).`,
-    `import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";`,
-    `import { delimiter, dirname, join } from "node:path";`,
-    `import { homedir } from "node:os";`,
+    `// Register this generated MCP server into EVERY detected MCP client, preserving existing entries.`,
+    `// Like a normal MCP server install: it auto-detects each client's own config and writes the server there.`,
+    `// Required env: MCP_REG_NAME, MCP_REG_NODE (node bin), MCP_REG_JS (server.js).`,
+    `// Optional env: MCP_REG_MODE=desktop (legacy single-target Claude Desktop), MCP_REG_CONFIG (its path),`,
+    `//   MCP_REG_CLAUDE_CODE_CONFIG (override ~/.claude.json), MCP_REG_CLEAN_CONFIGS (path-list of Claude`,
+    `//   Desktop configs to de-dupe), MCP_REG_HOME (override home dir - for tests), MCP_REG_NO_CLI=1 (skip`,
+    `//   the codex/code CLIs - for tests).`,
+    `import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';`,
+    `import { dirname, join } from 'node:path';`,
+    `import { homedir, platform } from 'node:os';`,
+    `import { spawnSync } from 'node:child_process';`,
     ``,
     `const name = process.env.MCP_REG_NAME;`,
     `const nodeBin = process.env.MCP_REG_NODE;`,
     `const serverJs = process.env.MCP_REG_JS;`,
     `if (!name || !nodeBin || !serverJs) {`,
-    `  console.error("MCP_REG_NAME, MCP_REG_NODE, and MCP_REG_JS are required");`,
+    `  console.error('MCP_REG_NAME, MCP_REG_NODE, and MCP_REG_JS are required');`,
     `  process.exit(1);`,
     `}`,
     ``,
+    `const HOME = process.env.MCP_REG_HOME || homedir();`,
+    `const NO_CLI = process.env.MCP_REG_NO_CLI === '1';`,
+    ``,
     `function readJson(file) {`,
-    `  try { return JSON.parse(readFileSync(file, "utf8") || "{}"); } catch { return {}; }`,
+    `  try { return JSON.parse(readFileSync(file, 'utf8') || '{}'); } catch { return {}; }`,
+    `}`,
+    `function ensureObject(value) {`,
+    `  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};`,
     `}`,
     `function writeJson(file, cfg) {`,
     `  mkdirSync(dirname(file), { recursive: true });`,
-    `  writeFileSync(file, JSON.stringify(cfg, null, 2) + "\\n");`,
-    `}`,
-    `function ensureObject(value) {`,
-    `  return value && typeof value === "object" && !Array.isArray(value) ? value : {};`,
+    `  if (existsSync(file)) { try { copyFileSync(file, file + '.mcpbak'); } catch (e) { /* backup best-effort */ } }`,
+    `  writeFileSync(file, JSON.stringify(cfg, null, 2) + '\\n');`,
     `}`,
     ``,
-    `function removeFromDesktopConfig(file) {`,
-    `  if (!file || !existsSync(file)) return false;`,
-    `  const cfg = ensureObject(readJson(file));`,
-    `  if (!cfg.mcpServers || typeof cfg.mcpServers !== "object" || !(name in cfg.mcpServers)) return false;`,
-    `  delete cfg.mcpServers[name];`,
-    `  writeJson(file, cfg);`,
-    `  return true;`,
+    `// Full stdio entry (Claude Code / Cursor / Windsurf accept it; Claude Code needs the type+env).`,
+    `function stdioEntry() { return { type: 'stdio', command: nodeBin, args: [serverJs], env: {} }; }`,
+    `// VS Code's mcp.json omits env when empty.`,
+    `function stdioEntryNoEnv() { return { type: 'stdio', command: nodeBin, args: [serverJs] }; }`,
+    `// Claude Desktop's classic shape.`,
+    `function desktopEntry() { return { command: nodeBin, args: [serverJs] }; }`,
+    ``,
+    `// VS Code keeps its user MCP config in a per-OS profile dir.`,
+    `function vscodeUserDir() {`,
+    `  if (platform() === 'darwin') return join(HOME, 'Library', 'Application Support', 'Code', 'User');`,
+    `  if (platform() === 'win32') return join(process.env.APPDATA || join(HOME, 'AppData', 'Roaming'), 'Code', 'User');`,
+    `  return join(HOME, '.config', 'Code', 'User');`,
+    `}`,
+    ``,
+    `// Claude Desktop's config dir (per-OS). Linux has no official Desktop build; the path is provided so a`,
+    `// custom/unofficial install is still detected if present.`,
+    `function claudeDesktopDir() {`,
+    `  if (platform() === 'darwin') return join(HOME, 'Library', 'Application Support', 'Claude');`,
+    `  if (platform() === 'win32') return join(process.env.APPDATA || join(HOME, 'AppData', 'Roaming'), 'Claude');`,
+    `  return join(HOME, '.config', 'Claude');`,
+    `}`,
+    ``,
+    `// JSON-file clients. Registered only when DETECTED (config file or app dir present), except Claude Code`,
+    `// which is always written (the flagship + this installer's historical default).`,
+    `function jsonTargets() {`,
+    `  const claudeCode = process.env.MCP_REG_CLAUDE_CODE_CONFIG || join(HOME, '.claude.json');`,
+    `  const vsDir = vscodeUserDir();`,
+    `  const desktopDir = claudeDesktopDir();`,
+    `  return [`,
+    `    { id: 'claude-code', label: 'Claude Code', file: claudeCode, key: 'mcpServers', entry: stdioEntry, force: true, projectCleanup: true },`,
+    `    { id: 'claude-desktop', label: 'Claude Desktop', file: join(desktopDir, 'claude_desktop_config.json'), key: 'mcpServers', entry: desktopEntry, dirs: [desktopDir] },`,
+    `    { id: 'cursor', label: 'Cursor', file: join(HOME, '.cursor', 'mcp.json'), key: 'mcpServers', entry: stdioEntry, dirs: [join(HOME, '.cursor')] },`,
+    `    { id: 'windsurf', label: 'Windsurf', file: join(HOME, '.codeium', 'windsurf', 'mcp_config.json'), key: 'mcpServers', entry: stdioEntry, dirs: [join(HOME, '.codeium', 'windsurf'), join(HOME, '.codeium')] },`,
+    `    { id: 'vscode', label: 'VS Code', file: join(vsDir, 'mcp.json'), key: 'servers', entry: stdioEntryNoEnv, dirs: [vsDir] },`,
+    `  ];`,
+    `}`,
+    ``,
+    `function isDetected(t) {`,
+    `  if (t.force) return true;`,
+    `  if (existsSync(t.file)) return true;`,
+    `  return (t.dirs || []).some((d) => existsSync(d));`,
+    `}`,
+    ``,
+    `function registerJsonTarget(t) {`,
+    `  const cfg = ensureObject(readJson(t.file));`,
+    `  cfg[t.key] = ensureObject(cfg[t.key]);`,
+    `  cfg[t.key][name] = t.entry();`,
+    `  let cleaned = 0;`,
+    `  if (t.projectCleanup && cfg.projects && typeof cfg.projects === 'object') {`,
+    `    for (const project of Object.values(cfg.projects)) {`,
+    `      if (project && typeof project === 'object' && project.mcpServers && typeof project.mcpServers === 'object' && name in project.mcpServers) {`,
+    `        delete project.mcpServers[name];`,
+    `        cleaned++;`,
+    `      }`,
+    `    }`,
+    `  }`,
+    `  writeJson(t.file, cfg);`,
+    `  console.log('Registered [' + name + '] into ' + t.label + ' (' + t.file + ')');`,
+    `  if (cleaned) console.log('  - removed ' + cleaned + ' duplicate project-scoped entr' + (cleaned === 1 ? 'y' : 'ies') + '.');`,
+    `}`,
+    ``,
+    `// Codex stores MCP servers in TOML (~/.codex/config.toml); use its official CLI rather than hand-editing`,
+    `// TOML (no parser shipped, and a bad merge would corrupt the user's config). Idempotent: remove then add.`,
+    `function registerCodexCli() {`,
+    `  if (NO_CLI) return;`,
+    `  const probe = spawnSync('codex', ['--version'], { encoding: 'utf8' });`,
+    `  if (probe.error) return; // codex not on PATH`,
+    `  spawnSync('codex', ['mcp', 'remove', name], { encoding: 'utf8' }); // ignore: may not exist yet`,
+    `  const res = spawnSync('codex', ['mcp', 'add', name, '--', nodeBin, serverJs], { encoding: 'utf8' });`,
+    `  if (res.status === 0) console.log('Registered [' + name + '] into Codex (codex mcp add).');`,
+    `  else console.error('WARN: codex is installed but \\'codex mcp add\\' failed: ' + ((res.stderr || res.stdout || '').toString().trim() || ('exit ' + res.status)));`,
     `}`,
     ``,
     `function registerClaudeDesktop() {`,
     `  const configPath = process.env.MCP_REG_CONFIG;`,
-    `  if (!configPath) { console.error("MCP_REG_CONFIG not set"); process.exit(1); }`,
+    `  if (!configPath) { console.error('MCP_REG_CONFIG not set'); process.exit(1); }`,
     `  const cfg = ensureObject(readJson(configPath));`,
     `  cfg.mcpServers = ensureObject(cfg.mcpServers);`,
     `  cfg.mcpServers[name] = { command: nodeBin, args: [serverJs] };`,
     `  writeJson(configPath, cfg);`,
-    `  console.log("Registered \\"" + name + "\\" in Claude Desktop config " + configPath);`,
+    `  console.log('Registered [' + name + '] into Claude Desktop (' + configPath + ')');`,
     `}`,
     ``,
-    `function registerClaudeCodeUser() {`,
-    `  const configPath = process.env.MCP_REG_CLAUDE_CODE_CONFIG || join(homedir(), ".claude.json");`,
-    `  const cfg = ensureObject(readJson(configPath));`,
-    `  cfg.mcpServers = ensureObject(cfg.mcpServers);`,
-    `  cfg.mcpServers[name] = { type: "stdio", command: nodeBin, args: [serverJs], env: {} };`,
-    ``,
-    `  let projectCleanups = 0;`,
-    `  if (cfg.projects && typeof cfg.projects === "object") {`,
-    `    for (const project of Object.values(cfg.projects)) {`,
-    `      if (!project || typeof project !== "object") continue;`,
-    `      if (project.mcpServers && typeof project.mcpServers === "object" && name in project.mcpServers) {`,
-    `        delete project.mcpServers[name];`,
-    `        projectCleanups++;`,
-    `      }`,
-    `    }`,
+    `function registerAll() {`,
+    `  let wrote = 0;`,
+    `  const skipped = [];`,
+    `  for (const t of jsonTargets()) {`,
+    `    if (isDetected(t)) { registerJsonTarget(t); wrote++; }`,
+    `    else skipped.push(t.label);`,
     `  }`,
-    `  writeJson(configPath, cfg);`,
-    `  console.log("Registered \\"" + name + "\\" in Claude Code user MCPs " + configPath);`,
-    `  if (projectCleanups) console.log("Removed " + projectCleanups + " duplicate project-scoped Claude Code entr" + (projectCleanups === 1 ? "y" : "ies") + ".");`,
-    ``,
-    `  const cleanupConfigs = (process.env.MCP_REG_CLEAN_CONFIGS || "").split(delimiter).filter(Boolean);`,
-    `  const desktopCleanups = cleanupConfigs.filter(removeFromDesktopConfig).length;`,
-    `  if (desktopCleanups) console.log("Removed " + desktopCleanups + " stale Claude Desktop entr" + (desktopCleanups === 1 ? "y" : "ies") + ".");`,
+    `  registerCodexCli();`,
+    `  if (skipped.length) console.log('Not detected (skipped): ' + skipped.join(', ') + '. Re-run install after installing them.');`,
+    `  if (!wrote) console.error('WARN: no JSON MCP clients detected; nothing was written.');`,
     `}`,
     ``,
-    `if (process.env.MCP_REG_MODE === "desktop") registerClaudeDesktop();`,
-    `else registerClaudeCodeUser();`,
+    `if (process.env.MCP_REG_MODE === 'desktop') registerClaudeDesktop();`,
+    `else registerAll();`,
     ``,
   ].join("\n");
 }
 
 /**
  * POSIX installer (macOS/Linux). Run with `bash install.sh`. Installs deps, builds server.js, then
- * registers the server in Claude Code user MCPs so it is visible from every project. `MCP_TARGET=desktop`
+ * registers the server into every detected MCP client (Claude Code, Cursor, Windsurf, VS Code, Codex) so it
+ * is usable from each, the way any MCP server install works. `MCP_TARGET=desktop`
  * keeps the legacy Claude Desktop behavior; `--no-register` builds only and prints the snippet.
  */
 export function installSh(input: CodegenInput): string {
@@ -1234,10 +1297,11 @@ npx --yes playwright install chromium || echo "WARN: 'npx playwright install chr
 `
     : "";
   return `#!/usr/bin/env bash
-# install.sh - build this generated MCP server and register it with Claude Code user MCPs.
-#   bash install.sh                 install deps, build, and register
+# install.sh - build this generated MCP server and register it into every detected MCP client.
+#   bash install.sh                 install deps, build, and register into all detected clients
 #   bash install.sh --no-register   build only, print the config snippet
-#   MCP_TARGET=desktop bash install.sh   opt into legacy Claude Desktop config registration
+#   MCP_TARGET=desktop bash install.sh   register only into the legacy Claude Desktop config
+# Detected automatically: Claude Code (~/.claude.json), Cursor, Windsurf, VS Code, and Codex (via its CLI).
 set -eo pipefail
 
 SERVER_NAME="${name}"
@@ -1288,19 +1352,13 @@ if [ "$TARGET" = "desktop" ]; then
   exit 0
 fi
 
-if [ "$(uname)" = "Darwin" ]; then
-  DESKTOP_CONFIG="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
-else
-  DESKTOP_CONFIG="$HOME/.config/Claude/claude_desktop_config.json"
-fi
-
-MCP_REG_MODE="claude-code-user" \\
+# Multi-client: the helper auto-detects every installed client (Claude Code, Claude Desktop, Cursor,
+# Windsurf, VS Code, Codex) from $HOME and registers into each in its own format.
 MCP_REG_CLAUDE_CODE_CONFIG="\${CLAUDE_CODE_CONFIG:-$HOME/.claude.json}" \\
-MCP_REG_CLEAN_CONFIGS="$DESKTOP_CONFIG" \\
 MCP_REG_NAME="$SERVER_NAME" MCP_REG_NODE="$NODE_BIN" MCP_REG_JS="$SERVER_JS" \\
   node "$SCRIPT_DIR/mcp-register.mjs"
 
-echo "==> Done. Restart Claude Code or run /mcp to load \\"$SERVER_NAME\\"."
+echo "==> Done. Registered into every detected MCP client above. Restart the client (Claude Code: run /mcp) to load \\"$SERVER_NAME\\"."
 `;
 }
 
@@ -1317,7 +1375,7 @@ npx --yes playwright install chromium
 if ($LASTEXITCODE -ne 0) { Write-Warning "playwright install chromium failed - browser_* tools will not work until you run it manually." }
 `
     : "";
-  return `# install.ps1 - build this generated MCP server and register it with Claude Code user MCPs.
+  return `# install.ps1 - build this generated MCP server and register it into every detected MCP client.
 #   powershell -ExecutionPolicy Bypass -File install.ps1
 #   powershell -ExecutionPolicy Bypass -File install.ps1 --no-register   (build only)
 #   $env:MCP_TARGET = "desktop"   (opt into legacy Claude Desktop registration)
@@ -1372,24 +1430,24 @@ if ($env:CLAUDE_CODE_CONFIG) {
 } else {
   $ClaudeCodeConfig = Join-Path $HOME ".claude.json"
 }
-$DesktopConfig = Join-Path $env:APPDATA "Claude\\claude_desktop_config.json"
 
+# Multi-client: the helper auto-detects every installed client (Claude Code, Claude Desktop, Cursor,
+# Windsurf, VS Code, Codex) and registers into each in its own format.
 $env:MCP_REG_MODE = "claude-code-user"
 $env:MCP_REG_CLAUDE_CODE_CONFIG = $ClaudeCodeConfig
-$env:MCP_REG_CLEAN_CONFIGS = $DesktopConfig
 $env:MCP_REG_NAME = $ServerName
 $env:MCP_REG_NODE = $NodeBin
 $env:MCP_REG_JS = $ServerJs
 node (Join-Path $ScriptDir "mcp-register.mjs")
 if ($LASTEXITCODE -ne 0) { Write-Error "registration failed"; exit 1 }
 
-Write-Host "==> Done. Restart Claude Code or run /mcp to load $ServerName."
+Write-Host "==> Done. Registered into every detected MCP client above. Restart the client (Claude Code: run /mcp) to load $ServerName."
 `;
 }
 
 export function generateServer(input: CodegenInput): GeneratedServerArtifact {
   const snippet = configSnippet(input);
-  const readme = `# ${input.title} - MCP server\n\nAuto-generated from ${input.url} (v${input.version}). Runs locally and may use public HTTP calls plus Playwright-driven browser steps.\n\n## Install (one step)\n\nThis builds the server and registers it with Claude Code user MCPs, then restart Claude Code or run \`/mcp\`.\n\n\`\`\`bash\n# macOS / Linux\nbash install.sh\n\`\`\`\n\`\`\`powershell\n# Windows\npowershell -ExecutionPolicy Bypass -File install.ps1\n\`\`\`\n\nThe installer registers the server with an absolute \`node\` path in \`~/.claude.json\`, removes duplicate project-scoped Claude Code entries for the same server, and removes stale Claude Desktop entries for the same server. Set \`MCP_TARGET=desktop\` if you intentionally want the legacy Claude Desktop config path, or pass \`--no-register\` to build only.\n\n## Run manually\n\n\`\`\`bash\nnpm install\nnpm run build\nnpm start\n\`\`\`\n\nBrowser tools use Playwright, and \`install.sh\`/\`install.ps1\` download the Chromium binary for you when this server has \`browser_*\` tools. To do it by hand instead: \`npx playwright install chromium\` (add \`--with-deps\` on Linux if system libraries are missing). Set \`MCP_BROWSER_PATH\` or \`MCP_BROWSER_CHANNEL=chrome\` to drive your own Chrome rather than the bundled Chromium.\n\n## Signed-in & bot-protected pages (stealth + human handoff)\n\nThe browser session runs with light stealth (real Chrome flags, \`navigator.webdriver\` stripped). When a tool hits a sign-in wall or a CAPTCHA it does NOT fail - it returns \`PAUSED - human action needed\`, opens a visible browser window, and waits. Complete the sign-in/challenge in that window, then call \`browser_resume\` to continue.\n\n- \`MCP_BROWSER_PROFILE=<dir>\`: a dedicated Chrome profile dir so a one-time sign-in/clearance STICKS across restarts (recommended; never point at your live Chrome profile).\n- \`MCP_BROWSER_HEADLESS=0\`: stay headed the whole time (best for multi-step authenticated flows).\n- \`MCP_BROWSER_CHANNEL=chrome\`: drive your real installed Chrome instead of bundled Chromium (stronger stealth).\n- \`MCP_BROWSER_DRIVER=patchright\`: opt into a stealth-patched Playwright drop-in (install it yourself) for hard bot walls.\n- \`MCP_HANDOFF=off\`: disable the popup/handoff (detect-only).\n\nThe \`claude_code_config.json\` snippet is also included if you prefer to wire it up by hand (fix the absolute path).\n`;
+  const readme = `# ${input.title} - MCP server\n\nAuto-generated from ${input.url} (v${input.version}). Runs locally and may use public HTTP calls plus Playwright-driven browser steps.\n\n## Install (one step)\n\nThis builds the server and registers it into **every MCP client it detects on your machine**, then restart that client (in Claude Code, run \`/mcp\`).\n\n\`\`\`bash\n# macOS / Linux\nbash install.sh\n\`\`\`\n\`\`\`powershell\n# Windows\npowershell -ExecutionPolicy Bypass -File install.ps1\n\`\`\`\n\nThe installer auto-detects and registers into each client in its own config format, with an absolute \`node\` path, preserving your existing servers (and backing up each file it edits):\n\n- **Claude Code** - \`~/.claude.json\` (also de-dupes duplicate project-scoped entries)\n- **Claude Desktop** - the OS \`claude_desktop_config.json\`\n- **Cursor** - \`~/.cursor/mcp.json\`\n- **Windsurf** - \`~/.codeium/windsurf/mcp_config.json\`\n- **VS Code** - the user \`mcp.json\` (\`servers\` key)\n- **Codex** - via \`codex mcp add\` (its config is TOML)\n\nA client is registered only when it is detected (its config or app dir exists; Claude Code is always written). Re-run the installer after installing a new client. Pass \`--no-register\` to build only, or \`MCP_TARGET=desktop\` to target only the legacy Claude Desktop config.\n\n## Run manually\n\n\`\`\`bash\nnpm install\nnpm run build\nnpm start\n\`\`\`\n\nBrowser tools use Playwright, and \`install.sh\`/\`install.ps1\` download the Chromium binary for you when this server has \`browser_*\` tools. To do it by hand instead: \`npx playwright install chromium\` (add \`--with-deps\` on Linux if system libraries are missing). Set \`MCP_BROWSER_PATH\` or \`MCP_BROWSER_CHANNEL=chrome\` to drive your own Chrome rather than the bundled Chromium.\n\n## Signed-in & bot-protected pages (stealth + human handoff)\n\nThe browser session runs with light stealth (real Chrome flags, \`navigator.webdriver\` stripped). When a tool hits a sign-in wall or a CAPTCHA it does NOT fail - it returns \`PAUSED - human action needed\`, opens a visible browser window, and waits. Complete the sign-in/challenge in that window, then call \`browser_resume\` to continue.\n\n- \`MCP_BROWSER_PROFILE=<dir>\`: a dedicated Chrome profile dir so a one-time sign-in/clearance STICKS across restarts (recommended; never point at your live Chrome profile).\n- \`MCP_BROWSER_HEADLESS=0\`: stay headed the whole time (best for multi-step authenticated flows).\n- \`MCP_BROWSER_CHANNEL=chrome\`: drive your real installed Chrome instead of bundled Chromium (stronger stealth).\n- \`MCP_BROWSER_DRIVER=patchright\`: opt into a stealth-patched Playwright drop-in (install it yourself) for hard bot walls.\n- \`MCP_HANDOFF=off\`: disable the popup/handoff (detect-only).\n\nThe \`claude_code_config.json\` snippet is also included if you prefer to wire it up by hand (fix the absolute path).\n`;
   return {
     serverId: input.serverId,
     version: input.version,

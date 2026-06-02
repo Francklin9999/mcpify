@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, chmodSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { join, delimiter } from "node:path";
+import { platform } from "node:os";
 import { spawnSync } from "node:child_process";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -135,9 +137,9 @@ test("HTTP-only servers do NOT trigger a Playwright browser download", () => {
   assert.match(sh, /mcp-register\.mjs/);
 });
 
-// The helper must be idempotent, preserve existing user MCPs, remove duplicate project-scoped entries,
-// create the file/dir when absent, and write an absolute command/args. Run the real helper to prove it.
-test("mcp-register.mjs registers Claude Code user MCPs and cleans duplicate scopes", () => {
+// Claude Code registration must be idempotent, preserve existing user MCPs, remove duplicate project-scoped
+// entries, create the file/dir when absent, and write an absolute command/args. Run the real helper to prove it.
+test("mcp-register.mjs registers Claude Code user MCPs and cleans duplicate project scopes", () => {
   rmSync(genDir, { recursive: true, force: true });
   mkdirSync(genDir, { recursive: true });
   const helper = artifact.files.find((f) => f.path === "mcp-register.mjs")!.content;
@@ -145,9 +147,7 @@ test("mcp-register.mjs registers Claude Code user MCPs and cleans duplicate scop
   writeFileSync(helperPath, helper);
 
   const cfgPath = `${genDir}/nested/dir/.claude.json`;
-  const desktopPath = `${genDir}/desktop/claude_desktop_config.json`;
   mkdirSync(`${genDir}/nested/dir`, { recursive: true });
-  mkdirSync(`${genDir}/desktop`, { recursive: true });
   writeFileSync(
     cfgPath,
     JSON.stringify({
@@ -162,10 +162,6 @@ test("mcp-register.mjs registers Claude Code user MCPs and cleans duplicate scop
       },
     }),
   );
-  writeFileSync(
-    desktopPath,
-    JSON.stringify({ mcpServers: { "example-com": { command: "node", args: ["/old/server.js"] }, keep: { command: "node" } } }),
-  );
 
   const res = spawnSync(process.execPath, [helperPath], {
     encoding: "utf8",
@@ -173,10 +169,13 @@ test("mcp-register.mjs registers Claude Code user MCPs and cleans duplicate scop
       ...process.env,
       MCP_REG_MODE: "claude-code-user",
       MCP_REG_CLAUDE_CODE_CONFIG: cfgPath,
-      MCP_REG_CLEAN_CONFIGS: desktopPath,
       MCP_REG_NAME: "example-com",
       MCP_REG_NODE: "/usr/local/bin/node",
       MCP_REG_JS: `${genDir}/server.js`,
+      // Hermetic: HOME has no other clients, and skip the codex/code CLIs, so multi-client detection only
+      // writes the explicitly-pointed Claude Code config (never the real machine's editors).
+      MCP_REG_HOME: `${genDir}/home`,
+      MCP_REG_NO_CLI: "1",
     },
   });
   assert.equal(res.status, 0, `helper failed:\n${res.stdout}\n${res.stderr}`);
@@ -193,10 +192,6 @@ test("mcp-register.mjs registers Claude Code user MCPs and cleans duplicate scop
   assert.equal(merged.projects["/tmp/project"].mcpServers["example-com"], undefined);
   assert.ok(merged.projects["/tmp/project"].mcpServers.keep, "other project MCPs survive cleanup");
 
-  const desktop = JSON.parse(readFileSync(desktopPath, "utf8"));
-  assert.equal(desktop.mcpServers["example-com"], undefined);
-  assert.ok(desktop.mcpServers.keep, "other desktop MCPs survive cleanup");
-
   // First-time install: no config file at all -> helper creates it (+ parent dirs).
   const freshPath = `${genDir}/fresh/.claude.json`;
   const res2 = spawnSync(process.execPath, [helperPath], {
@@ -208,6 +203,8 @@ test("mcp-register.mjs registers Claude Code user MCPs and cleans duplicate scop
       MCP_REG_NAME: "example-com",
       MCP_REG_NODE: "node",
       MCP_REG_JS: "/s.js",
+      MCP_REG_HOME: `${genDir}/fresh-home`,
+      MCP_REG_NO_CLI: "1",
     },
   });
   assert.equal(res2.status, 0, `helper (fresh) failed:\n${res2.stdout}\n${res2.stderr}`);
@@ -239,6 +236,147 @@ test("mcp-register.mjs keeps legacy Claude Desktop mode available", () => {
   const merged = JSON.parse(readFileSync(cfgPath, "utf8"));
   assert.equal(merged.mcpServers["example-com"].command, "/usr/local/bin/node");
   assert.deepEqual(merged.mcpServers["example-com"].args, [`${genDir}/server.js`]);
+});
+
+// "Detect all possible places": the default mode registers into EVERY detected client (Claude Code always;
+// Claude Desktop / Cursor / Windsurf / VS Code when their config or app dir is present), each in that
+// client's own format, preserving existing entries and backing up any file it edits. Hermetic via MCP_REG_HOME.
+test("mcp-register.mjs auto-detects and registers into all installed MCP clients", () => {
+  rmSync(genDir, { recursive: true, force: true });
+  mkdirSync(genDir, { recursive: true });
+  const helper = artifact.files.find((f) => f.path === "mcp-register.mjs")!.content;
+  const helperPath = `${genDir}/mcp-register.mjs`;
+  writeFileSync(helperPath, helper);
+
+  const home = `${genDir}/multi-home`;
+  const vsDir =
+    platform() === "darwin" ? join(home, "Library", "Application Support", "Code", "User")
+    : platform() === "win32" ? join(home, "AppData", "Roaming", "Code", "User")
+    : join(home, ".config", "Code", "User");
+  const desktopDir =
+    platform() === "darwin" ? join(home, "Library", "Application Support", "Claude")
+    : platform() === "win32" ? join(home, "AppData", "Roaming", "Claude")
+    : join(home, ".config", "Claude");
+
+  // Cursor: pre-existing config with another server that MUST survive (and get backed up).
+  mkdirSync(join(home, ".cursor"), { recursive: true });
+  writeFileSync(join(home, ".cursor", "mcp.json"), JSON.stringify({ mcpServers: { keep: { command: "node", args: ["/keep.js"] } } }));
+  // Windsurf + VS Code + Claude Desktop: only the app dir exists (no config yet) -> still detected, file created.
+  mkdirSync(join(home, ".codeium", "windsurf"), { recursive: true });
+  mkdirSync(vsDir, { recursive: true });
+  mkdirSync(desktopDir, { recursive: true });
+
+  const res = spawnSync(process.execPath, [helperPath], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      MCP_REG_HOME: home,
+      MCP_REG_NO_CLI: "1", // skip codex/code CLIs so the test never touches the real machine
+      MCP_REG_NAME: "example-com",
+      MCP_REG_NODE: "/usr/local/bin/node",
+      MCP_REG_JS: `${home}/server.js`,
+    },
+  });
+  assert.equal(res.status, 0, `helper failed:\n${res.stdout}\n${res.stderr}`);
+
+  // Claude Code (always, default path = HOME/.claude.json): full stdio entry.
+  const claude = JSON.parse(readFileSync(join(home, ".claude.json"), "utf8"));
+  assert.deepEqual(claude.mcpServers["example-com"], { type: "stdio", command: "/usr/local/bin/node", args: [`${home}/server.js`], env: {} });
+
+  // Cursor: server added under mcpServers, pre-existing entry preserved, original file backed up.
+  const cursor = JSON.parse(readFileSync(join(home, ".cursor", "mcp.json"), "utf8"));
+  assert.ok(cursor.mcpServers["example-com"], "cursor got the server");
+  assert.ok(cursor.mcpServers.keep, "cursor's existing server preserved");
+  assert.ok(existsSync(join(home, ".cursor", "mcp.json.mcpbak")), "edited cursor config was backed up");
+
+  // Windsurf: config created from the detected app dir.
+  const windsurf = JSON.parse(readFileSync(join(home, ".codeium", "windsurf", "mcp_config.json"), "utf8"));
+  assert.ok(windsurf.mcpServers["example-com"], "windsurf got the server");
+
+  // Claude Desktop: registered (NOT removed) when its app dir is detected, classic {command,args} shape.
+  const desktop = JSON.parse(readFileSync(join(desktopDir, "claude_desktop_config.json"), "utf8"));
+  assert.deepEqual(desktop.mcpServers["example-com"], { command: "/usr/local/bin/node", args: [`${home}/server.js`] }, "claude desktop got the server");
+
+  // VS Code: DIFFERENT shape - top-level "servers" key (not mcpServers), no env.
+  const vscode = JSON.parse(readFileSync(join(vsDir, "mcp.json"), "utf8"));
+  assert.ok(vscode.servers["example-com"], "vscode got the server under the 'servers' key");
+  assert.equal(vscode.mcpServers, undefined, "vscode must NOT use the mcpServers key");
+  assert.deepEqual(vscode.servers["example-com"], { type: "stdio", command: "/usr/local/bin/node", args: [`${home}/server.js`] });
+});
+
+// Idempotency + a client that ISN'T installed stays untouched: a second run must not duplicate or error,
+// and a never-detected client (no config, no dir) gets no file created.
+test("mcp-register.mjs is idempotent and never creates configs for absent clients", () => {
+  rmSync(genDir, { recursive: true, force: true });
+  mkdirSync(genDir, { recursive: true });
+  const helper = artifact.files.find((f) => f.path === "mcp-register.mjs")!.content;
+  const helperPath = `${genDir}/mcp-register.mjs`;
+  writeFileSync(helperPath, helper);
+
+  const home = `${genDir}/idem-home`;
+  mkdirSync(home, { recursive: true });
+  const env = {
+    ...process.env,
+    MCP_REG_HOME: home,
+    MCP_REG_NO_CLI: "1",
+    MCP_REG_NAME: "example-com",
+    MCP_REG_NODE: "/usr/local/bin/node",
+    MCP_REG_JS: `${home}/server.js`,
+  };
+  const r1 = spawnSync(process.execPath, [helperPath], { encoding: "utf8", env });
+  const r2 = spawnSync(process.execPath, [helperPath], { encoding: "utf8", env });
+  assert.equal(r1.status, 0, r1.stderr);
+  assert.equal(r2.status, 0, r2.stderr);
+
+  // Only Claude Code (forced) is written; Cursor/Windsurf/VS Code were absent -> no files invented.
+  assert.ok(existsSync(join(home, ".claude.json")), "claude code config created");
+  assert.ok(!existsSync(join(home, ".cursor", "mcp.json")), "no cursor config invented when cursor absent");
+  assert.ok(!existsSync(join(home, ".codeium", "windsurf", "mcp_config.json")), "no windsurf config invented when absent");
+
+  // Idempotent: exactly one entry after two runs.
+  const claude = JSON.parse(readFileSync(join(home, ".claude.json"), "utf8"));
+  assert.equal(Object.keys(claude.mcpServers).filter((k) => k === "example-com").length, 1);
+});
+
+// Codex stores MCP servers in TOML, so the helper shells out to `codex mcp add` rather than hand-editing it.
+// Prove the integration with a fake `codex` on PATH that records its argv: the helper must detect it and call
+// `codex mcp add <name> -- <node> <serverJs>` (idempotently removing first). Skipped on Windows (the fake is a
+// shell script) - the JSON-file clients still cover Windows.
+test("mcp-register.mjs registers into Codex via its CLI (codex mcp add)", (t) => {
+  if (platform() === "win32") { t.skip("fake codex executable is a POSIX shell script"); return; }
+  rmSync(genDir, { recursive: true, force: true });
+  mkdirSync(genDir, { recursive: true });
+  const helper = artifact.files.find((f) => f.path === "mcp-register.mjs")!.content;
+  const helperPath = `${genDir}/mcp-register.mjs`;
+  writeFileSync(helperPath, helper);
+
+  const home = `${genDir}/codex-home`;
+  const binDir = `${genDir}/bin`;
+  const callLog = `${genDir}/codex-calls.log`;
+  mkdirSync(home, { recursive: true });
+  mkdirSync(binDir, { recursive: true });
+  // Fake codex: append its args to a log, succeed.
+  writeFileSync(`${binDir}/codex`, `#!/usr/bin/env bash\necho "$@" >> "${callLog}"\nexit 0\n`);
+  chmodSync(`${binDir}/codex`, 0o755);
+
+  const res = spawnSync(process.execPath, [helperPath], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
+      MCP_REG_HOME: home,
+      // NOTE: NO_CLI intentionally NOT set - we WANT the codex CLI path to run.
+      MCP_REG_NAME: "example-com",
+      MCP_REG_NODE: "/usr/local/bin/node",
+      MCP_REG_JS: `${home}/server.js`,
+    },
+  });
+  assert.equal(res.status, 0, `helper failed:\n${res.stdout}\n${res.stderr}`);
+
+  const calls = readFileSync(callLog, "utf8");
+  assert.match(calls, /mcp remove example-com/, "removes any prior entry first (idempotent)");
+  assert.match(calls, new RegExp(`mcp add example-com -- /usr/local/bin/node ${home.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/server\\.js`), "adds with the documented `-- <command> <args>` form");
+  assert.match(res.stdout, /into Codex/);
 });
 
 // Gate A: the generated server.ts TYPE-CHECKS against the real @modelcontextprotocol/sdk
