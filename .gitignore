@@ -7,7 +7,13 @@ services/.gen-test-manual/
 .env
 .env.*
 !.env.example
+!.env.deploy.example
 .DS_Store
+
+# Claude Code local runtime state (machine/session-specific; never commit)
+.claude/scheduled_tasks.lock
+.claude/*.lock
+.claude/settings.local.json
 
 # Playwright MCP session artifacts (snapshots, console logs) - never commit
 .playwright-mcp/
