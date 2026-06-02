@@ -32,7 +32,10 @@ const AUTH_PATH_RE = /(?:^|\/)(?:log[-_]?in|sign[-_]?in|sign[-_]?up|signin|signu
 // the source-side noise filter (e.g. telemetry.algolia.com's /1/settings, an /isalive probe) and would
 // otherwise ship as junk tools. Path probes are segment-anchored so a real `/healthcare/{id}` page is safe.
 const PROBE_PATH_RE = /(?:^|\/)(?:isalive|alive|health(?:z|check)?|ping|heartbeat|liveness|readiness)(?:\/|$)/i;
-const INFRA_HOST_RE = /(?:^|\.)(?:telemetry|rum|metrics|beacon|stats|sentry|datadog|newrelic|nr-data|amplitude|mixpanel|track(?:ing)?)\./i;
+// Only UNAMBIGUOUS monitoring/analytics vendor hosts - never a site's own data API. Deliberately excludes
+// generic labels like `stats.`/`metrics.`/`track.` which are common for REAL data APIs (stats.nba.com, a
+// metrics product's own endpoint, package-tracking), so a genuine data tool is never silently dropped.
+const INFRA_HOST_RE = /(?:^|\.)(?:telemetry|rum|beacon|sentry|datadog|newrelic|nr-data|amplitude|mixpanel)\./i;
 
 // Tools that are always kept regardless of where they point (the floor + the page-level metadata tool).
 const PROTECTED_NAMES = new Set(["fetch_page_content", "extract_page_metadata"]);

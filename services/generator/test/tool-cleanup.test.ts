@@ -63,6 +63,28 @@ test("drops SaaS telemetry hosts and liveness/health probes (dynamic-app infra n
   assert.deepEqual(names, ["post_query"], `only the real data endpoint survives, got: ${names.join(", ")}`);
 });
 
+test("does NOT drop data APIs on generic stats./metrics. hosts (only named monitoring vendors are infra)", () => {
+  // Boundary pin: `stats.`/`metrics.` are standard subdomains for REAL data APIs (stats.nba.com, etc.).
+  // Only unambiguous monitoring vendors (sentry/datadog/telemetry/...) are treated as infra junk.
+  const httpAt = (name: string, raw: string): ReturnType<typeof http> => {
+    const t = http(name, new URL(raw).pathname);
+    if (t.execution.kind === "http") t.execution.request.rawUrl = raw;
+    return t;
+  };
+  const out = cleanupTools(
+    [
+      httpAt("get_team_stats", "https://stats.nba.com/stats/teamgamelog?TeamID=1"),
+      httpAt("get_metrics", "https://metrics.coolproduct.io/v1/series?id=cpu"),
+      httpAt("post_sentry", "https://o123.sentry.io/api/1/envelope/"),
+    ],
+    "https://app.example.com/",
+  );
+  const names = out.map((t) => t.name);
+  assert.ok(names.includes("get_team_stats"), "stats.nba.com data API survives");
+  assert.ok(names.includes("get_metrics"), "metrics.<product> data API survives");
+  assert.ok(!names.includes("post_sentry"), "sentry.io monitoring host still dropped");
+});
+
 test("does NOT drop legitimate detail pages that merely contain user/account-ish segments", () => {
   // These are exactly the sub-page tools we want to keep - segment-anchored regex must not catch them.
   const out = cleanupTools(
