@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Adversarial: links and forms hidden in script and comments</title>
+  <meta name="description" content="A real search box plus traps inside script/style/comments/noscript.">
+</head>
+<body>
+  <!-- A real, visible search form the parser SHOULD find: -->
+  <form action="/search" method="get">
+    <input type="search" name="q" placeholder="Search the catalog">
+    <input type="submit" value="Go">
+  </form>
+
+  <!-- TRAP 1: a link inside an HTML comment. The parser must NOT extract /COMMENT_TRAP.
+       <a href="/COMMENT_TRAP">commented link</a>
+       <form action="/COMMENT_FORM_TRAP" method="post"><input name="evil"></form> -->
+
+  <script type="text/javascript">
+    // TRAP 2: markup written as a JS string. Must NOT be extracted.
+    var tpl = '<a href="/SCRIPT_LINK_TRAP">script link</a>';
+    var f = "<form action='/SCRIPT_FORM_TRAP'><input name='x'></form>";
+    document.write(tpl);
+    fetch('/inline-script-xhr-not-a-link');
+    if (1 < 2 && 3 > 0) { /* angle brackets that could confuse a naive tag scanner */ }
+  </script>
+
+  <style>
+    /* TRAP 3: a selector that looks like a tag. a[href="/STYLE_TRAP"] { color: red; } */
+    .button::after { content: "<a href='/STYLE_CONTENT_TRAP'>x</a>"; }
+  </style>
+
+  <noscript>
+    <!-- noscript fallback markup is legitimate (a no-JS client follows it); it must be KEPT, not stripped -->
+    <a href="/real-noscript-fallback">No-JS fallback page</a>
+  </noscript>
+
+  <template id="card">
+    <a href="/TEMPLATE_TRAP">templated link</a>
+    <form action="/TEMPLATE_FORM_TRAP"><input name="y"></form>
+  </template>
+
+  <!-- A real, visible navigation link the parser SHOULD find: -->
+  <nav><a href="/real-visible-page">Visible Page</a></nav>
+</body>
+</html>

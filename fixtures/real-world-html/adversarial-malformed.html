@@ -1,0 +1,14 @@
+<html><head><title>Malformed & unterminated markup
+<body>
+<!-- unterminated comment that swallows the rest of the doc if a parser is naive
+<form action="/should-not-leak" method="post"><input name="trap">
+<a href="/also-trapped">link inside open comment
+<div class="card"><a href="/real-1">Item 1<a href="/real-2">Item 2
+<form action="/search" method=get><input type=search name=q placeholder=Search>
+<input type="submit">
+<select name="cat"><option>Books<option>Toys</select>
+<button onclick="doThing(1 < 2)">Filter < 5</button>
+<a href=/unquoted-href>unquoted</a>
+<img src="x.png" alt="angle > bracket in attr">
+<a href="/real-3" title='mixed "quotes" here'>Item 3</a>
+<form><input name="bare"></form>

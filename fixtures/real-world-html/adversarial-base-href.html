@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Adversarial: base href rewrites relative URL resolution</title>
+  <!-- All relative URLs on this page resolve against the base, NOT the page URL.
+       Page URL in the harness is https://www.example-store.com/listing/page-2
+       so a naive resolver would produce https://www.example-store.com/products/42
+       but the CORRECT (browser) result is https://cdn.example-cdn.net/shop/products/42 -->
+  <base href="https://cdn.example-cdn.net/shop/">
+</head>
+<body>
+  <form action="search" method="get">
+    <input type="search" name="q" placeholder="Find products">
+  </form>
+  <ul>
+    <li><a href="products/42">Product 42</a></li>
+    <li><a href="products/43">Product 43</a></li>
+    <li><a href="products/44">Product 44</a></li>
+  </ul>
+</body>
+</html>
