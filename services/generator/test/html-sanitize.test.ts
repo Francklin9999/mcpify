@@ -76,6 +76,11 @@ test("resolveBaseHref: missing/empty/non-http base falls back to the page URL", 
   assert.equal(resolveBaseHref(``, page), page, "empty html");
 });
 
+test("resolveBaseHref: a <base> mentioned inside a comment does NOT shadow the real one", () => {
+  const html = `<!-- the <base> tag below points at the CDN -->\n<base href="https://cdn.example.net/app/">`;
+  assert.equal(resolveBaseHref(html, "https://site.example/x"), "https://cdn.example.net/app/");
+});
+
 test("resolveBaseHref: first <base href> wins (browsers honor only the first)", () => {
   const base = resolveBaseHref(`<base href="https://a.example/"><base href="https://b.example/">`, "https://p.example/");
   assert.equal(base, "https://a.example/");

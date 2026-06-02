@@ -7,13 +7,15 @@ import { regenerate } from "./regenerate.js";
 import { discover } from "./discover.js";
 import type { PostgresStore } from "./adapters/postgres.js";
 import type { HttpScraper } from "./adapters/scraper-http.js";
-import type { GeneratedServerArtifact } from "@mcp/types";
+import type { GeneratedServerArtifact, ToolDefinition } from "@mcp/types";
 
 export interface WorkerDeps {
   store: PostgresStore;
   scraper: HttpScraper;
   inference: InferenceClient;
   heal: HealClient;
+  /** Optional sitemap/robots sub-page discovery, threaded into the generate path. Off when unset (tests). */
+  discoverSubPages?: (pageUrl: string) => Promise<ToolDefinition[]>;
 }
 
 export interface JobResult {
@@ -38,7 +40,7 @@ export async function processJob(jobId: string, payload: unknown, deps: WorkerDe
     case "generate": {
       const outcome = await generate(
         { url: job.url, legalMode: job.legalMode, bundle: job.bundle },
-        { scraper: deps.scraper, inference: deps.inference, persistence: deps.store.forGenerate(jobId) },
+        { scraper: deps.scraper, inference: deps.inference, persistence: deps.store.forGenerate(jobId), discoverSubPages: deps.discoverSubPages },
       );
       return { status: "done", result: outcome.artifact };
     }

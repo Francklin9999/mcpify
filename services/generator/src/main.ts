@@ -5,6 +5,7 @@ import { PostgresStore } from "./adapters/postgres.js";
 import { HttpScraper } from "./adapters/scraper-http.js";
 import { FsArtifactStore } from "./adapters/artifact-store.js";
 import { makeLLMClients } from "./llm-factory.js";
+import { discoverSubPageTools, httpFetchText } from "./sitemap-discovery.js";
 
 /**
  * Deployable worker process: consumes `mcp-jobs` (BullMQ) and runs the enqueue shim for the Go monitor.
@@ -28,7 +29,13 @@ async function main(): Promise<void> {
   const { inference, heal } = makeLLMClients();
 
   const store = new PostgresStore(createDb(databaseUrl), new FsArtifactStore(artifactRoot));
-  const deps = { store, scraper: new HttpScraper(scraperUrl), inference, heal };
+  // Sub-page discovery (sitemap/robots) enriches generated servers with parameterized detail tools. OFF by
+  // default and opt-in via SUBPAGE_DISCOVERY=1: it makes the generator fetch /robots.txt + /sitemap.xml
+  // directly (honoring Disallow) rather than routing through the scraper's centralized legal layer, so it's
+  // an explicit choice. Best-effort and bounded - never blocks a generate job.
+  const subPagesOn = env("SUBPAGE_DISCOVERY", "0") === "1";
+  const discoverSubPages = subPagesOn ? (url: string) => discoverSubPageTools(url, httpFetchText()) : undefined;
+  const deps = { store, scraper: new HttpScraper(scraperUrl), inference, heal, discoverSubPages };
 
   const worker = startWorker(connection, deps);
   const { server } = await startEnqueueServer(enqueuePort, connection);

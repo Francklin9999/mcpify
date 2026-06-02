@@ -1,6 +1,7 @@
 import type { CaptureBundle, NetworkCapture, ToolDefinition } from "@mcp/types";
 import { analyzeBundleHtml, type DetailLinkPattern, type QueryLinkPattern, type SearchActionPattern } from "./html-analysis.js";
 import { parseCandidates, validateCandidates, type InferenceClient } from "./inference.js";
+import { cleanupTools } from "./tool-cleanup.js";
 
 /**
  * Incremental tool discovery (`continuous generation`). As a reactive page changes, new structure appears -
@@ -182,13 +183,16 @@ export async function discoverMore(
   }
 
   const raw = client.proposeMoreTools ? await client.proposeMoreTools(delta) : await client.proposeTools(bundle);
-  const { tools: added, droppedCount } = validateCandidates(parseCandidates(raw), {
+  const { tools: validated, droppedCount } = validateCandidates(parseCandidates(raw), {
     seenNames: coverage.names,
     dropIf: (tool) => {
       const s = toolSig(tool);
       return s !== "" && coverage.sigs.has(s);
     },
   });
+  // Same final pass as inferTools: repair encoded placeholders + drop mis-mined auth navigation from the
+  // newly discovered tools (this path bypasses inferTools by calling the client directly).
+  const added = cleanupTools(validated, bundle.url);
 
   return { tools: [...currentTools, ...added], added, droppedCount, calledModel: true, delta };
 }

@@ -1,5 +1,7 @@
 import type { CaptureBundle, GenerateRequest, GeneratedServerArtifact, LegalMode, RegistryEntry, ToolDefinition } from "@mcp/types";
-import { inferTools, type InferenceClient } from "./inference.js";
+import { aggregateConfidence } from "@mcp/types";
+import { inferTools, validateCandidates, type InferenceClient } from "./inference.js";
+import { coverageOf, toolSig } from "./incremental.js";
 import { generateServer } from "./codegen.js";
 import { publishToSolana } from "./solana-publish.js";
 
@@ -25,6 +27,11 @@ export interface GenerateDeps {
   scraper: Scraper;
   inference: InferenceClient;
   persistence: GeneratePersistence;
+  /**
+   * Optional sub-page discovery (sitemap/robots). When provided, its tools are merged into the inferred set
+   * (deduped by name + endpoint signature). Best-effort: a failure or absence never blocks generation.
+   */
+  discoverSubPages?: (pageUrl: string) => Promise<ToolDefinition[]>;
 }
 
 export interface GenerateOutcome {
@@ -41,6 +48,11 @@ export async function generate(req: GenerateRequest, deps: GenerateDeps): Promis
   const bundle = req.bundle ?? (await deps.scraper.capture(req.url, req.legalMode));
   const { result, droppedCount } = await inferTools(bundle, deps.inference);
 
+  // Best-effort sub-page enrichment: fold in tools discovered from the site's own sitemap/robots, deduped
+  // by name + endpoint signature so they never duplicate DOM-mined detail tools. Never blocks generation.
+  const tools = await withSubPageTools(result.tools, req.url, deps.discoverSubPages);
+  const confidence = tools === result.tools ? result.confidence : aggregateConfidence(tools.map((t) => t.confidence));
+
   const { serverId, version } = await deps.persistence.nextServer(req.url);
   const title = bundle.meta.title ?? req.url;
   // Emit the snapshot-driven browsing toolkit (browser_navigate/click/type/...) when the page is
@@ -50,12 +62,12 @@ export async function generate(req: GenerateRequest, deps: GenerateDeps): Promis
     bundle.meta.renderedWithJs ||
     (bundle.page?.actions?.length ?? 0) > 0 ||
     (bundle.page?.forms?.length ?? 0) > 0 ||
-    result.tools.some((t) => t.execution.kind === "browser");
-  const artifact = generateServer({ serverId, version, url: req.url, title, tools: result.tools, browsing });
+    tools.some((t) => t.execution.kind === "browser");
+  const artifact = generateServer({ serverId, version, url: req.url, title, tools, browsing });
 
   // A server with zero usable tools is NOT active - surface it as broken (per generator.md), not a
   // healthy zero-tool server. Confidence is already 0 in that case (aggregateConfidence([]) === 0).
-  const status: RegistryEntry["status"] = result.tools.length === 0 ? "broken" : "active";
+  const status: RegistryEntry["status"] = tools.length === 0 ? "broken" : "active";
 
   const artifactUrl = await deps.persistence.saveArtifact(artifact);
   const entry: RegistryEntry = {
@@ -63,24 +75,52 @@ export async function generate(req: GenerateRequest, deps: GenerateDeps): Promis
     url: req.url,
     title,
     tier: "auto_gen",
-    confidence: result.confidence,
+    confidence,
     installCount: 0,
     lastParsedAt: new Date().toISOString(),
     status,
     currentVersion: version,
   };
-  await deps.persistence.writeRegistry(entry, result.tools, artifactUrl);
+  await deps.persistence.writeRegistry(entry, tools, artifactUrl);
 
   // Publish to the on-chain registry; never blocks generation.
-  void publishToSolana(entry, result.tools);
+  void publishToSolana(entry, tools);
 
   return {
     serverId,
     version,
     status,
-    toolCount: result.tools.length,
+    toolCount: tools.length,
     droppedCount,
-    confidence: result.confidence,
+    confidence,
     artifact: { ...artifact, artifactUrl },
   };
+}
+
+/**
+ * Merge sitemap/robots-discovered sub-page tools into the inferred set. Deduped by tool name AND endpoint
+ * signature (so a sitemap `get_product_page` never duplicates a DOM-mined one). Returns the SAME array when
+ * nothing is added (so callers can skip a confidence recompute). Best-effort: any failure yields the inputs.
+ */
+async function withSubPageTools(
+  tools: ToolDefinition[],
+  pageUrl: string,
+  discover?: (pageUrl: string) => Promise<ToolDefinition[]>,
+): Promise<ToolDefinition[]> {
+  if (!discover) return tools;
+  try {
+    const extra = await discover(pageUrl);
+    if (!extra.length) return tools;
+    const coverage = coverageOf(tools);
+    const { tools: merged } = validateCandidates(extra, {
+      seenNames: coverage.names,
+      dropIf: (tool) => {
+        const s = toolSig(tool);
+        return s !== "" && coverage.sigs.has(s);
+      },
+    });
+    return merged.length ? [...tools, ...merged] : tools;
+  } catch {
+    return tools; // sub-page discovery is best-effort; a failure must never block generation
+  }
 }

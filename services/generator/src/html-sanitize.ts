@@ -56,7 +56,8 @@ function attrValue(tag: string, name: string): string | undefined {
  */
 export function resolveBaseHref(html: string, pageUrl: string): string {
   if (!html) return pageUrl;
-  const tag = html.match(/<base\b[^>]*>/i)?.[0];
+  // Strip comments first so a `<base>` written inside an HTML comment can't shadow the real one.
+  const tag = html.replace(COMMENT_RE, " ").match(/<base\b[^>]*>/i)?.[0];
   if (!tag) return pageUrl;
   const href = attrValue(tag, "href");
   if (!href) return pageUrl;
