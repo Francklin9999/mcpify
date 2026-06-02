@@ -3,7 +3,6 @@ import { aggregateConfidence } from "@mcp/types";
 import { inferTools, validateCandidates, type InferenceClient } from "./inference.js";
 import { coverageOf, toolSig } from "./incremental.js";
 import { generateServer } from "./codegen.js";
-import { publishToSolana } from "./solana-publish.js";
 
 /**
  * `generate` use-case (`03` Flow A): scraper -> inference -> codegen -> persist.
@@ -82,9 +81,6 @@ export async function generate(req: GenerateRequest, deps: GenerateDeps): Promis
     currentVersion: version,
   };
   await deps.persistence.writeRegistry(entry, tools, artifactUrl);
-
-  // Publish to the on-chain registry; never blocks generation.
-  void publishToSolana(entry, tools);
 
   return {
     serverId,

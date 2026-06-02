@@ -16,7 +16,6 @@
     "build:phase0": "npm run build --workspace=@mcp/types && npm run build --workspace=@mcp/db",
     "pretest": "npm run build:phase0",
     "test": "npm run test --workspaces --if-present",
-    "sync:mongo-solana": "npm run build --workspace=@mcp/solana && node scripts/sync-mongodb-to-solana.mjs",
     "vercel-build": "npm run build --workspace=@mcp/web",
     "deploy:build": "docker compose -f infra/compose.prod.yml build",
     "deploy:up": "docker compose -f infra/compose.prod.yml up -d --build",

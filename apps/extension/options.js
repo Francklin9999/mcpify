@@ -1,13 +1,7 @@
 import { DEFAULT_API_BASE } from "./lib/config.js";
-import { ELEVENLABS_DEFAULTS, getElevenLabsSettings, setElevenLabsSettings } from "./lib/elevenlabs.js";
 import { ATLAS_DEFAULTS, getAtlasSettings, setAtlasSettings } from "./lib/atlas.js";
 
 const api = document.getElementById("api");
-const elevenApiKey = document.getElementById("elevenApiKey");
-const elevenVoiceId = document.getElementById("elevenVoiceId");
-const elevenTtsModel = document.getElementById("elevenTtsModel");
-const elevenSttModel = document.getElementById("elevenSttModel");
-const elevenAutoSpeak = document.getElementById("elevenAutoSpeak");
 const atlasEndpoint = document.getElementById("atlasEndpoint");
 const atlasApiKey = document.getElementById("atlasApiKey");
 const atlasDataSource = document.getElementById("atlasDataSource");
@@ -55,14 +49,6 @@ chrome.storage.sync.get("apiBase").then(({ apiBase }) => {
   api.value = normalizeApiBase(apiBase);
 });
 
-getElevenLabsSettings().then((settings) => {
-  elevenApiKey.value = settings.apiKey || "";
-  elevenVoiceId.value = settings.voiceId || ELEVENLABS_DEFAULTS.voiceId;
-  elevenTtsModel.value = settings.ttsModel || ELEVENLABS_DEFAULTS.ttsModel;
-  elevenSttModel.value = settings.sttModel || ELEVENLABS_DEFAULTS.sttModel;
-  elevenAutoSpeak.checked = settings.autoSpeak === true;
-});
-
 getAtlasSettings().then((settings) => {
   atlasEndpoint.value = settings.endpoint || "";
   atlasApiKey.value = settings.apiKey || "";
@@ -74,13 +60,6 @@ getAtlasSettings().then((settings) => {
 document.getElementById("save").addEventListener("click", async () => {
   const value = normalizeApiBase(api.value);
   await chrome.storage.sync.set({ apiBase: value });
-  await setElevenLabsSettings({
-    apiKey: elevenApiKey.value,
-    voiceId: elevenVoiceId.value,
-    ttsModel: elevenTtsModel.value,
-    sttModel: elevenSttModel.value,
-    autoSpeak: elevenAutoSpeak.checked,
-  });
   await setAtlasSettings({
     endpoint: atlasEndpoint.value,
     apiKey: atlasApiKey.value,

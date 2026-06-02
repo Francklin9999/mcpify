@@ -100,7 +100,3 @@ envVarGroups:
         sync: false
       - key: MONGODB_URI
         sync: false
-      - key: SOLANA_RPC_URL
-        value: https://api.devnet.solana.com
-      - key: ELEVENLABS_API_KEY
-        sync: false

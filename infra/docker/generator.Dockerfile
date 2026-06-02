@@ -10,7 +10,6 @@ COPY services/generator ./services/generator
 RUN npm ci
 RUN npm run build --workspace=@mcp/types \
   && npm run build --workspace=@mcp/db \
-  && npm run build --workspace=@mcp/solana \
   && npm run build --workspace=@mcp/generator
 RUN npm prune --omit=dev
 

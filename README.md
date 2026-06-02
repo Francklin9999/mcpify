@@ -29,20 +29,14 @@ locally — so an LLM can actually *act* on that site, using your machine and yo
 - **LLM providers (pluggable)** — one factory, swapped by the `LLM_PROVIDER` env var:
   **OpenAI `gpt-5.4` (default)**, **Anthropic Claude**, or **Google Gemini** — with a keyless heuristic
   fallback when no key is set. Same inference + self-heal interface for all three.
-- **ElevenLabs voice** *(extension)* — talk to the side-panel agent and hear it back: **speech-to-text**
-  input (Scribe) and **text-to-speech** replies (multilingual v2), with optional auto-speak. Configured in
-  the extension settings.
-- **Solana on-chain registry** — generated servers can be published to an on-chain registry program
-  (`B6xe3XtwyokW7Nsud63otwagnJS4GMkAutWXwftMtCKh`) via the `@mcp/solana` client, giving each server a
-  verifiable, discoverable record.
 - **MongoDB Atlas** — a curated server catalog merged into the web library, detail pages, and downloads,
   plus a **per-domain tool cache** so repeat generations of the same site are fast.
 - **Chrome extension** — see below.
 
 ## The Chrome extension
 
-A **static MV3 extension — no build step**. Load `apps/extension` unpacked. Its side-panel chat (with voice)
-does two things against the tab you're already on:
+A **static MV3 extension — no build step**. Load `apps/extension` unpacked. Its side-panel chat does two
+things against the tab you're already on:
 
 - **Drives the live page for you** — an in-browser agent loop reads the page, clicks, types, and navigates
   as your real signed-in session. Every page-changing action and every off-origin navigation **asks you to
@@ -68,13 +62,11 @@ Never: store credentials server-side, scrape behind a login server-side, or bypa
 |---------|-------|-----------|
 | `packages/types` | TS + zod | **Keystone contracts** — every cross-component shape, one source |
 | `packages/db` | Drizzle / Postgres | Registry schema + migrations |
-| `packages/solana` | TS + web3.js | On-chain registry client (`publishServer` / `fetchRegistry`) |
 | `services/scraper` | Python / Scrapling | 3-tier fetch → `CaptureBundle` (real-Chromium XHR capture) |
 | `services/generator` | Node | LLM factory (OpenAI/Claude/Gemini) + codegen + self-heal + BullMQ worker |
 | `services/monitor` | Go | Health + drift detection → enqueue jobs |
 | `apps/web` | Next.js | Landing page + library / generate / monitor + API |
-| `apps/extension` | Static MV3 | Side-panel voice chat: drive the tab + generate a server from it |
-| `programs/server-registry` | Rust / Anchor | The Solana registry program |
+| `apps/extension` | Static MV3 | Side-panel chat: drive the tab + generate a server from it |
 
 **Data flow:** `web → BullMQ → generator worker → scraper (real browser) → codegen → Postgres + artifact
 store → download`. The Go monitor feeds the same queue for self-heal.
@@ -88,9 +80,8 @@ none, for the heuristic fallback):
 cp .env.example .env
 ```
 
-Key surface: `LLM_PROVIDER` + `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`,
-`ELEVENLABS_API_KEY`, `MONGODB_URI`, `SOLANA_RPC_URL` / `SOLANA_REGISTRY_KEYPAIR`, and the Postgres/Redis
-infra URLs (defaults match docker-compose). See `.env.example` for the annotated list.
+Key surface: `LLM_PROVIDER` + `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`, `MONGODB_URI`,
+and the Postgres/Redis infra URLs (defaults match docker-compose). See `.env.example` for the annotated list.
 
 ### LLM providers
 
@@ -135,7 +126,7 @@ cd ../../apps/web && npm run build && \
 </details>
 
 **Chrome extension:** `chrome://extensions` → enable Developer mode → **Load unpacked** → select
-`apps/extension` (no build). API base + ElevenLabs/Atlas config sync from `mcp.config.json` / the web app.
+`apps/extension` (no build). API base and Atlas config are managed from the extension settings.
 
 ## Production stack
 
@@ -153,7 +144,7 @@ container stack or managed equivalents.
 ## Test
 
 ```bash
-npm test                                                      # all Node unit suites (incl. extension agent loop + voice)
+npm test                                                      # all Node unit suites
 cd services/scraper && .venv/bin/python -m pytest             # scraper (tier-2 needs Chromium, else skips)
 cd services/monitor && go test ./internal/...                 # monitor logic
 bash services/generator/test/integration/run.sh               # worker (needs Redis + Postgres)

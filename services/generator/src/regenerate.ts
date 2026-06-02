@@ -4,7 +4,6 @@ import { generateServer } from "./codegen.js";
 import type { Scraper } from "./generate.js";
 import type { CurrentServer } from "./self-heal.js";
 import type { VersionPersistence } from "./version-write.js";
-import { publishToSolana } from "./solana-publish.js";
 
 /**
  * `regenerate` handler (`01 S4`, `03` Flow B large-drift). Unlike `generate()` - which allocates a NEW
@@ -56,22 +55,6 @@ export async function regenerate(job: RegenerateJob, current: CurrentServer, dep
     status,
     lastParsedAt: new Date().toISOString(),
   });
-
-  // Publish updated tools to the on-chain registry; failure is non-fatal.
-  void publishToSolana(
-    {
-      serverId: job.serverId,
-      url: current.url,
-      title: current.title,
-      tier: "auto_gen",
-      confidence: aggregateConfidence(result.tools.map((t) => t.confidence)),
-      installCount: 0,
-      lastParsedAt: new Date().toISOString(),
-      status,
-      currentVersion: newVersion,
-    },
-    result.tools,
-  );
 
   return {
     serverId: job.serverId,

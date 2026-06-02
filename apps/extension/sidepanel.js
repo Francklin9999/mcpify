@@ -1,6 +1,5 @@
 import { generate, waitForArtifact, assistAgentStep, findServerForUrl, discoverTools, apiBase } from "./lib/api.js";
 import { buildCaptureBundle } from "./lib/capture.js";
-import { ELEVENLABS_STORAGE_KEYS, getElevenLabsSettings, synthesizeWithElevenLabs, transcribeWithElevenLabs } from "./lib/elevenlabs.js";
 import { renderMarkdown } from "./lib/markdown.js";
 import { zipBlob } from "./lib/zip.js";
 import {
@@ -22,14 +21,12 @@ const input = document.getElementById("input");
 const pageEl = document.getElementById("page");
 const welcome = document.getElementById("welcome");
 const sendBtn = document.getElementById("send");
-const voiceInputBtn = document.getElementById("voiceinput");
 const composerHint = document.getElementById("composerhint");
 const themeBtn = document.getElementById("theme");
 const historyToggleBtn = document.getElementById("historytoggle");
 const historyPanel = document.getElementById("historypanel");
 const historyList = document.getElementById("historylist");
 const autoApproveBtn = document.getElementById("autoapprove");
-const speakReplyBtn = document.getElementById("speakreply");
 const newChatBtn = document.getElementById("newchat");
 const genBtn = document.getElementById("gen");
 
@@ -38,11 +35,6 @@ let activeAbort = null;
 let autoApprove = false;
 let chatSessions = [];
 let activeChatId = null;
-let elevenLabsSettings = null;
-
-let recordingState = null;
-let playingAudio = null;
-let speakingBusy = false;
 
 const CHAT_STORAGE_KEY = "sidePanelChatsV1";
 const CHAT_ACTIVE_KEY = "sidePanelActiveChatIdV1";
@@ -58,10 +50,6 @@ const ICONS = {
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
   stop:
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>',
-  mic:
-    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 19v3"/><path d="M8 22h8"/></svg>',
-  speaker:
-    '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
 };
 
 function el(tag, cls, html) {
@@ -172,45 +160,6 @@ async function initTheme() {
   applyTheme(preferred, false);
 }
 
-/**
- * Pull ElevenLabs + Atlas config from the web app's env and write it into
- * chrome.storage.local as defaults. Any key already set in storage (via the
- * options page) is left untouched - env values never override manual entries.
- */
-async function syncConfigFromServer() {
-  try {
-    const base = await apiBase();
-    const res = await fetch(`${base}/api/extension-config`);
-    if (!res.ok) return;
-    const config = await res.json();
-
-    const elKeys = Object.values(ELEVENLABS_STORAGE_KEYS);
-    const stored = await chrome.storage.local.get(elKeys).catch(() => ({}));
-    const updates = {};
-
-    if (config.elevenLabs) {
-      const el = config.elevenLabs;
-      if (el.apiKey   && !stored[ELEVENLABS_STORAGE_KEYS.apiKey])   updates[ELEVENLABS_STORAGE_KEYS.apiKey]   = el.apiKey;
-      if (el.voiceId  && !stored[ELEVENLABS_STORAGE_KEYS.voiceId])  updates[ELEVENLABS_STORAGE_KEYS.voiceId]  = el.voiceId;
-      if (el.ttsModel && !stored[ELEVENLABS_STORAGE_KEYS.ttsModel]) updates[ELEVENLABS_STORAGE_KEYS.ttsModel] = el.ttsModel;
-      if (el.sttModel && !stored[ELEVENLABS_STORAGE_KEYS.sttModel]) updates[ELEVENLABS_STORAGE_KEYS.sttModel] = el.sttModel;
-    }
-
-    if (Object.keys(updates).length) {
-      await chrome.storage.local.set(updates);
-      await loadElevenLabsSettings();
-    }
-  } catch {
-    // Web app not running or endpoint unavailable - silently skip.
-  }
-}
-
-async function loadElevenLabsSettings() {
-  elevenLabsSettings = await getElevenLabsSettings().catch(() => null);
-  updateVoiceUi();
-}
-
-
 function applyTheme(theme, persist = true) {
   const next = theme === "dark" ? "dark" : "light";
   document.documentElement.dataset.theme = next;
@@ -219,27 +168,8 @@ function applyTheme(theme, persist = true) {
   if (persist) chrome.storage.sync.set({ sidePanelTheme: next }).catch(() => {});
 }
 
-function updateVoiceUi() {
-  if (voiceInputBtn) {
-    const recording = Boolean(recordingState);
-    voiceInputBtn.classList.toggle("active", recording);
-    voiceInputBtn.innerHTML = recording ? ICONS.stop : ICONS.mic;
-    voiceInputBtn.title = recording ? "Stop recording" : "Record voice prompt";
-    voiceInputBtn.setAttribute("aria-label", recording ? "Stop recording" : "Record voice prompt");
-  }
-  if (speakReplyBtn) {
-    const active = speakingBusy || Boolean(playingAudio);
-    speakReplyBtn.classList.toggle("active", active);
-    speakReplyBtn.innerHTML = active ? ICONS.stop : ICONS.speaker;
-    speakReplyBtn.title = active ? "Stop playback" : "Play last answer";
-    speakReplyBtn.setAttribute("aria-label", active ? "Stop playback" : "Play last answer");
-  }
-}
-
 function clearChatView() {
   if (activeAbort) activeAbort.abort();
-  cancelRecording();
-  stopPlayback();
   log.querySelectorAll(".msg").forEach((node) => node.remove());
   if (welcome) welcome.hidden = false;
   input.value = "";
@@ -279,65 +209,6 @@ function relativeTime(iso) {
 
 function currentSessionIndex() {
   return chatSessions.findIndex((session) => session.id === activeChatId);
-}
-
-function lastAssistantText() {
-  for (let i = history.length - 1; i >= 0; i--) {
-    const entry = history[i];
-    if (entry?.role === "assistant" && cleanText(entry.content)) return entry.content;
-  }
-  return "";
-}
-
-function stopPlayback() {
-  if (playingAudio) {
-    try {
-      playingAudio.pause();
-      playingAudio.src = "";
-    } catch {}
-    playingAudio = null;
-  }
-  speakingBusy = false;
-  updateVoiceUi();
-}
-
-async function playAssistantReply(text = lastAssistantText()) {
-  if (!elevenLabsSettings) await loadElevenLabsSettings();
-  const speakText = cleanText(text);
-  if (!speakText) {
-    message("bot", '<p class="sub">There is no assistant reply to read yet.</p>');
-    return;
-  }
-  if (!elevenLabsSettings?.apiKey) {
-    message("bot", '<p class="err">Set your ElevenLabs API key in Settings before using voice playback.</p>');
-    return;
-  }
-  if (speakingBusy || playingAudio) {
-    stopPlayback();
-    return;
-  }
-  speakingBusy = true;
-  updateVoiceUi();
-  try {
-    const blob = await synthesizeWithElevenLabs(speakText, elevenLabsSettings);
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    playingAudio = audio;
-    audio.addEventListener("ended", () => {
-      URL.revokeObjectURL(url);
-      stopPlayback();
-    }, { once: true });
-    audio.addEventListener("error", () => {
-      URL.revokeObjectURL(url);
-      stopPlayback();
-    }, { once: true });
-    speakingBusy = false;
-    updateVoiceUi();
-    await audio.play();
-  } catch (err) {
-    stopPlayback();
-    message("bot", `<p class="err">Voice playback failed: ${escapeHtml(err?.message || err)}</p>`);
-  }
 }
 
 function normalizeSession(session) {
@@ -487,95 +358,6 @@ async function initChatMemory() {
 
 function cleanText(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
-}
-
-function recorderMimeType() {
-  const candidates = [
-    "audio/webm;codecs=opus",
-    "audio/webm",
-    "audio/ogg;codecs=opus",
-  ];
-  return candidates.find((type) => globalThis.MediaRecorder?.isTypeSupported?.(type)) || "";
-}
-
-function cancelRecording() {
-  const state = recordingState;
-  if (!state) return;
-  recordingState = null;
-  try {
-    state.recorder.stop();
-  } catch {}
-  try {
-    state.stream.getTracks().forEach((track) => track.stop());
-  } catch {}
-  updateVoiceUi();
-}
-
-async function stopRecordingAndTranscribe() {
-  if (!elevenLabsSettings) await loadElevenLabsSettings();
-  const state = recordingState;
-  if (!state) return;
-  recordingState = null;
-  updateVoiceUi();
-  try {
-    state.recorder.stop();
-  } catch {}
-  try {
-    state.stream.getTracks().forEach((track) => track.stop());
-  } catch {}
-  const blob = await state.done;
-  if (!blob || !blob.size) return;
-  if (!elevenLabsSettings?.apiKey) {
-    message("bot", '<p class="err">Set your ElevenLabs API key in Settings before using voice input.</p>');
-    return;
-  }
-  voiceInputBtn.disabled = true;
-  try {
-    const transcript = await transcribeWithElevenLabs(blob, elevenLabsSettings);
-    input.value = input.value ? `${input.value.trim()} ${transcript}` : transcript;
-    autoGrowInput();
-    input.focus();
-  } catch (err) {
-    message("bot", `<p class="err">Voice input failed: ${escapeHtml(err?.message || err)}</p>`);
-  } finally {
-    voiceInputBtn.disabled = false;
-    updateVoiceUi();
-  }
-}
-
-async function toggleRecording() {
-  if (!elevenLabsSettings) await loadElevenLabsSettings();
-  if (recordingState) {
-    await stopRecordingAndTranscribe();
-    return;
-  }
-  if (!elevenLabsSettings?.apiKey) {
-    message("bot", '<p class="err">Set your ElevenLabs API key in Settings before using voice input.</p>');
-    return;
-  }
-  if (!navigator.mediaDevices?.getUserMedia || !globalThis.MediaRecorder) {
-    message("bot", '<p class="err">This browser does not support microphone recording here.</p>');
-    return;
-  }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const chunks = [];
-    const mimeType = recorderMimeType();
-    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-    const done = new Promise((resolve) => {
-      recorder.addEventListener("dataavailable", (event) => {
-        if (event.data?.size) chunks.push(event.data);
-      });
-      recorder.addEventListener("stop", () => {
-        resolve(new Blob(chunks, { type: chunks[0]?.type || mimeType || "audio/webm" }));
-      }, { once: true });
-    });
-    recordingState = { recorder, stream, done };
-    recorder.start();
-    updateVoiceUi();
-  } catch (err) {
-    message("bot", `<p class="err">Couldn't start the microphone: ${escapeHtml(err?.message || err)}</p>`);
-  }
 }
 
 async function readPageSnapshot(tab) {
@@ -1274,7 +1056,6 @@ async function sendChat(text) {
     // Persist only the final assistant answer across turns (tool results stay within the turn to avoid bloat).
     if (outcome.finalText) {
       await appendHistory("assistant", outcome.finalText);
-      if (elevenLabsSettings?.autoSpeak) playAssistantReply(outcome.finalText).catch(() => {});
     }
   } catch (err) {
     if (err?.name === "AbortError" || signal.aborted) {
@@ -1484,14 +1265,6 @@ sendBtn.addEventListener("click", (event) => {
   event.preventDefault();
   activeAbort.abort();
 });
-voiceInputBtn.addEventListener("click", (event) => {
-  event.preventDefault();
-  toggleRecording();
-});
-speakReplyBtn.addEventListener("click", (event) => {
-  event.preventDefault();
-  playAssistantReply().catch(() => {});
-});
 
 input.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
@@ -1516,17 +1289,8 @@ themeBtn.addEventListener("click", () => {
 document.querySelectorAll(".suggestion").forEach((button) => {
   button.addEventListener("click", () => sendChat(button.dataset.q || button.textContent || ""));
 });
-chrome.storage.onChanged?.addListener((changes, area) => {
-  if (area !== "local") return;
-  const keys = Object.keys(changes);
-  if (keys.some((key) => key.startsWith("elevenLabs"))) loadElevenLabsSettings().catch(() => {});
-});
 
 initPageTitle();
 initTheme();
-syncConfigFromServer().finally(() => {
-  loadElevenLabsSettings();
-});
 initChatMemory();
 autoGrowInput();
-updateVoiceUi();
