@@ -191,6 +191,82 @@ test("HTML analysis mining: repeated product links become a detail-page tool wit
   }
 });
 
+test("static catalog slug-id links become a repeated detail-page tool", async () => {
+  const html = `<html><body>
+    <a href="/catalogue/a-light-in-the-attic_1000/index.html">A Light in the Attic</a>
+    <a href="/catalogue/tipping-the-velvet_999/index.html">Tipping the Velvet</a>
+    <a href="/catalogue/soumission_998/index.html">Soumission</a>
+    <a href="/catalogue/category/books/travel_2/index.html">Travel category</a>
+  </body></html>`;
+  const tools = await toolsFor(html);
+  const detail = tools.find((t) => t.name === "get_product_page")!;
+  assert.ok(detail, "catalog detail tool mined from repeated slug-id links");
+  if (detail.execution.kind === "http") {
+    assert.equal(detail.execution.request.urlPattern, "/catalogue/{id}/index.html");
+    assert.equal(detail.execution.paramMapping.id!.in, "path");
+  }
+});
+
+test("package search results become package detail tools without product browser tools", async () => {
+  const html = `<html><body>
+    <a href="/package/express">express</a>
+    <a href="/package/@types/express">@types/express</a>
+    <a href="/package/express-session">express-session</a>
+  </body></html>`;
+  const tools = await toolsFor(html);
+  const detail = tools.find((t) => t.name === "get_package_page")!;
+  assert.ok(detail, "package detail tool mined from repeated package links");
+  if (detail.execution.kind === "http") {
+    assert.equal(detail.execution.request.urlPattern, "/package/{package}");
+    assert.equal(detail.execution.paramMapping.package!.in, "path");
+  }
+  assert.ok(!tools.some((tool) => tool.name === "get_product_details" || tool.name === "get_item_details"));
+});
+
+test("author links become author detail tools", async () => {
+  const html = `<html><body>
+    <a href="/author/Albert-Einstein">(about)</a>
+    <a href="/author/J-K-Rowling">(about)</a>
+    <a href="/author/Jane-Austen">(about)</a>
+  </body></html>`;
+  const tools = await toolsFor(html);
+  const detail = tools.find((t) => t.name === "get_author_page")!;
+  assert.ok(detail, "author detail tool mined from repeated author links");
+  if (detail.execution.kind === "http") {
+    assert.equal(detail.execution.request.urlPattern, "/author/{author}");
+    assert.equal(detail.execution.paramMapping.author!.in, "path");
+  }
+});
+
+test("RubyGems links become gem detail tools", async () => {
+  const html = `<html><body>
+    <a href="/gems/rails">rails</a>
+    <a href="/gems/rails-i18n">rails-i18n</a>
+    <a href="/gems/rails-html-sanitizer">rails-html-sanitizer</a>
+  </body></html>`;
+  const tools = await toolsFor(html);
+  const detail = tools.find((t) => t.name === "get_gem_page")!;
+  assert.ok(detail, "gem detail tool mined from repeated gem links");
+  if (detail.execution.kind === "http") {
+    assert.equal(detail.execution.request.urlPattern, "/gems/{gem}");
+    assert.equal(detail.execution.paramMapping.gem!.in, "path");
+  }
+});
+
+test("page_num query links become pagination tools", async () => {
+  const html = `<html><body>
+    <a href="/pages/forms/?page_num=1">1</a>
+    <a href="/pages/forms/?page_num=2">2</a>
+    <a href="/pages/forms/?page_num=3">3</a>
+  </body></html>`;
+  const tools = await toolsFor(html);
+  const pagination = tools.find((t) => t.name === "paginate_results")!;
+  assert.ok(pagination, "pagination tool mined from page_num links");
+  if (pagination.execution.kind === "http") {
+    assert.equal(pagination.execution.paramMapping.page_num!.in, "query");
+  }
+});
+
 test("structured browser tools are generated for product pages and search/listing pages", async () => {
   const html = `<html><body>
     <a href="/products/red-shoe">Red Shoe</a>
@@ -269,6 +345,158 @@ test("travel pages yield travel listing tools without product-detail false posit
   const { result } = await inferTools(b, new HeuristicInferenceClient());
   assert.ok(result.tools.some((tool) => tool.name === "list_travel_options" && tool.execution.kind === "browser"));
   assert.ok(!result.tools.some((tool) => tool.name === "get_product_details"), "travel pages should not become product detail tools");
+});
+
+test("news item links do not become product/item detail tools", async () => {
+  const b = {
+    ...contentBundle,
+    url: "https://news.ycombinator.com/",
+    dom: {
+      html: `<html><body>
+        <a href="item?id=1">Show HN: Parser work</a>
+        <a href="item?id=2">Ask HN: Tool behavior</a>
+        <a href="item?id=3">Launch HN: Search UI</a>
+      </body></html>`,
+      domHash: "sha256:x",
+    },
+    network: [],
+  } as CaptureBundle;
+  const { result } = await inferTools(b, new HeuristicInferenceClient());
+  assert.ok(!result.tools.some((tool) => tool.name === "get_product_page" || tool.name === "get_item_page"));
+  assert.ok(!result.tools.some((tool) => tool.name === "get_product_details" || tool.name === "get_item_details"));
+});
+
+test("single-letter p paths are not generic product detail evidence", async () => {
+  const b = {
+    ...contentBundle,
+    url: "https://www.npmjs.com/search?q=express",
+    dom: {
+      html: `<html><body>
+        <a href="/p/npm-search">Search docs</a>
+        <a href="/p/package-quality">Quality docs</a>
+        <a href="/package/express">express</a>
+      </body></html>`,
+      domHash: "sha256:x",
+    },
+    network: [],
+  } as CaptureBundle;
+  const { result } = await inferTools(b, new HeuristicInferenceClient());
+  assert.ok(!result.tools.some((tool) => tool.name === "get_product_page" || tool.name === "get_product_details"));
+});
+
+test("one or two product-like marketing links are not enough for generic product tools", async () => {
+  const tools = await toolsFor(`<html><body>
+    <a href="/products/pro">Pro plan</a>
+    <a href="/products/teams">Teams plan</a>
+    <a href="/package/express">express</a>
+  </body></html>`);
+  assert.ok(!tools.some((tool) => tool.name === "get_product_page" || tool.name === "get_product_details"));
+});
+
+test("commerce pages with returns copy do not become travel pages", async () => {
+  const b = {
+    ...contentBundle,
+    url: "https://www.amazon.com/s?k=laptop",
+    dom: {
+      html: "<html><body><h1>laptop results</h1><p>Free returns. Price, shipping, add to cart, in stock.</p></body></html>",
+      domHash: "sha256:x",
+    },
+    meta: { ...contentBundle.meta, title: "Amazon.com : laptop" },
+    network: [],
+  } as CaptureBundle;
+  const { result } = await inferTools(b, new HeuristicInferenceClient());
+  assert.ok(!result.tools.some((tool) => tool.name === "list_travel_options"));
+});
+
+test("captcha and human-verification forms do not become tools", async () => {
+  const html = `<html><head><title>Human verification</title></head><body>
+    <form action="/nocaptcha" method="post">
+      <input name="captcha">
+      <button>Submit</button>
+    </form>
+  </body></html>`;
+  const tools = await toolsFor(html);
+  assert.ok(!tools.some((tool) => tool.name.includes("captcha") || tool.name.includes("nocaptcha")));
+});
+
+test("feedback and configuration forms do not become user-facing tools", async () => {
+  const html = `<html><body>
+    <form action="/search/feedback" method="post"><textarea name="message"></textarea></form>
+    <form action="/search/custom_scopes" method="post"><input name="scope"></form>
+    <form action="/new_signup" method="post"><input name="email"></form>
+    <form action="/search" method="get"><input name="q"></form>
+  </body></html>`;
+  const tools = await toolsFor(html);
+  assert.ok(!tools.some((tool) => tool.name.includes("feedback") || tool.name.includes("custom_scopes") || tool.name.includes("signup")));
+  assert.ok(tools.some((tool) => tool.name === "search"));
+});
+
+test("optional-only non-search GET forms are skipped in favor of query-link mining", async () => {
+  const tools = await toolsFor(`<html><body>
+    <form action="/search?q=playwright&type=repositories" method="get">
+      <input name="query-builder-test">
+    </form>
+  </body></html>`);
+  assert.ok(!tools.some((tool) => tool.name === "get_search"));
+});
+
+test("searchTerm query parameters are treated as search inputs", async () => {
+  const b = {
+    ...contentBundle,
+    url: "https://www.target.com/s?searchTerm=laptop",
+    dom: { html: "<html><body></body></html>", domHash: "sha256:x" },
+    network: [],
+  } as CaptureBundle;
+  const { result } = await inferTools(b, new HeuristicInferenceClient());
+  const search = result.tools.find((tool) => tool.name === "search");
+  assert.ok(search, "search tool mined from searchTerm");
+  if (search?.execution.kind === "http") {
+    assert.equal(search.execution.paramMapping.query?.key, "searchTerm");
+  }
+});
+
+test("Yelp-style find_desc query parameters are treated as search inputs", async () => {
+  const b = {
+    ...contentBundle,
+    url: "https://www.yelp.com/search?find_desc=pizza&find_loc=Montreal",
+    dom: { html: "<html><body></body></html>", domHash: "sha256:x" },
+    network: [],
+  } as CaptureBundle;
+  const { result } = await inferTools(b, new HeuristicInferenceClient());
+  const search = result.tools.find((tool) => tool.name === "search");
+  assert.ok(search, "search tool mined from find_desc");
+  if (search?.execution.kind === "http") {
+    assert.equal(search.execution.paramMapping.query?.key, "find_desc");
+  }
+});
+
+test("known travel hosts get travel listing tools even from sparse static pages", async () => {
+  const b = {
+    ...contentBundle,
+    url: "https://www.booking.com/searchresults.html?ss=Montreal",
+    dom: { html: "<html><body></body></html>", domHash: "sha256:x" },
+    network: [],
+  } as CaptureBundle;
+  const { result } = await inferTools(b, new HeuristicInferenceClient());
+  assert.ok(result.tools.some((tool) => tool.name === "list_travel_options" && tool.execution.kind === "browser"));
+});
+
+test("non-travel pages mentioning travel-like tags do not become travel pages", async () => {
+  const b = {
+    ...contentBundle,
+    url: "https://quotes.toscrape.com/",
+    dom: {
+      html: `<html><body>
+        <a href="/tag/travel/page/1/">travel</a>
+        <blockquote>It is better to be hated for what you are.</blockquote>
+      </body></html>`,
+      domHash: "sha256:x",
+    },
+    meta: { ...contentBundle.meta, title: "Quotes to Scrape" },
+    network: [],
+  } as CaptureBundle;
+  const { result } = await inferTools(b, new HeuristicInferenceClient());
+  assert.ok(!result.tools.some((tool) => tool.name === "list_travel_options"));
 });
 
 test("visible page actions become browser tools like add_to_cart and next-page controls", async () => {

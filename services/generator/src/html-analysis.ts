@@ -1,4 +1,5 @@
 import type { AppStateSummary, CaptureBundle } from "@mcp/types";
+import { resolveBaseHref, stripNonRenderedMarkup } from "./html-sanitize.js";
 
 export interface HtmlField {
   name: string;
@@ -71,8 +72,27 @@ export interface PageAnalysis {
   searchActions: SearchActionPattern[];
 }
 
-const SEARCH_FIELDS = new Set(["q", "query", "search", "s", "keyword", "keywords", "term", "k", "_nkw", "search_term_string", "text"]);
-const PRODUCT_SEGMENTS = new Set(["dp", "product", "products", "item", "items", "itm", "sku", "p"]);
+const SEARCH_FIELDS = new Set(["q", "query", "search", "s", "keyword", "keywords", "term", "searchterm", "find_desc", "k", "_nkw", "search_term_string", "text"]);
+const PRODUCT_SEGMENTS = new Set(["dp", "product", "products", "itm", "sku"]);
+const ENTITY_SEGMENTS: Record<string, { name: string; paramName: string; description: string }> = {
+  package: {
+    name: "get_package_page",
+    paramName: "package",
+    description: "Fetch a package detail page by package name and return readable page text.",
+  },
+  author: {
+    name: "get_author_page",
+    paramName: "author",
+    description: "Fetch an author detail page by author id and return readable page text.",
+  },
+  gems: {
+    name: "get_gem_page",
+    paramName: "gem",
+    description: "Fetch a RubyGems detail page by gem name and return readable page text.",
+  },
+};
+const PAGE_FIELD_RE = /^(?:page|p|page_num|pagenum|page_number|pagenumber)$/i;
+const TRAVEL_TEXT_RE = /\b(?:flights?|airport|airfare|depart(?:ure|ing)?|roundtrip|round trip|one[- ]way|travell?ers?|adults?|hotels?|stays?|car rental|cars? hire)\b/;
 
 function decodeEntities(value: string): string {
   return value
@@ -331,10 +351,55 @@ function productPatternFor(link: HtmlLinkSummary): DetailLinkPattern | null {
   return null;
 }
 
-function detailPatterns(links: HtmlLinkSummary[]): DetailLinkPattern[] {
+function slugIdPatternFor(link: HtmlLinkSummary): DetailLinkPattern | null {
+  const url = new URL(link.href);
+  const parts = url.pathname.split("/").filter(Boolean);
+  if (parts.some((part) => part.toLowerCase() === "category")) return null;
+  const index = parts.findIndex((part) => /^[a-z0-9][a-z0-9-]+_\d+$/i.test(part));
+  if (index < 0) return null;
+  const patternParts = [...parts];
+  patternParts[index] = "{id}";
+  return {
+    name: "get_product_page",
+    urlPattern: `/${patternParts.join("/")}`,
+    rawUrl: link.href,
+    paramName: "id",
+    description: "Fetch a repeated catalog detail page by id and return readable page text.",
+    confidence: 0.55,
+  };
+}
+
+function entityPatternFor(link: HtmlLinkSummary): DetailLinkPattern | null {
+  const url = new URL(link.href);
+  const parts = url.pathname.split("/").filter(Boolean);
+  for (let index = 0; index < parts.length - 1; index++) {
+    const segment = parts[index]!.toLowerCase();
+    const entity = ENTITY_SEGMENTS[segment];
+    if (!entity) continue;
+    const patternParts = [...parts];
+    if (segment === "package") {
+      patternParts.splice(index + 1, patternParts.length - index - 1, `{${entity.paramName}}`);
+    } else {
+      patternParts[index + 1] = `{${entity.paramName}}`;
+    }
+    return {
+      name: entity.name,
+      urlPattern: `/${patternParts.join("/")}`,
+      rawUrl: link.href,
+      paramName: entity.paramName,
+      description: entity.description,
+      confidence: 0.56,
+    };
+  }
+  return null;
+}
+
+function detailPatterns(links: HtmlLinkSummary[], pageUrl: string): DetailLinkPattern[] {
   const grouped = new Map<string, DetailLinkPattern & { count: number }>();
+  const pageOrigin = origin(pageUrl);
   for (const link of links) {
-    const pattern = productPatternFor(link);
+    if (pageOrigin && origin(link.href) !== pageOrigin) continue;
+    const pattern = productPatternFor(link) ?? slugIdPatternFor(link) ?? entityPatternFor(link);
     if (!pattern) continue;
     const key = `${origin(pattern.rawUrl)} ${pattern.urlPattern} ${pattern.paramName}`;
     const current = grouped.get(key);
@@ -342,13 +407,13 @@ function detailPatterns(links: HtmlLinkSummary[]): DetailLinkPattern[] {
     else grouped.set(key, { ...pattern, count: 1 });
   }
   return [...grouped.values()]
-    .filter((pattern) => pattern.count >= 1)
+    .filter((pattern) => pattern.count >= 3)
     .sort((a, b) => b.count - a.count)
     .slice(0, 6)
     .map(({ count: _count, ...pattern }) => pattern);
 }
 
-function queryLinkPatterns(links: HtmlLinkSummary[]): QueryLinkPattern[] {
+function queryLinkPatterns(links: HtmlLinkSummary[], pageUrl: string): QueryLinkPattern[] {
   const grouped = new Map<
     string,
     {
@@ -360,6 +425,7 @@ function queryLinkPatterns(links: HtmlLinkSummary[]): QueryLinkPattern[] {
       hasSearch: boolean;
     }
   >();
+  const pageOrigin = origin(pageUrl);
   for (const link of links) {
     let url: URL;
     try {
@@ -367,6 +433,7 @@ function queryLinkPatterns(links: HtmlLinkSummary[]): QueryLinkPattern[] {
     } catch {
       continue;
     }
+    if (pageOrigin && url.origin !== pageOrigin) continue;
     if (![...url.searchParams.keys()].length) continue;
     const path = url.pathname || "/";
     const key = `${url.origin}${path}`;
@@ -384,7 +451,7 @@ function queryLinkPatterns(links: HtmlLinkSummary[]): QueryLinkPattern[] {
       const rawValue = url.searchParams.get(param);
       if (rawValue) values.add(rawValue);
       current.keys.set(param, values);
-      if (/^(page|p)$/i.test(param)) current.hasPage = true;
+      if (PAGE_FIELD_RE.test(param)) current.hasPage = true;
       if (SEARCH_FIELDS.has(param.toLowerCase())) current.hasSearch = true;
     }
     grouped.set(key, current);
@@ -395,7 +462,7 @@ function queryLinkPatterns(links: HtmlLinkSummary[]): QueryLinkPattern[] {
     const varyingKeys = [...group.keys.entries()].filter(([, values]) => values.size >= 2).map(([name]) => name);
     if (varyingKeys.length === 0) continue;
     const params = [...group.keys.keys()]
-      .filter((name) => varyingKeys.includes(name) || SEARCH_FIELDS.has(name.toLowerCase()) || /^(page|p)$/i.test(name))
+      .filter((name) => varyingKeys.includes(name) || SEARCH_FIELDS.has(name.toLowerCase()) || PAGE_FIELD_RE.test(name))
       .slice(0, 6)
       .map((name) => ({ name, required: SEARCH_FIELDS.has(name.toLowerCase()) }));
     if (params.length === 0) continue;
@@ -429,7 +496,7 @@ function currentPageQueryPatterns(bundle: CaptureBundle): { queryPatterns: Query
   if (keys.length === 0) return { queryPatterns: [], searchActions: [] };
 
   const searchKey = keys.find((key) => SEARCH_FIELDS.has(key.toLowerCase()));
-  const pageKey = keys.find((key) => /^(page|p)$/i.test(key));
+  const pageKey = keys.find((key) => PAGE_FIELD_RE.test(key));
   const filterKeys = keys.filter((key) => key !== searchKey && key !== pageKey).slice(0, 6);
 
   const queryPatterns: QueryLinkPattern[] = [];
@@ -474,11 +541,24 @@ function currentPageQueryPatterns(bundle: CaptureBundle): { queryPatterns: Query
 function likelyKinds(bundle: CaptureBundle, forms: HtmlFormSummary[], links: HtmlLinkSummary[], jsonLdTypes: string[], text: string): string[] {
   const kinds = new Set<string>();
   const url = bundle.url.toLowerCase();
+  const host = (() => {
+    try {
+      return new URL(bundle.url).hostname.toLowerCase();
+    } catch {
+      return "";
+    }
+  })();
   const hay = `${url} ${bundle.meta.title ?? ""} ${text.slice(0, 2000)}`.toLowerCase();
   const pageHay = JSON.stringify(bundle.page?.appState ?? []).toLowerCase();
+  const commerce =
+    jsonLdTypes.some((type) => /product|offer/i.test(type)) ||
+    /\/dp\/|\/products?\/|\/itm\//i.test(url) ||
+    (!/news\.ycombinator\.com/i.test(url) && /add to cart|add to basket|buy now|availability|in stock|out of stock/.test(hay));
   const travel =
-    /flight|airport|airfare|depart|return|roundtrip|round trip|one[- ]way|travell?ers?|adults?|hotels?|stays?|car rental|cars? hire/.test(hay) ||
-    jsonLdTypes.some((type) => /flight|trip|travel|hotel|lodgingbusiness|airline/i.test(type));
+    !commerce &&
+    (/(^|\.)(?:skyscanner|booking|expedia|kayak|airbnb|hotels|tripadvisor)\./.test(host) ||
+      TRAVEL_TEXT_RE.test(hay) ||
+      jsonLdTypes.some((type) => /flight|trip|travel|hotel|lodgingbusiness|airline/i.test(type)));
   if (forms.some((form) => form.purpose === "search")) kinds.add("searchable");
   if (travel) kinds.add("travel");
   if (jsonLdTypes.some((type) => /product/i.test(type)) || /\/dp\/|\/products?\//i.test(url)) kinds.add("product_detail");
@@ -486,15 +566,22 @@ function likelyKinds(bundle: CaptureBundle, forms: HtmlFormSummary[], links: Htm
   if (!travel && /product|sku|asin|offer|price/.test(pageHay)) kinds.add("product_detail");
   if (!travel && /results|searchterm|search_term|string|items|edges|products/.test(pageHay)) kinds.add("product_listing");
   if (/cart|basket|checkout/.test(hay)) kinds.add("commerce");
-  if (!travel && /price|\$|cad|add to cart|buy now|availability|in stock/.test(hay)) kinds.add("commerce");
+  if (!travel && commerce) kinds.add("commerce");
   return [...kinds];
 }
 
 export function analyzeBundleHtml(bundle: CaptureBundle): PageAnalysis {
   const html = bundle.dom.html || "";
-  const forms = parseForms(html, bundle.url);
-  const links = parseLinks(html, bundle.url);
-  const buttons = parseButtons(html);
+  // Mine structure (links/forms/buttons) only from markup a browser renders as live DOM, and resolve
+  // relative URLs against the document's <base href>. JSON-LD, text, title, and meta below keep reading
+  // the raw html (JSON-LD lives inside <script>, which the sanitized markup intentionally drops).
+  const markup = stripNonRenderedMarkup(html);
+  // Resolve <base href> from the sanitized markup (not raw html) so a <base> mentioned inside a comment or
+  // script string can't shadow the real one - the same reason link/form mining runs on `markup`.
+  const linkBase = resolveBaseHref(markup, bundle.url);
+  const forms = parseForms(markup, linkBase);
+  const links = parseLinks(markup, linkBase);
+  const buttons = parseButtons(markup);
   const jsonLdTypes = parseJsonLdTypes(html);
   const searchActions = parseSearchActions(html, bundle.url);
   const currentPagePatterns = currentPageQueryPatterns(bundle);
@@ -511,8 +598,11 @@ export function analyzeBundleHtml(bundle: CaptureBundle): PageAnalysis {
     forms,
     links: links.slice(0, 80),
     buttons,
-    detailLinkPatterns: detailPatterns(links),
-    queryLinkPatterns: [...currentPagePatterns.queryPatterns, ...queryLinkPatterns(links)],
+    // Filter link-derived patterns against the SAME base the links resolved against (linkBase), so a
+    // <base href> pointing at a sibling host (www vs apex, or a CDN) keeps its detail/query tools instead
+    // of dropping them as "cross-origin". With no <base> (or a same-origin one) linkBase === bundle.url.
+    detailLinkPatterns: detailPatterns(links, linkBase),
+    queryLinkPatterns: [...currentPagePatterns.queryPatterns, ...queryLinkPatterns(links, linkBase)],
     searchActions: [...currentPagePatterns.searchActions, ...searchActions],
   };
 }

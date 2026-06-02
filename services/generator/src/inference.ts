@@ -1,5 +1,6 @@
 import { CaptureBundle, InferenceResult, ToolDefinition, aggregateConfidence } from "@mcp/types";
 import { siteRecipeTools } from "./site-recipes.js";
+import { cleanupTools } from "./tool-cleanup.js";
 import type { DiscoveryDelta } from "./incremental.js";
 
 /**
@@ -80,6 +81,22 @@ export interface ValidateOptions {
   dropIf?: (tool: ToolDefinition) => boolean;
 }
 
+function executionSignature(tool: ToolDefinition): string {
+  if (tool.execution.kind === "http") {
+    const mapping = Object.entries(tool.execution.paramMapping)
+      .map(([name, value]) => `${name}:${value.in}:${value.key}`)
+      .sort()
+      .join(",");
+    return [
+      "http",
+      tool.execution.request.method.toUpperCase(),
+      tool.execution.request.urlPattern,
+      mapping,
+    ].join("|");
+  }
+  return `browser|${JSON.stringify(tool.inputSchema)}|${JSON.stringify(tool.execution.steps)}`;
+}
+
 /**
  * The VALIDATION GATE shared by full and incremental inference: parse -> contract-validate -> dedup by name
  * (MCP registerTool throws on a duplicate; DB tools PK is (server_id, version, name)) -> optional drop. Pure;
@@ -89,6 +106,7 @@ export function validateCandidates(candidates: unknown[], opts: ValidateOptions 
   const tools: ToolDefinition[] = [];
   let droppedCount = 0;
   const seen = new Set<string>(opts.seenNames ?? []);
+  const seenExecutions = new Set<string>();
   for (const candidate of candidates) {
     const parsed = ToolDefinition.safeParse(candidate);
     if (!parsed.success) {
@@ -103,7 +121,13 @@ export function validateCandidates(candidates: unknown[], opts: ValidateOptions 
       droppedCount++;
       continue;
     }
+    const signature = executionSignature(parsed.data);
+    if (seenExecutions.has(signature)) {
+      droppedCount++;
+      continue;
+    }
     seen.add(parsed.data.name);
+    seenExecutions.add(signature);
     tools.push(parsed.data);
   }
   return { tools, droppedCount };
@@ -126,14 +150,18 @@ export async function inferTools(
   const candidates = [...siteRecipeTools(bundle), ...parseCandidates(raw)];
   const { tools, droppedCount } = validateCandidates(candidates);
 
-  // Floor: never ship a zero-tool (broken) server - give every site the content-fetch baseline.
-  if (tools.length === 0) tools.push(contentToolFor(bundle));
+  // Final pass: repair encoded path placeholders and drop mis-mined auth/account navigation.
+  const cleaned = cleanupTools(tools, bundle.url);
 
-  const confidence = aggregateConfidence(tools.map((t) => t.confidence));
+  // Floor: never ship a zero-tool (broken) server - give every site the content-fetch baseline. Applied
+  // AFTER cleanup so a degenerate page whose only tool was auth junk still gets the content baseline.
+  if (cleaned.length === 0) cleaned.push(contentToolFor(bundle));
+
+  const confidence = aggregateConfidence(cleaned.map((t) => t.confidence));
   const result = InferenceResult.parse({
     url: bundle.url,
     bundleId: bundle.bundleId,
-    tools,
+    tools: cleaned,
     confidence,
     modelVersion,
   });

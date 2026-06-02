@@ -6,6 +6,7 @@ import { zipBlob } from "./lib/zip.js";
 import {
   runAgent,
   parseStepResponse,
+  steerLinkedInJobSearchStep,
   needsConfirm,
   BROWSER_TOOL_SPECS,
   discoveredToolSpecs,
@@ -1214,6 +1215,7 @@ async function sendChat(text) {
   const view = agentView(pending.body);
   const tabExecute = makeTabExecutor();
   const findDiscovered = (name) => discovery.sessionTools.find((t) => t.name === name);
+  const latestUserPrompt = prompt;
   let activeRow = null;
 
   try {
@@ -1221,13 +1223,17 @@ async function sendChat(text) {
     const outcome = await runAgent(history.slice(), {
       // Recompute specs each step so tools discovered mid-turn become callable immediately (browser_*
       // primitives + whatever discovered tools exist for this page right now).
-      step: (messages) =>
-        assistAgentStep(
+      step: (messages) => {
+        const toolDefs = discovery.sessionTools;
+        return assistAgentStep(
           messages,
           pageContext,
-          [...BROWSER_TOOL_SPECS, ...discoveredToolSpecs(discovery.sessionTools)],
+          [...BROWSER_TOOL_SPECS, ...discoveredToolSpecs(toolDefs)],
           controller.signal,
-        ).then(parseStepResponse),
+        )
+          .then(parseStepResponse)
+          .then((step) => steerLinkedInJobSearchStep(step, latestUserPrompt, toolDefs, pageContext.url));
+      },
       execute: async (call) => {
         const def = findDiscovered(call.name);
         let result = def ? await executeDiscovered(def, call.arguments, tabExecute) : await tabExecute(call);
@@ -1350,7 +1356,7 @@ function extractToolNames(serverTs) {
 function artifactHtml(artifact, tab) {
   const files = artifact.files || [];
   const serverTs = files.find((file) => file.path === "server.ts");
-  const config = artifact.configSnippet || files.find((file) => file.path === "claude_desktop_config.json")?.content || "{}";
+  const config = artifact.configSnippet || files.find((file) => file.path === "claude_code_config.json")?.content || "{}";
   const toolNames = extractToolNames(serverTs);
   const toolsHtml = toolNames.length
     ? toolNames.map((name) => `<span class="tool-tag">${escapeHtml(name)}</span>`).join("")

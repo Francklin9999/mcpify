@@ -27,7 +27,19 @@ test("keeps valid tools and DROPS invalid ones (the gate)", async () => {
 });
 
 test("aggregate confidence is computed over SURVIVORS only", async () => {
-  const second = { ...validTool, name: "list_products", confidence: 0.7 };
+  const second = {
+    ...validTool,
+    name: "list_products",
+    confidence: 0.7,
+    execution: {
+      ...validTool.execution,
+      request: {
+        ...validTool.execution.request,
+        urlPattern: "/api/categories/{id}",
+        rawUrl: "https://example.com/api/categories/42",
+      },
+    },
+  };
   const { result } = await inferTools(bundle, fakeClient(JSON.stringify([validTool, second])));
   assert.equal(result.tools.length, 2);
   assert.equal(result.confidence, 0.8); // mean(0.9, 0.7)
@@ -67,6 +79,14 @@ test("dedups tools by name (real sites fire the same templated endpoint repeated
   assert.equal(droppedCount, 2);
 });
 
+test("dedups tools by equivalent execution signature even when names differ", async () => {
+  const alias = { ...validTool, name: "lookup_product" };
+  const { result, droppedCount } = await inferTools(bundle, fakeClient(JSON.stringify([validTool, alias])));
+  assert.equal(result.tools.length, 1);
+  assert.equal(result.tools[0]!.name, "get_product");
+  assert.equal(droppedCount, 1);
+});
+
 test("site recipes add deterministic Amazon tools even when model emits nothing", async () => {
   const amazonBundle: CaptureBundle = {
     ...bundle,
@@ -94,6 +114,10 @@ test("site recipes add deterministic LinkedIn tools even when model emits nothin
   const { result } = await inferTools(linkedinBundle, fakeClient(JSON.stringify({ tools: [] })));
   assert.ok(result.tools.some((tool) => tool.name === "search_linkedin_all_results"));
   assert.ok(result.tools.some((tool) => tool.name === "search_linkedin_people"));
+  assert.ok(result.tools.some((tool) => tool.name === "open_linkedin_jobs_page"));
+  assert.ok(result.tools.some((tool) => tool.name === "search_linkedin_jobs"));
+  assert.ok(result.tools.some((tool) => tool.name === "go_to_next_linkedin_jobs_page"));
+  assert.ok(result.tools.some((tool) => tool.name === "open_linkedin_job_and_extract_details"));
   assert.ok(result.tools.some((tool) => tool.name === "go_to_next_linkedin_results_page"));
   assert.ok(result.tools.some((tool) => tool.name === "open_linkedin_profile_and_extract_metadata"));
   assert.ok(result.tools.some((tool) => tool.name === "open_linkedin_post_and_extract_metadata"));

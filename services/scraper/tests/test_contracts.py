@@ -38,6 +38,23 @@ def test_rejects_non_url_uuid_datetime_matching_zod_constraints(repo_fixture):
             CaptureBundle.model_validate(broken)
 
 
+def test_accepts_optional_rich_page_snapshot(repo_fixture):
+    bundle = repo_fixture("capture-bundles/sample-public.json")
+    bundle["page"] = {
+        "visibleText": "hello",
+        "headings": ["Heading"],
+        "actions": [{"kind": "button", "label": "Search", "selector": "button.search"}],
+        "forms": [{
+            "selector": "form.search",
+            "method": "GET",
+            "purpose": "search",
+            "fields": [{"name": "q", "type": "search", "required": True, "selector": "input[name=q]"}],
+        }],
+        "appState": [{"source": "__NEXT_DATA__", "keys": ["props"], "schema": {"type": "object"}}],
+    }
+    assert CaptureBundle.model_validate(bundle).page is not None
+
+
 def test_network_capture_rejects_a_secret_list_header():
     """Fail-closed backstop - mirror of the TS NetworkCapture.superRefine (04)."""
     leaky = {

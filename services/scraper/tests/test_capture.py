@@ -5,8 +5,10 @@ from scraper.capture import (
     FetchResult,
     RawNetworkCall,
     assemble_bundle,
+    dedupe_network_calls,
     infer_schema,
     looks_like_bot_wall,
+    snapshot_page,
     template_url,
 )
 
@@ -82,6 +84,9 @@ def test_bot_wall_detection():
     assert looks_like_bot_wall("<html>Please complete the CAPTCHA to continue</html>")
     assert looks_like_bot_wall("<html>Enter the characters you see below</html>")
     assert looks_like_bot_wall("<html>x</html>", "Just a moment...")  # cloudflare title
+    assert looks_like_bot_wall("<html>x</html>", "Client Challenge")
+    assert looks_like_bot_wall("<html>x</html>", "Human verification - Stack Overflow")
+    assert looks_like_bot_wall("<html>Please enable JavaScript and cookies to continue</html>")
     assert not looks_like_bot_wall("<html>A normal article about football.</html>", "Wikipedia")
 
 
@@ -129,6 +134,7 @@ def test_assemble_bundle_scrubs_network_headers():
                 request_headers={"accept": "application/json", "authorization": "Bearer x"},
                 status_code=200,
                 content_type="application/json",
+                request_body={"query": "shoe", "page": 1},
                 response_body={"id": 7},
             )
         ],
@@ -139,4 +145,99 @@ def test_assemble_bundle_scrubs_network_headers():
     assert cap.urlPattern == "/api/items/{id}"
     assert "authorization" not in cap.requestHeaders  # scrubbed before construction
     assert cap.requestHeaders == {"accept": "application/json"}
+    assert cap.requestBodySchema == {"type": "object", "properties": {"query": {"type": "string"}, "page": {"type": "integer"}}}
     assert cap.responseSchema == {"type": "object", "properties": {"id": {"type": "integer"}}}
+
+
+def test_dedupe_network_calls_keeps_best_schema_rich_representative():
+    weak = RawNetworkCall(
+        method="get",
+        raw_url="https://e.com/api/items/1?sort=asc",
+        request_headers={},
+        status_code=304,
+        content_type="application/json",
+    )
+    rich = RawNetworkCall(
+        method="GET",
+        raw_url="https://e.com/api/items/2?sort=desc",
+        request_headers={},
+        status_code=200,
+        content_type="application/json",
+        response_body={"id": 2},
+    )
+    distinct_query_shape = RawNetworkCall(
+        method="GET",
+        raw_url="https://e.com/api/items/2?sort=desc&page=1",
+        request_headers={},
+        status_code=200,
+        content_type="application/json",
+        response_body={"id": 2},
+    )
+
+    deduped = dedupe_network_calls([weak, rich, distinct_query_shape])
+
+    assert deduped == [rich, distinct_query_shape]
+
+
+def test_snapshot_page_extracts_visible_text_headings_forms_and_actions():
+    html = """<!doctype html><html><body>
+      <h1>Search Books</h1>
+      <form action="/search" method="get">
+        <input type="search" name="q" placeholder="Search">
+        <button type="submit">Go</button>
+      </form>
+      <a href="/catalogue/a-light-in-the-attic_1000/index.html">A Light in the Attic</a>
+      <script>secret()</script>
+    </body></html>"""
+
+    page = snapshot_page(html, "https://books.example.com/")
+
+    assert page.visibleText is not None
+    assert "Search Books" in page.visibleText
+    assert "secret" not in page.visibleText
+    assert page.headings == ["Search Books"]
+    assert page.forms is not None
+    form = page.forms[0]
+    assert form.method == "GET"
+    assert form.action == "https://books.example.com/search"
+    assert form.purpose == "search"
+    assert form.fields[0].name == "q"
+    assert form.fields[0].type == "search"
+    assert form.fields[0].required is True
+    assert page.actions is not None
+    assert any(action.kind == "link" and action.href == "https://books.example.com/catalogue/a-light-in-the-attic_1000/index.html" for action in page.actions)
+
+
+def test_assemble_bundle_includes_page_snapshot_for_all_tiers():
+    result = FetchResult(
+        html="<html><body><h2>Results</h2><form action='/s'><input name='q'></form></body></html>",
+        status=200,
+        rendered_with_js=False,
+    )
+
+    bundle = assemble_bundle("https://example.com/", "safe", 1, result)
+
+    assert bundle.page is not None
+    assert bundle.page.headings == ["Results"]
+    assert bundle.page.forms is not None
+    assert bundle.page.forms[0].purpose == "search"
+
+
+def test_snapshot_page_extracts_schema_only_app_state_hints():
+    html = """<html><body>
+      <script id="__NEXT_DATA__" type="application/json">
+        {"props":{"pageProps":{"products":[{"__typename":"Product","id":7,"name":"Shoe"}]}},"buildId":"abc"}
+      </script>
+    </body></html>"""
+
+    page = snapshot_page(html, "https://shop.example.com/")
+
+    assert page.appState is not None
+    hint = page.appState[0]
+    assert hint.source == "__NEXT_DATA__"
+    assert hint.keys == ["props", "buildId"]
+    assert hint.types == ["Product"]
+    dumped = hint.model_dump(by_alias=True)
+    assert dumped["schema"]["type"] == "object"
+    assert "Shoe" not in str(dumped)
+    assert "abc" not in str(dumped)

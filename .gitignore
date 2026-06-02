@@ -9,6 +9,9 @@ services/.gen-test-manual/
 !.env.example
 .DS_Store
 
+# Playwright MCP session artifacts (snapshots, console logs) - never commit
+.playwright-mcp/
+
 # Next.js / Plasmo build outputs
 .next/
 .turbo/

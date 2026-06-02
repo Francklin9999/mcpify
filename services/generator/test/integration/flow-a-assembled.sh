@@ -75,7 +75,7 @@ echo "=== DOWNLOAD the generated server (the deliverable) ==="
 DL=$(curl -fsS "$BASE/api/servers/$SERVERID/download/1")
 echo "$DL" | grep -q "server.ts" || { echo "FAIL: download missing server.ts"; echo "$DL" | head -c 400; exit 1; }
 echo "$DL" | grep -q "McpServer\|registerTool" || { echo "FAIL: server.ts is not a real MCP server"; exit 1; }
-echo "$DL" | grep -q "claude_desktop_config.json" || { echo "FAIL: download missing config snippet"; exit 1; }
+echo "$DL" | grep -q "claude_code_config.json" || { echo "FAIL: download missing config snippet"; exit 1; }
 echo "  ok: download returned a real, runnable MCP server + config"
 
 echo "=== SAVED & visible: the generated server shows up in the Library (same DB) ==="

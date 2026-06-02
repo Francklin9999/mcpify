@@ -15,7 +15,7 @@ test("buildZip creates a valid store-only archive with the generated files", () 
   const zip = buildZip(
     [
       { path: "server.ts", content: "export const ok = true;\n" },
-      { path: "claude_desktop_config.json", content: '{"mcpServers":{}}' },
+      { path: "claude_code_config.json", content: '{"mcpServers":{}}' },
     ],
     "amazon-tools-v3",
   );
@@ -29,7 +29,7 @@ test("buildZip creates a valid store-only archive with the generated files", () 
 
   const text = new TextDecoder().decode(zip);
   assert.match(text, /amazon-tools-v3\/server\.ts/);
-  assert.match(text, /amazon-tools-v3\/claude_desktop_config\.json/);
+  assert.match(text, /amazon-tools-v3\/claude_code_config\.json/);
   assert.match(text, /export const ok = true;/);
   assert.match(text, /"mcpServers"/);
 });

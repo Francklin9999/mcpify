@@ -9,6 +9,9 @@ import {
   MUTATING_TOOLS,
   BROWSER_TOOL_SPECS,
   discoveredToolSpecs,
+  steerLinkedInJobSearchStep,
+  extractLinkedInJobKeywords,
+  isLinkedInJobsPageIntent,
   isMutatingHttpTool,
   needsConfirmDiscoveredTool,
   httpRequestFromTool,
@@ -449,4 +452,57 @@ test("parseStepResponse tolerates messy bodies", () => {
   assert.deepEqual(p.toolCalls[0], { id: undefined, name: "browser_click", arguments: { ref: "e1" } });
   assert.deepEqual(p.toolCalls[1].arguments, {});
   assert.deepEqual(parseStepResponse(null), { text: undefined, toolCalls: [] });
+});
+
+test("LinkedIn job intent rewrites mistaken people search to jobs tool", () => {
+  const step = {
+    toolCalls: [{ name: "search_linkedin_people", arguments: { query: "Software Developer" } }],
+  };
+  const tools = [{
+    name: "search_linkedin_jobs",
+    inputSchema: {
+      type: "object",
+      properties: { keywords: { type: "string" }, location: { type: "string" } },
+      required: ["keywords"],
+    },
+  }];
+  const steered = steerLinkedInJobSearchStep(
+    step,
+    "Can you search for Software Developer in the browser",
+    tools,
+    "https://www.linkedin.com/search/results/people/?keywords=Rayen%20Bouriel",
+  );
+  assert.equal(steered.toolCalls[0].name, "search_linkedin_jobs");
+  assert.deepEqual(steered.toolCalls[0].arguments, { keywords: "Software Developer" });
+});
+
+test("LinkedIn person lookup is not rewritten to jobs", () => {
+  const step = {
+    toolCalls: [{ name: "search_linkedin_people", arguments: { query: "Rayen Bouriel" } }],
+  };
+  const tools = [{ name: "search_linkedin_jobs", inputSchema: { type: "object", properties: { keywords: { type: "string" } } } }];
+  const steered = steerLinkedInJobSearchStep(step, "Can you look up Rayen Bouriel LinkedIn", tools, "https://www.linkedin.com/feed/");
+  assert.equal(steered.toolCalls[0].name, "search_linkedin_people");
+  assert.equal(extractLinkedInJobKeywords("Can you search for full stack jobs for me"), "full stack");
+});
+
+test("LinkedIn jobs page intent navigates to jobs, not people search", () => {
+  const step = {
+    toolCalls: [{ name: "browser_snapshot", arguments: {} }],
+  };
+  const steered = steerLinkedInJobSearchStep(step, "Can you go on the job page", [], "https://www.linkedin.com/search/results/people/?keywords=Rayen%20Bouriel");
+  assert.equal(steered.toolCalls[0].name, "browser_navigate");
+  assert.deepEqual(steered.toolCalls[0].arguments, { url: "https://www.linkedin.com/jobs/" });
+  assert.equal(isLinkedInJobsPageIntent("Can you go on the job page"), true);
+  assert.equal(isLinkedInJobsPageIntent("Can you search for software developer jobs"), false);
+});
+
+test("LinkedIn jobs page intent uses generated jobs-page tool when available", () => {
+  const step = {
+    toolCalls: [{ name: "search_linkedin_people", arguments: { query: "jobs" } }],
+  };
+  const tools = [{ name: "open_linkedin_jobs_page", inputSchema: { type: "object", properties: {} } }];
+  const steered = steerLinkedInJobSearchStep(step, "Open the jobs page", tools, "https://www.linkedin.com/feed/");
+  assert.equal(steered.toolCalls[0].name, "open_linkedin_jobs_page");
+  assert.deepEqual(steered.toolCalls[0].arguments, {});
 });

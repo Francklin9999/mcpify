@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .legal import is_secret_field, is_secret_header
 
@@ -44,6 +44,56 @@ class ElementRef(BaseModel):
     role: str
     selector: str
     fallbackSelectors: Optional[list[str]] = None
+
+
+class PageField(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    type: str
+    label: Optional[str] = None
+    placeholder: Optional[str] = None
+    required: bool
+    selector: Optional[str] = None
+
+
+class PageForm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    selector: str
+    method: Literal["GET", "POST"]
+    action: Optional[str] = None
+    purpose: Literal["search", "auth", "form", "filter"]
+    submitLabel: Optional[str] = None
+    submitSelector: Optional[str] = None
+    fields: list[PageField]
+
+    _v_action = field_validator("action")(staticmethod(_require_url))
+
+
+class PageAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["link", "button", "input", "select", "menuitem"]
+    label: str
+    selector: str
+    href: Optional[str] = None
+
+    _v_href = field_validator("href")(staticmethod(_require_url))
+
+
+class AppStateSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    source: str
+    keys: Optional[list[str]] = None
+    schema_: Optional[JsonSchema] = Field(default=None, alias="schema")
+    types: Optional[list[str]] = None
+
+
+class PageSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    visibleText: Optional[str] = None
+    headings: Optional[list[str]] = None
+    actions: Optional[list[PageAction]] = None
+    forms: Optional[list[PageForm]] = None
+    appState: Optional[list[AppStateSummary]] = None
 
 
 class NetworkCapture(BaseModel):
@@ -94,6 +144,7 @@ class CaptureBundle(BaseModel):
     tier: Optional[Literal[1, 2, 3]] = None
     dom: DomSnapshot
     network: list[NetworkCapture]
+    page: Optional[PageSnapshot] = None
     meta: CaptureMeta
 
     _v_bundle_id = field_validator("bundleId")(staticmethod(_require_uuid))

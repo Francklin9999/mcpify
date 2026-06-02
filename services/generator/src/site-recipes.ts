@@ -219,6 +219,83 @@ function linkedinTools(bundle: CaptureBundle): ToolDefinition[] {
       confidence: 0.87,
     }),
     browserTool({
+      name: "open_linkedin_jobs_page",
+      description: "Open the LinkedIn Jobs page. Prefer this when the user asks to go to the jobs page without role keywords.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+      steps: [
+        { action: "navigate", value: `${origin}/jobs/` },
+        { action: "waitFor", target: { role: "page", selector: "body" } },
+        { action: "extract", value: "json:linkedin_jobs" },
+      ],
+      confidence: 0.89,
+    }),
+    browserTool({
+      name: "search_linkedin_jobs",
+      description:
+        "Search LinkedIn Jobs by role keywords and optional location/filter codes, then return structured job cards and the selected job detail text. Prefer this for job-hunting requests.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          keywords: { type: "string", description: "Role or skill keywords, for example full stack developer." },
+          location: { type: "string", description: "Optional location, for example Montreal, QC or Canada." },
+          date_posted: { type: "string", description: "Optional LinkedIn f_TPR code: r86400, r604800, or r2592000." },
+          workplace_type: { type: "string", description: "Optional LinkedIn f_WT code: 1 on-site, 2 remote, 3 hybrid." },
+          experience_level: { type: "string", description: "Optional LinkedIn f_E code: 1 internship, 2 entry, 3 associate, 4 mid-senior, 5 director, 6 executive." },
+          easy_apply: { type: "boolean", description: "Optional: true to include only Easy Apply jobs." },
+        },
+        required: ["keywords"],
+      },
+      steps: [
+        {
+          action: "navigate",
+          value: `${origin}/jobs/search/?keywords={{keywords}}&location={{location}}&f_TPR={{date_posted}}&f_WT={{workplace_type}}&f_E={{experience_level}}&f_AL={{easy_apply}}`,
+        },
+        { action: "waitFor", target: { role: "page", selector: "body" } },
+        { action: "extract", value: "json:linkedin_jobs" },
+      ],
+      confidence: 0.91,
+    }),
+    browserTool({
+      name: "go_to_next_linkedin_jobs_page",
+      description:
+        "Open a later LinkedIn Jobs search result page by result offset and return structured job cards. Use start=25 for page 2, 50 for page 3.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          keywords: { type: "string", description: "Role or skill keywords." },
+          location: { type: "string", description: "Optional location." },
+          start: { type: "string", description: "LinkedIn result offset, for example 25, 50, or 75." },
+        },
+        required: ["keywords", "start"],
+      },
+      steps: [
+        { action: "navigate", value: `${origin}/jobs/search/?keywords={{keywords}}&location={{location}}&start={{start}}` },
+        { action: "waitFor", target: { role: "page", selector: "body" } },
+        { action: "extract", value: "json:linkedin_jobs" },
+      ],
+      confidence: 0.88,
+    }),
+    browserTool({
+      name: "open_linkedin_job_and_extract_details",
+      description: "Open a LinkedIn job URL or /jobs/view/ URL and return structured job details.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          job_url: { type: "string", description: "Full LinkedIn job URL, usually under /jobs/view/." },
+        },
+        required: ["job_url"],
+      },
+      steps: [
+        { action: "navigate", value: "{{job_url}}" },
+        { action: "waitFor", target: { role: "page", selector: "body" } },
+        { action: "extract", value: "json:linkedin_jobs" },
+      ],
+      confidence: 0.9,
+    }),
+    browserTool({
       name: "go_to_next_linkedin_results_page",
       description: "Open a specific LinkedIn search results page for the same query and return readable page text.",
       inputSchema: {

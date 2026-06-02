@@ -1,7 +1,7 @@
 import type { CaptureBundle, PageAction, PageField, PageForm } from "@mcp/types";
 import type { InferenceClient } from "./inference.js";
 import type { HealClient } from "./self-heal.js";
-import { analyzeBundleHtml } from "./html-analysis.js";
+import { analyzeBundleHtml, type HtmlFormSummary, type PageAnalysis } from "./html-analysis.js";
 
 /**
  * No-LLM fallback inference. Builds REAL, runnable tools from a CaptureBundle without any model key:
@@ -18,8 +18,10 @@ const isTracking = (k: string) => TRACKING.test(k) || k === "_";
 const NOISY_HOST = /(google-analytics|doubleclick|newrelic|nr-data|segment|sentry|hotjar|amplitude|optimizely|facebook|bing|adsrvr|demdex|datadog)/i;
 const NOISY_PATH = /(?:^|\/)(collect|collector|analytics|tracking|telemetry|metrics|events?|pagead|conversion|viewthroughconversion|newrelic|nrjs|jserrors|experimentchokepoint|ccm|rmkt|tallyman|loginwebevent|funnel)(?:\/|$)|\/g\/collect\b|\/sid\.json\b/i;
 const STATIC_ASSET = /\.(?:js|mjs|css|map|png|jpe?g|gif|svg|ico|woff2?|ttf|webmanifest)$/i;
+const CHALLENGE_FORM = /captcha|nocaptcha|recaptcha|challenge|human.?verification|verify.?human/i;
+const LOW_VALUE_FORM_ACTION = /feedback|custom[_-]?scopes?|newsletter|subscribe|signup|sign[_-]?up|survey|report[_-]?(?:abuse|content)?/i;
 
-const SEARCH_FIELDS = new Set(["q", "query", "search", "s", "keyword", "keywords", "term", "k", "_nkw", "search_term_string", "text"]);
+const SEARCH_FIELDS = new Set(["q", "query", "search", "s", "keyword", "keywords", "term", "searchterm", "find_desc", "k", "_nkw", "search_term_string", "text"]);
 
 function toolName(method: string, urlPattern: string): string {
   const segs = urlPattern.split("/").filter((s) => s && !s.startsWith("{"));
@@ -247,9 +249,59 @@ function toolsFromForms(bundle: CaptureBundle): unknown[] {
   }
 }
 
+function toolsFromAnalyzedForms(bundle: CaptureBundle, analysis: PageAnalysis): unknown[] {
+  return analysis.forms.slice(0, 6).flatMap((form: HtmlFormSummary) => {
+    if (form.purpose === "auth" || form.fields.length === 0) return [];
+    if (CHALLENGE_FORM.test(form.action) || form.fields.some((field) => CHALLENGE_FORM.test(`${field.name} ${field.placeholder ?? ""}`))) return [];
+    if (LOW_VALUE_FORM_ACTION.test(form.action) && form.purpose !== "search") return [];
+    if (form.method === "GET" && form.purpose !== "search" && form.fields.every((field) => !field.required)) return [];
+    let action: URL;
+    try {
+      action = new URL(form.action, bundle.url);
+    } catch {
+      return [];
+    }
+    if (action.protocol !== "http:" && action.protocol !== "https:") return [];
+
+    const isSearch = form.purpose === "search";
+    const name = isSearch ? "search" : toolName(form.method, action.pathname);
+    const where = form.method === "POST" ? "body" : "query";
+    const properties: Record<string, unknown> = {};
+    const paramMapping: Record<string, { in: string; key: string }> = {};
+    const required: string[] = [];
+    for (const field of form.fields.slice(0, 8)) {
+      properties[field.name] = { type: "string" };
+      paramMapping[field.name] = { in: where, key: field.name };
+      if (field.required) required.push(field.name);
+    }
+
+    return [{
+      name,
+      description: isSearch
+        ? `Search ${action.host} (submits the page's search form).`
+        : `Submit the ${form.method} form at ${action.pathname} on ${action.host}.`,
+      inputSchema: { type: "object", properties, required },
+      execution: {
+        kind: "http",
+        request: {
+          method: form.method,
+          urlPattern: action.pathname || "/",
+          rawUrl: action.toString(),
+          requestHeaders: { accept: "text/html" },
+          statusCode: 200,
+          contentType: "text/html",
+        },
+        paramMapping,
+      },
+      confidence: isSearch ? 0.54 : 0.5,
+    }];
+  });
+}
+
 function toolsFromHtmlAnalysis(bundle: CaptureBundle): unknown[] {
   try {
     const analysis = analyzeBundleHtml(bundle);
+    const formTools = toolsFromAnalyzedForms(bundle, analysis);
     const detailTools = analysis.detailLinkPatterns.map((pattern) => ({
       name: pattern.name,
       description: pattern.description,
@@ -322,7 +374,7 @@ function toolsFromHtmlAnalysis(bundle: CaptureBundle): unknown[] {
       },
       confidence: pattern.confidence,
     }));
-    return [...searchActions, ...queryTools, ...detailTools, ...structuredBrowserTools(bundle, analysis)];
+    return [...formTools, ...searchActions, ...queryTools, ...detailTools, ...structuredBrowserTools(bundle, analysis)];
   } catch {
     return [];
   }
@@ -361,7 +413,7 @@ function structuredBrowserTools(bundle: CaptureBundle, analysis = analyzeBundleH
   }
 
   const detailPattern = analysis.detailLinkPatterns[0];
-  if (detailPattern && !isTravel) {
+  if (detailPattern && !isTravel && (detailPattern.name === "get_product_page" || detailPattern.name === "get_item_page")) {
     const detailUrl = absoluteFrom(bundle, detailPattern.urlPattern).replace(
       `{${detailPattern.paramName}}`,
       `{{${detailPattern.paramName}}}`,
@@ -571,7 +623,7 @@ function contentTool(bundle: CaptureBundle): unknown {
 
 /** All heuristic tools for a bundle: content (floor) + network + forms. inferTools dedups by name. */
 export function heuristicTools(bundle: CaptureBundle): unknown[] {
-  return [contentTool(bundle), ...toolsFromForms(bundle), ...toolsFromHtmlAnalysis(bundle), ...toolsFromNetwork(bundle)];
+  return [contentTool(bundle), ...toolsFromHtmlAnalysis(bundle), ...toolsFromNetwork(bundle)];
 }
 
 export class HeuristicInferenceClient implements InferenceClient {

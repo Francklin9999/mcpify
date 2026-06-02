@@ -14,7 +14,7 @@ function fileName(value: string): string {
  * GET /api/atlas/download?serverId=uuid
  *
  * Returns the generated MCP server artifact stored in MongoDB. The artifact includes runnable files,
- * the entrypoint, Claude Desktop config snippet, and structured tools for direct client integration.
+ * the entrypoint, Claude Code config snippet, and structured tools for direct client integration.
  */
 export async function GET(req: Request): Promise<Response> {
   const { searchParams } = new URL(req.url);

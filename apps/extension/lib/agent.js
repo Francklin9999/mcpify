@@ -80,8 +80,8 @@ export const BROWSER_TOOL_SPECS = [
   },
   {
     name: "browser_extract",
-    description: "Extract structured JSON from the current page. mode = 'product', 'listing', or 'metadata' (default).",
-    parameters: { type: "object", properties: { mode: { type: "string", description: "product | listing | metadata" } } },
+    description: "Extract structured JSON from the current page. mode = 'product', 'listing', 'linkedin_jobs', or 'metadata' (default).",
+    parameters: { type: "object", properties: { mode: { type: "string", description: "product | listing | linkedin_jobs | metadata" } } },
   },
 ];
 
@@ -185,6 +185,114 @@ export function parseStepResponse(data) {
     toolCalls.push({ id: typeof call.id === "string" ? call.id : undefined, name: call.name, arguments: args });
   }
   return { text, toolCalls };
+}
+
+function isLinkedInUrl(url) {
+  try {
+    return /(^|\.)linkedin\.com$/i.test(new URL(String(url || "")).hostname);
+  } catch {
+    return false;
+  }
+}
+
+export function isLinkedInJobSearchIntent(text) {
+  const s = String(text || "").toLowerCase();
+  if (!s) return false;
+  if (isLinkedInJobsPageIntent(s)) return false;
+  if (/\b(rayen|bouriel|profile|person|people|connection|message)\b/.test(s) && !/\b(job|jobs|role|roles|position|positions|hiring|career)\b/.test(s)) {
+    return false;
+  }
+  return /\b(job|jobs|role|roles|position|positions|hiring|career|careers)\b/.test(s) || /\b(full[-\s]?stack|front[-\s]?end|back[-\s]?end|software developer|software engineer|developer|engineer)\b/.test(s);
+}
+
+export function isLinkedInJobsPageIntent(text) {
+  const s = String(text || "").toLowerCase();
+  if (!/\b(?:go|open|navigate|take|switch|click)\b/.test(s)) return false;
+  if (!/\b(?:job|jobs|career|careers)\b/.test(s)) return false;
+  if (/\b(?:search|find|look\s+for|show|get)\b/.test(s)) return false;
+  if (/\b(?:developer|engineer|full[-\s]?stack|front[-\s]?end|back[-\s]?end|software|data|product|designer|manager|analyst)\b/.test(s)) return false;
+  return /\b(?:page|tab|section|linkedin jobs?|jobs?)\b/.test(s);
+}
+
+export function extractLinkedInJobKeywords(prompt, fallback = "") {
+  let text = String(prompt || "").trim();
+  const patterns = [
+    /\b(?:search|find|look(?:\s+up|\s+for)?|show|get)\s+(?:me\s+)?(?:a\s+|an\s+|some\s+)?(.+?)(?:\s+(?:on|in)\s+linkedin|\s+in\s+the\s+browser|\s+for\s+me)?$/i,
+    /\b(?:job|jobs|role|roles|position|positions)\s+(?:for|as)\s+(.+?)(?:\s+(?:on|in)\s+linkedin|\s+in\s+the\s+browser|\s+for\s+me)?$/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      text = match[1];
+      break;
+    }
+  }
+  text = text
+    .replace(/\b(?:can you|please|could you|would you)\b/gi, " ")
+    .replace(/\b(?:search|find|look|show|get|for|me|a|an|some|the|browser|linkedin)\b/gi, " ")
+    .replace(/\b(?:job|jobs|role|roles|position|positions|page)\b/gi, " ")
+    .replace(/[?!.]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text || String(fallback || "").trim();
+}
+
+function firstSchemaParam(toolDef, preferred) {
+  const props = toolDef?.inputSchema?.properties || {};
+  for (const key of preferred) {
+    if (Object.prototype.hasOwnProperty.call(props, key)) return key;
+  }
+  const required = Array.isArray(toolDef?.inputSchema?.required) ? toolDef.inputSchema.required : [];
+  for (const key of required) {
+    if (props[key]?.type === "string" || !props[key]?.type) return key;
+  }
+  return Object.keys(props).find((key) => props[key]?.type === "string") || preferred[0];
+}
+
+export function steerLinkedInJobSearchStep(step, prompt, toolDefs, pageUrl) {
+  if (!step || !Array.isArray(step.toolCalls) || !step.toolCalls.length) return step;
+  if (!isLinkedInUrl(pageUrl)) return step;
+
+  if (isLinkedInJobsPageIntent(prompt)) {
+    const calls = step.toolCalls.map((call) => ({ ...call, arguments: { ...(call.arguments || {}) } }));
+    const mistakenIndex = calls.findIndex((call) =>
+      ["search_linkedin_people", "search_linkedin_all_results", "search_linkedin_jobs"].includes(call?.name) ||
+      (call?.name === "browser_type" && String(call.arguments?.text || "").trim()) ||
+      call?.name === "browser_snapshot"
+    );
+    if (mistakenIndex < 0) return step;
+    const navTool = (toolDefs || []).find((tool) => tool?.name === "open_linkedin_jobs_page");
+    calls[mistakenIndex] = navTool
+      ? { id: calls[mistakenIndex].id, name: "open_linkedin_jobs_page", arguments: {} }
+      : { id: calls[mistakenIndex].id, name: "browser_navigate", arguments: { url: "https://www.linkedin.com/jobs/" } };
+    return { ...step, toolCalls: calls };
+  }
+
+  const jobTool = (toolDefs || []).find((tool) => tool?.name === "search_linkedin_jobs");
+  if (!jobTool || !isLinkedInJobSearchIntent(prompt)) return step;
+
+  const calls = step.toolCalls.map((call) => ({ ...call, arguments: { ...(call.arguments || {}) } }));
+  const mistakenIndex = calls.findIndex((call) =>
+    ["search_linkedin_people", "search_linkedin_all_results"].includes(call?.name) ||
+    (call?.name === "browser_type" && String(call.arguments?.text || "").trim()) ||
+    call?.name === "browser_snapshot"
+  );
+  if (mistakenIndex < 0) return step;
+
+  const mistaken = calls[mistakenIndex];
+  const fallback = mistaken.arguments?.keywords || mistaken.arguments?.query || mistaken.arguments?.q || mistaken.arguments?.text || "";
+  const keywords = extractLinkedInJobKeywords(prompt, fallback);
+  if (!keywords) return step;
+
+  const param = firstSchemaParam(jobTool, ["keywords", "query", "q", "search"]);
+  const args = { [param]: keywords };
+  for (const key of ["location", "date_posted", "workplace_type", "experience_level", "easy_apply"]) {
+    if (Object.prototype.hasOwnProperty.call(jobTool.inputSchema?.properties || {}, key) && mistaken.arguments?.[key] != null) {
+      args[key] = mistaken.arguments[key];
+    }
+  }
+  calls[mistakenIndex] = { id: mistaken.id, name: "search_linkedin_jobs", arguments: args };
+  return { ...step, toolCalls: calls };
 }
 
 // Discovered (generated-server) tools usable live in-session

@@ -19,7 +19,7 @@ Prefer tools that map to real user tasks: search, list results, fetch detail pag
 and structured extraction. Prefer observed network calls when available. Otherwise derive safe public GET/POST
 tools or browser-step tools from visible forms, page selectors, canonical links, repeated detail-link patterns,
 and app-state hints in pageAnalysis. Use browser tools when the page is JS-driven or when the output should be
-structured JSON. For browser extract steps, prefer value "json:metadata", "json:product", or "json:listing".
+structured JSON. For browser extract steps, prefer value "json:metadata", "json:product", "json:listing", or "json:linkedin_jobs" on LinkedIn job pages.
 Skip login, password, checkout, account, and credential/session-only actions. Output JSON only, no prose.`;
 
 export const INCREMENTAL_NOTE = `INCREMENTAL MODE: you are EXTENDING an existing MCP server. The payload contains only NEW

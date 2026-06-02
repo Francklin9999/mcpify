@@ -129,7 +129,7 @@ export function GeneratePanel() {
           {job.result ? (
             <div className="snippet">
               <div className="snippet-head">
-                <span>claude_desktop_config.json</span>
+                <span>claude_code_config.json</span>
                 <a className="quiet-btn" href={job.result.artifactUrl}>Artifact</a>
               </div>
               <pre>{job.result.configSnippet}</pre>

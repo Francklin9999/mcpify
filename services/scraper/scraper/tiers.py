@@ -13,6 +13,7 @@ objects with `.request.method/.url`, `.status`, `.headers`).
 
 from __future__ import annotations
 
+import json
 from typing import Any, Optional
 
 from .capture import FetchResult, RawNetworkCall
@@ -24,6 +25,8 @@ from .contracts import ElementRef
 #   - page_setup runs BEFORE navigation, so our page.on("response") catches LOAD-TIME XHR (page_action runs
 #     after nav and would miss them). The raw Playwright response gives method + url + status + headers + body.
 # All verified against a real Chromium (tests/test_tiers_real.py).
+
+_MAX_JSON_BODY_BYTES = 512_000
 
 
 def _selectors_of_interest(page: Any) -> list[ElementRef]:
@@ -48,6 +51,36 @@ def _make_network_capturer() -> tuple[Any, list[RawNetworkCall]]:
     """
     calls: list[RawNetworkCall] = []
 
+    def small_json_response(resp: Any, headers: dict[str, str]) -> Any:
+        content_type = headers.get("content-type", "")
+        if "json" not in content_type.lower():
+            return None
+        try:
+            content_length = int(headers.get("content-length") or "0")
+        except ValueError:
+            content_length = 0
+        if content_length > _MAX_JSON_BODY_BYTES:
+            return None
+        try:
+            return resp.json()
+        except Exception:
+            return None
+
+    def request_json_body(req: Any) -> Any:
+        try:
+            headers = dict(req.headers or {})
+            content_type = headers.get("content-type", "")
+            if "json" not in content_type.lower():
+                return None
+            raw = getattr(req, "post_data", None)
+            if callable(raw):
+                raw = raw()
+            if not raw or len(str(raw).encode("utf-8")) > _MAX_JSON_BODY_BYTES:
+                return None
+            return json.loads(str(raw))
+        except Exception:
+            return None
+
     def page_setup(page: Any) -> None:
         def on_response(resp: Any) -> None:
             try:
@@ -55,18 +88,15 @@ def _make_network_capturer() -> tuple[Any, list[RawNetworkCall]]:
                 if req.resource_type not in ("xhr", "fetch"):
                     return
                 resp_headers = dict(resp.headers or {})
-                body: Any = None
-                try:
-                    body = resp.json()
-                except Exception:
-                    body = None
+                body = small_json_response(resp, resp_headers)
                 calls.append(
                     RawNetworkCall(
-                        method=req.method,
+                        method=str(req.method).upper(),
                         raw_url=resp.url,
                         request_headers=dict(req.headers or {}),
                         status_code=int(resp.status),
                         content_type=resp_headers.get("content-type", ""),
+                        request_body=request_json_body(req),
                         response_body=body,
                     )
                 )

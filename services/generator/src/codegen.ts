@@ -3,7 +3,7 @@ import type { ToolDefinition, GeneratedServerArtifact } from "@mcp/types";
 /**
  * Codegen: ToolDefinition[] -> a runnable MCP server artifact (`01 S3`, `services/generator.md`).
  * Emits `server.ts` against the verified @modelcontextprotocol/sdk API (McpServer.registerTool +
- * StdioServerTransport), a claude_desktop_config.json snippet, and a README. Deterministic.
+ * StdioServerTransport), a claude_code_config.json snippet, and a README. Deterministic.
  */
 
 export interface CodegenInput {
@@ -162,7 +162,7 @@ function browsingToolkitRegistrations(input: CodegenInput): string {
     {
       name: "browser_extract",
       description:
-        "Extract structured JSON from the current page. mode = 'product' (price/availability/rating/...), 'listing' (search-result cards), or 'metadata' (title/headings/links, the default).",
+        "Extract structured JSON from the current page. mode = 'product' (price/availability/rating/...), 'listing' (search-result cards), 'linkedin_jobs' (LinkedIn job cards/details), or 'metadata' (title/headings/links, the default).",
       shape: "{ mode: z.string().optional() }",
       call: 'browsing.extract(String(args.mode || "metadata"))',
     },
@@ -265,11 +265,29 @@ function interpolate(template: string | undefined, args: Record<string, unknown>
   });
 }
 
-// A navigate template references a param that was not supplied (e.g. paginated tool called with no page).
-function templateMissingParam(template: string | undefined, args: Record<string, unknown>): boolean {
+function interpolateUrl(template: string | undefined, args: Record<string, unknown>, baseUrl: string): string {
+  const rawTemplate = String(template ?? "");
+  const direct = rawTemplate.match(/^\\s*\\{\\{?(\\w+)\\}\\}?\\s*$/);
+  if (direct?.[1]) return String(args[direct[1]] ?? "");
+  const raw = interpolate(rawTemplate, args, true);
+  try {
+    const url = new URL(raw, baseUrl);
+    for (const [key, value] of Array.from(url.searchParams.entries())) {
+      if (value === "") url.searchParams.delete(key);
+    }
+    return url.toString();
+  } catch {
+    return raw;
+  }
+}
+
+// A navigate template references a required path param that was not supplied (e.g. /page-{{page}}.html).
+// Missing query params are omitted by interpolateUrl so optional filters can share one deterministic tool.
+function templateMissingPathParam(template: string | undefined, args: Record<string, unknown>): boolean {
+  const pathTemplate = String(template ?? "").split(/[?#]/, 1)[0] ?? "";
   const re = new RegExp(PLACEHOLDER.source, "g");
   let m: RegExpExecArray | null;
-  while ((m = re.exec(String(template ?? "")))) {
+  while ((m = re.exec(pathTemplate))) {
     const key = m[1];
     if (key && (args[key] == null || String(args[key]) === "")) return true;
   }
@@ -367,13 +385,10 @@ class PlaywrightBrowsing implements Browsing {
     let extracted: unknown;
     for (const step of spec.steps) {
       if (step.action === "navigate") {
-        // Skip a navigate whose params were not supplied (stay on the current page) so a paginated tool
-        // called without e.g. page extracts the current listing instead of a 404 URL like /page-.html.
-        // Tradeoff: if the inputSchema param and the URL placeholder are named differently, a supplied arg
-        // looks "missing" here and we silently stay put instead of erroring. The base navigate (when present)
-        // still lands on the right listing, so this favors a useful result over a loud failure.
-        if (templateMissingParam(step.value, args)) continue;
-        const targetUrl = interpolate(step.value, args);
+        // Skip only missing path params (stay on current page) so /page-{{page}}.html does not become
+        // /page-.html. Missing query params are treated as optional filters and removed.
+        if (templateMissingPathParam(step.value, args)) continue;
+        const targetUrl = interpolateUrl(step.value, args, SITE_URL || page.url());
         if (!sameUrl(targetUrl, page.url())) {
           await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
         }
@@ -581,7 +596,7 @@ async function snapshotText(page: any): Promise<string> {
 }
 
 async function extractData(page: any, mode: string, selectors?: string[]): Promise<unknown> {
-  if (mode === "json:metadata" || mode === "json:product" || mode === "json:listing") {
+  if (mode === "json:metadata" || mode === "json:product" || mode === "json:listing" || mode === "json:linkedin_jobs") {
     return evalWithRetry(page, (params: { extractMode: string; selectors?: string[] }) => {
       const extractMode = params.extractMode;
       const cardSelectors = params.selectors || [];
@@ -646,6 +661,76 @@ async function extractData(page: any, mode: string, selectors?: string[]): Promi
           brand: productLd?.brand?.name || productLd?.brand || textOf(["[data-testid='brand']", "[itemprop='brand']"]),
           images: Array.isArray(productLd?.image) ? productLd.image.slice(0, 8) : productLd?.image ? [productLd.image] : [],
           url: loc.href,
+        };
+      }
+      if (extractMode === "json:linkedin_jobs") {
+        const pickText = (root: any, selectors: string[]) => {
+          for (const selector of selectors) {
+            const node = root.querySelector(selector);
+            const text = clean(node?.textContent);
+            if (text) return text;
+          }
+          return "";
+        };
+        const jobIdFromUrl = (url: string) => {
+          const match = String(url || "").match(/\\/jobs\\/view\\/(\\d+)/i) || String(url || "").match(/[?&]currentJobId=(\\d+)/i);
+          return match ? match[1] : "";
+        };
+        const selected = {
+          title: textOf([".jobs-unified-top-card__job-title", ".job-details-jobs-unified-top-card__job-title", "h1"]),
+          company: textOf([".jobs-unified-top-card__company-name", ".job-details-jobs-unified-top-card__company-name", ".jobs-unified-top-card__subtitle-primary-grouping a"]),
+          location: textOf([".jobs-unified-top-card__bullet", ".job-details-jobs-unified-top-card__primary-description-container", ".jobs-unified-top-card__primary-description-container"]),
+          workplace: textOf([".jobs-unified-top-card__workplace-type", ".job-details-jobs-unified-top-card__job-insight"]),
+          url: loc.href,
+          jobId: jobIdFromUrl(loc.href),
+          description: textOf(["#job-details", ".jobs-description", ".jobs-box__html-content", ".jobs-description-content__text"]).slice(0, 5000),
+        };
+        const cardSelectors = [
+          "li[data-occludable-job-id]",
+          ".jobs-search-results__list-item",
+          ".job-card-container",
+          "[data-job-id]",
+          "li.scaffold-layout__list-item",
+        ];
+        const cards: any[] = [];
+        for (const selector of cardSelectors) {
+          for (const card of Array.from(doc.querySelectorAll(selector) as any[])) {
+            if (!cards.includes(card)) cards.push(card);
+          }
+        }
+        const seen = new Set<string>();
+        const results = cards
+          .map((card: any) => {
+            const link = card.querySelector('a[href*="/jobs/view/"]');
+            const url = link?.href || "";
+            const text = clean(card.textContent);
+            const jobId = card.getAttribute("data-occludable-job-id") || card.getAttribute("data-job-id") || jobIdFromUrl(url);
+            return {
+              jobId,
+              title: pickText(card, [".job-card-list__title", ".job-card-container__link", ".job-card-job-posting-card-wrapper__title", 'a[href*="/jobs/view/"]']) || clean(link?.textContent),
+              company: pickText(card, [".job-card-container__primary-description", ".artdeco-entity-lockup__subtitle", "[class*='company']"]),
+              location: pickText(card, [".job-card-container__metadata-item", ".artdeco-entity-lockup__caption", "[class*='location']"]),
+              url,
+              text: text.slice(0, 700),
+            };
+          })
+          .filter((entry: any) => {
+            const key = entry.jobId || entry.url || entry.title + "|" + entry.company + "|" + entry.location;
+            if (!entry.title && !entry.text) return false;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
+          .slice(0, 25);
+        return {
+          url: loc.href,
+          query: {
+            keywords: new URLSearchParams(loc.search).get("keywords") || "",
+            location: new URLSearchParams(loc.search).get("location") || "",
+            start: new URLSearchParams(loc.search).get("start") || "0",
+          },
+          selectedJob: selected.title || selected.company || selected.description ? selected : null,
+          results,
         };
       }
       // Preferred path: the inference identified the repeated card selector (e.g. "div.quote", ".product").
@@ -778,7 +863,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 export function configSnippet(input: CodegenInput): string {
   const name = slugFromUrl(input.url);
   return JSON.stringify(
-    { mcpServers: { [name]: { command: "node", args: [`/absolute/path/to/${name}/server.js`] } } },
+    { mcpServers: { [name]: { type: "stdio", command: "node", args: [`/absolute/path/to/${name}/server.js`], env: {} } } },
     null,
     2,
   );
@@ -829,53 +914,101 @@ export function tsconfigJson(): string {
 }
 
 /**
- * Shared JSON-merge helper, emitted beside the install scripts. Both install.sh and install.ps1 just set
- * env vars and run `node mcp-register.mjs`, keeping the actual config merge in one place (Node, which is
- * already required to run the server) instead of duplicating brittle jq/PowerShell JSON surgery.
- * It is idempotent and PRESERVES any existing mcpServers entries; it creates the config file + parent dir.
+ * Shared JSON helper, emitted beside the install scripts. The default mode registers in Claude Code's
+ * user MCP config (~/.claude.json), removes duplicate project-scoped entries for the same server, and
+ * removes stale Claude Desktop entries. A legacy desktop mode is kept for users who explicitly opt in.
  */
 export function registerHelperMjs(): string {
   // Built with string concatenation (no JS template literals) so codegen's own template literal below
   // doesn't try to interpolate the helper's ${...} expressions.
   return [
-    `// Merge this server into an MCP client config (Claude Desktop), preserving existing entries.`,
-    `// Driven by env: MCP_REG_CONFIG (config path), MCP_REG_NAME, MCP_REG_NODE (node bin), MCP_REG_JS (server.js).`,
-    `import { readFileSync, writeFileSync, mkdirSync } from "node:fs";`,
-    `import { dirname } from "node:path";`,
+    `// Register this server in Claude Code user MCPs, preserving existing entries.`,
+    `// Driven by env: MCP_REG_NAME, MCP_REG_NODE (node bin), MCP_REG_JS (server.js).`,
+    `import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";`,
+    `import { delimiter, dirname, join } from "node:path";`,
+    `import { homedir } from "node:os";`,
     ``,
-    `const path = process.env.MCP_REG_CONFIG;`,
-    `if (!path) { console.error("MCP_REG_CONFIG not set"); process.exit(1); }`,
+    `const name = process.env.MCP_REG_NAME;`,
+    `const nodeBin = process.env.MCP_REG_NODE;`,
+    `const serverJs = process.env.MCP_REG_JS;`,
+    `if (!name || !nodeBin || !serverJs) {`,
+    `  console.error("MCP_REG_NAME, MCP_REG_NODE, and MCP_REG_JS are required");`,
+    `  process.exit(1);`,
+    `}`,
     ``,
-    `let cfg = {};`,
-    `try { cfg = JSON.parse(readFileSync(path, "utf8") || "{}"); } catch { cfg = {}; }`,
-    `if (!cfg || typeof cfg !== "object") cfg = {};`,
-    `if (!cfg.mcpServers || typeof cfg.mcpServers !== "object") cfg.mcpServers = {};`,
+    `function readJson(file) {`,
+    `  try { return JSON.parse(readFileSync(file, "utf8") || "{}"); } catch { return {}; }`,
+    `}`,
+    `function writeJson(file, cfg) {`,
+    `  mkdirSync(dirname(file), { recursive: true });`,
+    `  writeFileSync(file, JSON.stringify(cfg, null, 2) + "\\n");`,
+    `}`,
+    `function ensureObject(value) {`,
+    `  return value && typeof value === "object" && !Array.isArray(value) ? value : {};`,
+    `}`,
     ``,
-    `cfg.mcpServers[process.env.MCP_REG_NAME] = {`,
-    `  command: process.env.MCP_REG_NODE,`,
-    `  args: [process.env.MCP_REG_JS],`,
-    `};`,
+    `function removeFromDesktopConfig(file) {`,
+    `  if (!file || !existsSync(file)) return false;`,
+    `  const cfg = ensureObject(readJson(file));`,
+    `  if (!cfg.mcpServers || typeof cfg.mcpServers !== "object" || !(name in cfg.mcpServers)) return false;`,
+    `  delete cfg.mcpServers[name];`,
+    `  writeJson(file, cfg);`,
+    `  return true;`,
+    `}`,
     ``,
-    `mkdirSync(dirname(path), { recursive: true });`,
-    `writeFileSync(path, JSON.stringify(cfg, null, 2) + "\\n");`,
-    `console.log("Registered \\"" + process.env.MCP_REG_NAME + "\\" in " + path);`,
+    `function registerClaudeDesktop() {`,
+    `  const configPath = process.env.MCP_REG_CONFIG;`,
+    `  if (!configPath) { console.error("MCP_REG_CONFIG not set"); process.exit(1); }`,
+    `  const cfg = ensureObject(readJson(configPath));`,
+    `  cfg.mcpServers = ensureObject(cfg.mcpServers);`,
+    `  cfg.mcpServers[name] = { command: nodeBin, args: [serverJs] };`,
+    `  writeJson(configPath, cfg);`,
+    `  console.log("Registered \\"" + name + "\\" in Claude Desktop config " + configPath);`,
+    `}`,
+    ``,
+    `function registerClaudeCodeUser() {`,
+    `  const configPath = process.env.MCP_REG_CLAUDE_CODE_CONFIG || join(homedir(), ".claude.json");`,
+    `  const cfg = ensureObject(readJson(configPath));`,
+    `  cfg.mcpServers = ensureObject(cfg.mcpServers);`,
+    `  cfg.mcpServers[name] = { type: "stdio", command: nodeBin, args: [serverJs], env: {} };`,
+    ``,
+    `  let projectCleanups = 0;`,
+    `  if (cfg.projects && typeof cfg.projects === "object") {`,
+    `    for (const project of Object.values(cfg.projects)) {`,
+    `      if (!project || typeof project !== "object") continue;`,
+    `      if (project.mcpServers && typeof project.mcpServers === "object" && name in project.mcpServers) {`,
+    `        delete project.mcpServers[name];`,
+    `        projectCleanups++;`,
+    `      }`,
+    `    }`,
+    `  }`,
+    `  writeJson(configPath, cfg);`,
+    `  console.log("Registered \\"" + name + "\\" in Claude Code user MCPs " + configPath);`,
+    `  if (projectCleanups) console.log("Removed " + projectCleanups + " duplicate project-scoped Claude Code entr" + (projectCleanups === 1 ? "y" : "ies") + ".");`,
+    ``,
+    `  const cleanupConfigs = (process.env.MCP_REG_CLEAN_CONFIGS || "").split(delimiter).filter(Boolean);`,
+    `  const desktopCleanups = cleanupConfigs.filter(removeFromDesktopConfig).length;`,
+    `  if (desktopCleanups) console.log("Removed " + desktopCleanups + " stale Claude Desktop entr" + (desktopCleanups === 1 ? "y" : "ies") + ".");`,
+    `}`,
+    ``,
+    `if (process.env.MCP_REG_MODE === "desktop") registerClaudeDesktop();`,
+    `else registerClaudeCodeUser();`,
     ``,
   ].join("\n");
 }
 
 /**
  * POSIX installer (macOS/Linux). Run with `bash install.sh`. Installs deps, builds server.js, then
- * registers the server in the Claude Desktop config so the client launches it over stdio by absolute path.
- * Honors MCP_CONFIG_PATH to target a different client/config; `--no-register` builds only and prints the snippet.
- * Resolves an ABSOLUTE node path at install time (GUI-launched clients don't inherit your shell PATH).
+ * registers the server in Claude Code user MCPs so it is visible from every project. `MCP_TARGET=desktop`
+ * keeps the legacy Claude Desktop behavior; `--no-register` builds only and prints the snippet.
  */
 export function installSh(input: CodegenInput): string {
   const name = slugFromUrl(input.url);
   return `#!/usr/bin/env bash
-# install.sh - build this generated MCP server and register it with your MCP client (Claude Desktop).
+# install.sh - build this generated MCP server and register it with Claude Code user MCPs.
 #   bash install.sh                 install deps, build, and register
 #   bash install.sh --no-register   build only, print the config snippet
-#   MCP_CONFIG_PATH=/path/to/config.json bash install.sh   target a specific client config
+#   MCP_TARGET=desktop bash install.sh   opt into legacy Claude Desktop config registration
 set -eo pipefail
 
 SERVER_NAME="${name}"
@@ -885,7 +1018,7 @@ cd "$SCRIPT_DIR"
 command -v node >/dev/null 2>&1 || { echo "ERROR: node (>=20) is required" >&2; exit 1; }
 command -v npm  >/dev/null 2>&1 || { echo "ERROR: npm is required" >&2; exit 1; }
 
-# Absolute node path - GUI-launched Claude Desktop often does not inherit your shell PATH.
+# Absolute node path - MCP clients do not always inherit your shell PATH.
 NODE_BIN="$(command -v node)"
 SERVER_JS="$SCRIPT_DIR/server.js"
 
@@ -899,38 +1032,59 @@ for arg in "$@"; do
   [ "$arg" = "--no-register" ] && REGISTER=0
 done
 
+TARGET="\${MCP_TARGET:-claude-code}"
+for arg in "$@"; do
+  [ "$arg" = "--desktop" ] && TARGET="desktop"
+  [ "$arg" = "--claude-desktop" ] && TARGET="desktop"
+  [ "$arg" = "--claude-code" ] && TARGET="claude-code"
+done
+
 if [ "$REGISTER" = "0" ]; then
-  echo "Build complete. Add this to your MCP client config under \\"mcpServers\\":"
-  echo "  \\"$SERVER_NAME\\": { \\"command\\": \\"$NODE_BIN\\", \\"args\\": [\\"$SERVER_JS\\"] }"
+  echo "Build complete. Add this to Claude Code user MCPs under \\"mcpServers\\":"
+  echo "  \\"$SERVER_NAME\\": { \\"type\\": \\"stdio\\", \\"command\\": \\"$NODE_BIN\\", \\"args\\": [\\"$SERVER_JS\\"], \\"env\\": {} }"
   exit 0
 fi
 
-# Resolve the Claude Desktop config path for this OS (override with MCP_CONFIG_PATH).
-if [ -n "$MCP_CONFIG_PATH" ]; then
-  CONFIG_PATH="$MCP_CONFIG_PATH"
-elif [ "$(uname)" = "Darwin" ]; then
-  CONFIG_PATH="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
-else
-  CONFIG_PATH="$HOME/.config/Claude/claude_desktop_config.json"
+if [ "$TARGET" = "desktop" ]; then
+  if [ -n "$MCP_CONFIG_PATH" ]; then
+    CONFIG_PATH="$MCP_CONFIG_PATH"
+  elif [ "$(uname)" = "Darwin" ]; then
+    CONFIG_PATH="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+  else
+    CONFIG_PATH="$HOME/.config/Claude/claude_desktop_config.json"
+  fi
+  MCP_REG_MODE="desktop" MCP_REG_CONFIG="$CONFIG_PATH" MCP_REG_NAME="$SERVER_NAME" MCP_REG_NODE="$NODE_BIN" MCP_REG_JS="$SERVER_JS" \\
+    node "$SCRIPT_DIR/mcp-register.mjs"
+  echo "==> Done. Restart Claude Desktop to load \\"$SERVER_NAME\\"."
+  exit 0
 fi
 
-MCP_REG_CONFIG="$CONFIG_PATH" MCP_REG_NAME="$SERVER_NAME" MCP_REG_NODE="$NODE_BIN" MCP_REG_JS="$SERVER_JS" \\
+if [ "$(uname)" = "Darwin" ]; then
+  DESKTOP_CONFIG="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+else
+  DESKTOP_CONFIG="$HOME/.config/Claude/claude_desktop_config.json"
+fi
+
+MCP_REG_MODE="claude-code-user" \\
+MCP_REG_CLAUDE_CODE_CONFIG="\${CLAUDE_CODE_CONFIG:-$HOME/.claude.json}" \\
+MCP_REG_CLEAN_CONFIGS="$DESKTOP_CONFIG" \\
+MCP_REG_NAME="$SERVER_NAME" MCP_REG_NODE="$NODE_BIN" MCP_REG_JS="$SERVER_JS" \\
   node "$SCRIPT_DIR/mcp-register.mjs"
 
-echo "==> Done. Restart Claude Desktop (or your MCP client) to load \\"$SERVER_NAME\\"."
+echo "==> Done. Restart Claude Code or run /mcp to load \\"$SERVER_NAME\\"."
 `;
 }
 
 /**
  * Windows installer (PowerShell). Run with `powershell -ExecutionPolicy Bypass -File install.ps1`.
- * Same behavior as install.sh; targets %APPDATA%\\Claude\\claude_desktop_config.json (override: $env:MCP_CONFIG_PATH).
+ * Same behavior as install.sh; targets Claude Code user MCPs by default.
  */
 export function installPs1(input: CodegenInput): string {
   const name = slugFromUrl(input.url);
-  return `# install.ps1 - build this generated MCP server and register it with Claude Desktop on Windows.
+  return `# install.ps1 - build this generated MCP server and register it with Claude Code user MCPs.
 #   powershell -ExecutionPolicy Bypass -File install.ps1
 #   powershell -ExecutionPolicy Bypass -File install.ps1 --no-register   (build only)
-#   $env:MCP_CONFIG_PATH = "C:\\path\\to\\config.json"   (target a specific client config)
+#   $env:MCP_TARGET = "desktop"   (opt into legacy Claude Desktop registration)
 $ErrorActionPreference = "Stop"
 
 $ServerName = "${name}"
@@ -950,30 +1104,56 @@ npm run build
 if ($LASTEXITCODE -ne 0) { Write-Error "npm run build failed"; exit 1 }
 
 if ($args -contains "--no-register") {
-  Write-Host "Build complete. Register manually: command=$NodeBin args=$ServerJs"
+  Write-Host "Build complete. Register manually in Claude Code user MCPs: command=$NodeBin args=$ServerJs"
   exit 0
 }
 
-if ($env:MCP_CONFIG_PATH) {
-  $ConfigPath = $env:MCP_CONFIG_PATH
-} else {
-  $ConfigPath = Join-Path $env:APPDATA "Claude\\claude_desktop_config.json"
+$Target = if ($env:MCP_TARGET) { $env:MCP_TARGET } else { "claude-code" }
+if ($args -contains "--desktop" -or $args -contains "--claude-desktop") { $Target = "desktop" }
+if ($args -contains "--claude-code") { $Target = "claude-code" }
+
+if ($Target -eq "desktop") {
+  if ($env:MCP_CONFIG_PATH) {
+    $ConfigPath = $env:MCP_CONFIG_PATH
+  } else {
+    $ConfigPath = Join-Path $env:APPDATA "Claude\\claude_desktop_config.json"
+  }
+
+  $env:MCP_REG_MODE = "desktop"
+  $env:MCP_REG_CONFIG = $ConfigPath
+  $env:MCP_REG_NAME = $ServerName
+  $env:MCP_REG_NODE = $NodeBin
+  $env:MCP_REG_JS = $ServerJs
+  node (Join-Path $ScriptDir "mcp-register.mjs")
+  if ($LASTEXITCODE -ne 0) { Write-Error "registration failed"; exit 1 }
+
+  Write-Host "==> Done. Restart Claude Desktop to load $ServerName."
+  exit 0
 }
 
-$env:MCP_REG_CONFIG = $ConfigPath
+if ($env:CLAUDE_CODE_CONFIG) {
+  $ClaudeCodeConfig = $env:CLAUDE_CODE_CONFIG
+} else {
+  $ClaudeCodeConfig = Join-Path $HOME ".claude.json"
+}
+$DesktopConfig = Join-Path $env:APPDATA "Claude\\claude_desktop_config.json"
+
+$env:MCP_REG_MODE = "claude-code-user"
+$env:MCP_REG_CLAUDE_CODE_CONFIG = $ClaudeCodeConfig
+$env:MCP_REG_CLEAN_CONFIGS = $DesktopConfig
 $env:MCP_REG_NAME = $ServerName
 $env:MCP_REG_NODE = $NodeBin
 $env:MCP_REG_JS = $ServerJs
 node (Join-Path $ScriptDir "mcp-register.mjs")
 if ($LASTEXITCODE -ne 0) { Write-Error "registration failed"; exit 1 }
 
-Write-Host "==> Done. Restart Claude Desktop (or your MCP client) to load $ServerName."
+Write-Host "==> Done. Restart Claude Code or run /mcp to load $ServerName."
 `;
 }
 
 export function generateServer(input: CodegenInput): GeneratedServerArtifact {
   const snippet = configSnippet(input);
-  const readme = `# ${input.title} - MCP server\n\nAuto-generated from ${input.url} (v${input.version}). Runs locally and may use public HTTP calls plus Playwright-driven browser steps.\n\n## Install (one step)\n\nThis builds the server and registers it with your MCP client (Claude Desktop), then restart the client.\n\n\`\`\`bash\n# macOS / Linux\nbash install.sh\n\`\`\`\n\`\`\`powershell\n# Windows\npowershell -ExecutionPolicy Bypass -File install.ps1\n\`\`\`\n\nThe installer registers the server with an absolute \`node\` path (GUI clients don't inherit your shell PATH).\nTarget a different client config with \`MCP_CONFIG_PATH=/path/to/config.json\`, or pass \`--no-register\` to build only.\n\n## Run manually\n\n\`\`\`bash\nnpm install\nnpm run build\nnpm start\n\`\`\`\n\nBrowser tools use Playwright. Run \`npx playwright install chromium\` once if you use the \`browser_*\` tools, and set \`MCP_BROWSER_PATH\` or \`MCP_BROWSER_CHANNEL=chrome\` if your local Chrome install is not auto-detected.\n\nThe \`claude_desktop_config.json\` snippet is also included if you prefer to wire it up by hand (fix the absolute path).\n`;
+  const readme = `# ${input.title} - MCP server\n\nAuto-generated from ${input.url} (v${input.version}). Runs locally and may use public HTTP calls plus Playwright-driven browser steps.\n\n## Install (one step)\n\nThis builds the server and registers it with Claude Code user MCPs, then restart Claude Code or run \`/mcp\`.\n\n\`\`\`bash\n# macOS / Linux\nbash install.sh\n\`\`\`\n\`\`\`powershell\n# Windows\npowershell -ExecutionPolicy Bypass -File install.ps1\n\`\`\`\n\nThe installer registers the server with an absolute \`node\` path in \`~/.claude.json\`, removes duplicate project-scoped Claude Code entries for the same server, and removes stale Claude Desktop entries for the same server. Set \`MCP_TARGET=desktop\` if you intentionally want the legacy Claude Desktop config path, or pass \`--no-register\` to build only.\n\n## Run manually\n\n\`\`\`bash\nnpm install\nnpm run build\nnpm start\n\`\`\`\n\nBrowser tools use Playwright. Run \`npx playwright install chromium\` once if you use the \`browser_*\` tools, and set \`MCP_BROWSER_PATH\` or \`MCP_BROWSER_CHANNEL=chrome\` if your local Chrome install is not auto-detected.\n\nThe \`claude_code_config.json\` snippet is also included if you prefer to wire it up by hand (fix the absolute path).\n`;
   return {
     serverId: input.serverId,
     version: input.version,
@@ -981,7 +1161,7 @@ export function generateServer(input: CodegenInput): GeneratedServerArtifact {
       { path: "server.ts", content: generateServerSource(input) },
       { path: "package.json", content: packageJson(input) },
       { path: "tsconfig.json", content: tsconfigJson() },
-      { path: "claude_desktop_config.json", content: snippet },
+      { path: "claude_code_config.json", content: snippet },
       { path: "mcp-register.mjs", content: registerHelperMjs() },
       { path: "install.sh", content: installSh(input) },
       { path: "install.ps1", content: installPs1(input) },

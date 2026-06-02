@@ -27,7 +27,7 @@ export async function artifactFromFileUrl(
   if (!rootStat?.isDirectory()) return null;
 
   const files = await collectFiles(root);
-  const configSnippet = files.find((file) => file.path === "claude_desktop_config.json")?.content ?? "{}";
+  const configSnippet = files.find((file) => file.path === "claude_code_config.json")?.content ?? "{}";
   const parsed = GeneratedServerArtifact.safeParse({
     serverId,
     version,

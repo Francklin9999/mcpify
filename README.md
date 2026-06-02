@@ -48,7 +48,7 @@ does two things against the tab you're already on:
   as your real signed-in session. Every page-changing action and every off-origin navigation **asks you to
   confirm first** (Confirm / Skip, inline).
 - **Turns the page into an MCP server** — generate, then copy/download `server.ts` +
-  `claude_desktop_config.json` straight from the chat.
+  `claude_code_config.json` straight from the chat.
 
 ## Legal modes
 

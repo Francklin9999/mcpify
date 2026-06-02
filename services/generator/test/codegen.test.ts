@@ -83,45 +83,122 @@ test("artifact ships an installable manifest pinning the verified dep ranges", (
   assert.ok(artifact.files.some((f) => f.path === "tsconfig.json"));
 });
 
-test("artifact ships one-step installers (install.sh/install.ps1) + a config-merge helper", () => {
+test("artifact ships one-step installers (install.sh/install.ps1) + a config helper", () => {
   const sh = artifact.files.find((f) => f.path === "install.sh")!.content;
   const ps1 = artifact.files.find((f) => f.path === "install.ps1")!.content;
   const helper = artifact.files.find((f) => f.path === "mcp-register.mjs")!.content;
   assert.ok(sh && ps1 && helper, "installers + helper are emitted");
 
-  // install.sh: builds, resolves an absolute node path, honors MCP_CONFIG_PATH, delegates the merge.
+  // install.sh: builds, resolves an absolute node path, defaults to Claude Code user MCPs.
   assert.match(sh, /^#!\/usr\/bin\/env bash/);
   assert.match(sh, /npm run build/);
   assert.match(sh, /command -v node/);
-  assert.match(sh, /MCP_CONFIG_PATH/);
+  assert.match(sh, /CLAUDE_CODE_CONFIG/);
+  assert.match(sh, /MCP_TARGET=desktop/);
   assert.match(sh, /mcp-register\.mjs/);
-  // install.ps1: PowerShell, %APPDATA% Claude config, same helper.
+  // install.ps1: PowerShell, Claude Code user config, same helper.
   assert.match(ps1, /\$PSScriptRoot/);
-  assert.match(ps1, /APPDATA/);
+  assert.match(ps1, /CLAUDE_CODE_CONFIG/);
+  assert.match(ps1, /MCP_TARGET/);
   assert.match(ps1, /mcp-register\.mjs/);
   // The server slug appears in both so the registered entry is named per-site.
   assert.match(sh, /SERVER_NAME="example-com"/);
   assert.match(ps1, /\$ServerName = "example-com"/);
 });
 
-// The merge helper must be idempotent and PRESERVE pre-existing mcpServers entries (the classic overwrite bug),
+// The helper must be idempotent, preserve existing user MCPs, remove duplicate project-scoped entries,
 // create the file/dir when absent, and write an absolute command/args. Run the real helper to prove it.
-test("mcp-register.mjs merges without clobbering existing entries and creates the file", () => {
+test("mcp-register.mjs registers Claude Code user MCPs and cleans duplicate scopes", () => {
   rmSync(genDir, { recursive: true, force: true });
   mkdirSync(genDir, { recursive: true });
   const helper = artifact.files.find((f) => f.path === "mcp-register.mjs")!.content;
   const helperPath = `${genDir}/mcp-register.mjs`;
   writeFileSync(helperPath, helper);
 
-  const cfgPath = `${genDir}/nested/dir/config.json`; // parent dirs do not exist yet
-  // Pre-existing config with another server that MUST survive the merge.
+  const cfgPath = `${genDir}/nested/dir/.claude.json`;
+  const desktopPath = `${genDir}/desktop/claude_desktop_config.json`;
   mkdirSync(`${genDir}/nested/dir`, { recursive: true });
-  writeFileSync(cfgPath, JSON.stringify({ mcpServers: { existing: { command: "node", args: ["/x/other.js"] } } }));
+  mkdirSync(`${genDir}/desktop`, { recursive: true });
+  writeFileSync(
+    cfgPath,
+    JSON.stringify({
+      mcpServers: { existing: { type: "stdio", command: "node", args: ["/x/other.js"], env: {} } },
+      projects: {
+        "/tmp/project": {
+          mcpServers: {
+            "example-com": { type: "stdio", command: "old-node", args: ["/old/server.js"], env: {} },
+            keep: { type: "stdio", command: "node", args: ["/keep/server.js"], env: {} },
+          },
+        },
+      },
+    }),
+  );
+  writeFileSync(
+    desktopPath,
+    JSON.stringify({ mcpServers: { "example-com": { command: "node", args: ["/old/server.js"] }, keep: { command: "node" } } }),
+  );
 
   const res = spawnSync(process.execPath, [helperPath], {
     encoding: "utf8",
     env: {
       ...process.env,
+      MCP_REG_MODE: "claude-code-user",
+      MCP_REG_CLAUDE_CODE_CONFIG: cfgPath,
+      MCP_REG_CLEAN_CONFIGS: desktopPath,
+      MCP_REG_NAME: "example-com",
+      MCP_REG_NODE: "/usr/local/bin/node",
+      MCP_REG_JS: `${genDir}/server.js`,
+    },
+  });
+  assert.equal(res.status, 0, `helper failed:\n${res.stdout}\n${res.stderr}`);
+
+  const merged = JSON.parse(readFileSync(cfgPath, "utf8"));
+  assert.deepEqual(
+    merged.mcpServers.existing,
+    { type: "stdio", command: "node", args: ["/x/other.js"], env: {} },
+    "existing entry preserved",
+  );
+  assert.equal(merged.mcpServers["example-com"].type, "stdio");
+  assert.equal(merged.mcpServers["example-com"].command, "/usr/local/bin/node");
+  assert.deepEqual(merged.mcpServers["example-com"].args, [`${genDir}/server.js`]);
+  assert.equal(merged.projects["/tmp/project"].mcpServers["example-com"], undefined);
+  assert.ok(merged.projects["/tmp/project"].mcpServers.keep, "other project MCPs survive cleanup");
+
+  const desktop = JSON.parse(readFileSync(desktopPath, "utf8"));
+  assert.equal(desktop.mcpServers["example-com"], undefined);
+  assert.ok(desktop.mcpServers.keep, "other desktop MCPs survive cleanup");
+
+  // First-time install: no config file at all -> helper creates it (+ parent dirs).
+  const freshPath = `${genDir}/fresh/.claude.json`;
+  const res2 = spawnSync(process.execPath, [helperPath], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      MCP_REG_MODE: "claude-code-user",
+      MCP_REG_CLAUDE_CODE_CONFIG: freshPath,
+      MCP_REG_NAME: "example-com",
+      MCP_REG_NODE: "node",
+      MCP_REG_JS: "/s.js",
+    },
+  });
+  assert.equal(res2.status, 0, `helper (fresh) failed:\n${res2.stdout}\n${res2.stderr}`);
+  assert.ok(existsSync(freshPath), "helper created the config file from scratch");
+  assert.ok(JSON.parse(readFileSync(freshPath, "utf8")).mcpServers["example-com"]);
+});
+
+test("mcp-register.mjs keeps legacy Claude Desktop mode available", () => {
+  rmSync(genDir, { recursive: true, force: true });
+  mkdirSync(genDir, { recursive: true });
+  const helper = artifact.files.find((f) => f.path === "mcp-register.mjs")!.content;
+  const helperPath = `${genDir}/mcp-register.mjs`;
+  writeFileSync(helperPath, helper);
+
+  const cfgPath = `${genDir}/desktop/config.json`;
+  const res = spawnSync(process.execPath, [helperPath], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      MCP_REG_MODE: "desktop",
       MCP_REG_CONFIG: cfgPath,
       MCP_REG_NAME: "example-com",
       MCP_REG_NODE: "/usr/local/bin/node",
@@ -131,19 +208,8 @@ test("mcp-register.mjs merges without clobbering existing entries and creates th
   assert.equal(res.status, 0, `helper failed:\n${res.stdout}\n${res.stderr}`);
 
   const merged = JSON.parse(readFileSync(cfgPath, "utf8"));
-  assert.deepEqual(merged.mcpServers.existing, { command: "node", args: ["/x/other.js"] }, "existing entry preserved");
   assert.equal(merged.mcpServers["example-com"].command, "/usr/local/bin/node");
   assert.deepEqual(merged.mcpServers["example-com"].args, [`${genDir}/server.js`]);
-
-  // First-time install: no config file at all -> helper creates it (+ parent dirs).
-  const freshPath = `${genDir}/fresh/config.json`;
-  const res2 = spawnSync(process.execPath, [helperPath], {
-    encoding: "utf8",
-    env: { ...process.env, MCP_REG_CONFIG: freshPath, MCP_REG_NAME: "example-com", MCP_REG_NODE: "node", MCP_REG_JS: "/s.js" },
-  });
-  assert.equal(res2.status, 0, `helper (fresh) failed:\n${res2.stdout}\n${res2.stderr}`);
-  assert.ok(existsSync(freshPath), "helper created the config file from scratch");
-  assert.ok(JSON.parse(readFileSync(freshPath, "utf8")).mcpServers["example-com"]);
 });
 
 // Gate A: the generated server.ts TYPE-CHECKS against the real @modelcontextprotocol/sdk

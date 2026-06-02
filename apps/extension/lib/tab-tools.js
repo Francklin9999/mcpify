@@ -72,11 +72,35 @@ async function runInPage(tabId, func, arg) {
 }
 
 function interpolate(template, args, encode = false) {
-  return String(template == null ? "" : template).replace(/\{\{(\w+)\}\}/g, (_m, key) => {
+  return String(template == null ? "" : template).replace(/\{\{?(\w+)\}\}?/g, (_m, key) => {
     const value = args && args[key];
     const text = value == null ? "" : String(value);
     return encode ? encodeURIComponent(text) : text;
   });
+}
+
+function interpolateUrl(payload) {
+  const template = payload && payload.template;
+  const args = (payload && payload.args) || {};
+  const rawTemplate = String(template == null ? "" : template);
+  const direct = rawTemplate.match(/^\s*\{\{?(\w+)\}\}?\s*$/);
+  if (direct) {
+    const value = args && args[direct[1]];
+    return value == null ? "" : String(value);
+  }
+  const raw = rawTemplate.replace(/\{\{?(\w+)\}\}?/g, (_m, key) => {
+    const value = args && args[key];
+    return value == null || String(value) === "" ? "" : encodeURIComponent(String(value));
+  });
+  try {
+    const url = new URL(raw, location.href);
+    for (const [key, value] of Array.from(url.searchParams.entries())) {
+      if (value === "") url.searchParams.delete(key);
+    }
+    return url.toString();
+  } catch {
+    return raw.replace(/([?&])[^=&#]+=(?=(&|#|$))/g, (_m, sep, tail) => (sep === "?" && tail === "&" ? "?" : sep === "?" ? "" : tail === "&" ? "&" : ""));
+  }
 }
 
 // in-page functions (serialized & injected - must be self-contained, no outer references)
@@ -372,6 +396,76 @@ function extractInPage(mode) {
       url: loc.href,
     };
   }
+  if (mode === "linkedin_jobs") {
+    const pickText = (root, selectors) => {
+      for (const selector of selectors) {
+        const node = root.querySelector(selector);
+        const text = clean(node && node.textContent);
+        if (text) return text;
+      }
+      return "";
+    };
+    const jobIdFromUrl = (url) => {
+      const match = String(url || "").match(/\/jobs\/view\/(\d+)/i) || String(url || "").match(/[?&]currentJobId=(\d+)/i);
+      return match ? match[1] : "";
+    };
+    const selected = {
+      title: textOf([".jobs-unified-top-card__job-title", ".job-details-jobs-unified-top-card__job-title", "h1"]),
+      company: textOf([".jobs-unified-top-card__company-name", ".job-details-jobs-unified-top-card__company-name", ".jobs-unified-top-card__subtitle-primary-grouping a"]),
+      location: textOf([".jobs-unified-top-card__bullet", ".job-details-jobs-unified-top-card__primary-description-container", ".jobs-unified-top-card__primary-description-container"]),
+      workplace: textOf([".jobs-unified-top-card__workplace-type", ".job-details-jobs-unified-top-card__job-insight"]),
+      url: loc.href,
+      jobId: jobIdFromUrl(loc.href),
+      description: textOf(["#job-details", ".jobs-description", ".jobs-box__html-content", ".jobs-description-content__text"]).slice(0, 5000),
+    };
+    const cardSelectors = [
+      "li[data-occludable-job-id]",
+      ".jobs-search-results__list-item",
+      ".job-card-container",
+      "[data-job-id]",
+      "li.scaffold-layout__list-item",
+    ];
+    const cards = [];
+    for (const selector of cardSelectors) {
+      for (const card of Array.from(doc.querySelectorAll(selector))) {
+        if (!cards.includes(card)) cards.push(card);
+      }
+    }
+    const seen = new Set();
+    const results = cards
+      .map((card) => {
+        const link = card.querySelector('a[href*="/jobs/view/"]');
+        const url = link && link.href ? link.href : "";
+        const text = clean(card.textContent);
+        const jobId = card.getAttribute("data-occludable-job-id") || card.getAttribute("data-job-id") || jobIdFromUrl(url);
+        return {
+          jobId,
+          title: pickText(card, [".job-card-list__title", ".job-card-container__link", ".job-card-job-posting-card-wrapper__title", 'a[href*="/jobs/view/"]']) || clean(link && link.textContent),
+          company: pickText(card, [".job-card-container__primary-description", ".artdeco-entity-lockup__subtitle", "[class*='company']"]),
+          location: pickText(card, [".job-card-container__metadata-item", ".artdeco-entity-lockup__caption", "[class*='location']"]),
+          url,
+          text: text.slice(0, 700),
+        };
+      })
+      .filter((entry) => {
+        const key = entry.jobId || entry.url || `${entry.title}|${entry.company}|${entry.location}`;
+        if (!entry.title && !entry.text) return false;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 25);
+    return {
+      url: loc.href,
+      query: {
+        keywords: new URLSearchParams(loc.search).get("keywords") || "",
+        location: new URLSearchParams(loc.search).get("location") || "",
+        start: new URLSearchParams(loc.search).get("start") || "0",
+      },
+      selectedJob: selected.title || selected.company || selected.description ? selected : null,
+      results,
+    };
+  }
   if (mode === "listing") {
     const seen = new Set();
     return Array.from(doc.querySelectorAll("a[href]"))
@@ -512,7 +606,7 @@ export async function executeBrowserStepsOnActiveTab(steps, args = {}) {
     if (!step || !step.action) continue;
     switch (step.action) {
       case "navigate": {
-        const targetUrl = resolveUrl(interpolate(step.value, args), tab.url || "");
+        const targetUrl = resolveUrl(await runInPage(tab.id, interpolateUrl, { template: step.value, args }), tab.url || "");
         if (!sameUrl(targetUrl, tab.url)) {
           await chrome.tabs.update(tab.id, { url: targetUrl });
           await waitForLoad(tab.id);

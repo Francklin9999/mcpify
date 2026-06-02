@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Callable, Optional
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
@@ -15,6 +16,7 @@ USER_AGENT = "mcp-scraper"
 RobotsFetcher = Callable[[str], Optional[str]]
 
 
+@lru_cache(maxsize=512)
 def _default_fetch(robots_url: str) -> Optional[str]:
     import urllib.request
 

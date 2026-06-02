@@ -35,5 +35,5 @@ test("generate job returns the generated artifact for /api/jobs polling", async 
 
   assert.equal(result.status, "done");
   assert.equal(result.result?.entrypoint, "server.ts");
-  assert.ok(result.result?.files.some((file) => file.path === "claude_desktop_config.json"));
+  assert.ok(result.result?.files.some((file) => file.path === "claude_code_config.json"));
 });
