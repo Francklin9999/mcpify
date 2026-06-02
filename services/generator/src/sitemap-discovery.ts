@@ -155,7 +155,7 @@ function sanitizeName(value: string): string {
  */
 export function clusterUrlTemplates(
   urls: string[],
-  opts: { origin?: string; minMembers?: number; max?: number } = {},
+  opts: { origin?: string; minMembers?: number; max?: number; maxTemplates?: number } = {},
 ): SubPagePattern[] {
   const minMembers = opts.minMembers ?? 8;
   type Group = { entity: string; values: Set<string>; example: string; segCount: number; paramIndex: number; sampleSegs: string[] };
@@ -200,12 +200,12 @@ export function clusterUrlTemplates(
     });
   }
 
-  // Dedup by tool name, keeping the strongest (most members); cap the count.
+  // Dedup by tool name, keeping the strongest (most members); cap the number of distinct detail-tool families.
   const byName = new Map<string, SubPagePattern>();
   for (const p of patterns.sort((a, b) => b.memberCount - a.memberCount)) {
     if (!byName.has(p.name)) byName.set(p.name, p);
   }
-  return [...byName.values()].slice(0, 6);
+  return [...byName.values()].slice(0, opts.maxTemplates ?? 25);
 }
 
 /** Does `path` fall under any `Disallow:` prefix? (Trailing `*` wildcards are treated as prefixes.) */
@@ -244,6 +244,8 @@ export interface SubPageDiscoveryOptions {
   maxUrls?: number;
   /** Min distinct param values for a template to count as a real collection. */
   minMembers?: number;
+  /** Max distinct detail-tool families to emit (the per-link "how many tools" cap). */
+  maxTemplates?: number;
 }
 
 /**
@@ -298,5 +300,5 @@ export async function discoverSubPageTools(
     }
   });
 
-  return clusterUrlTemplates(allowed, { origin, minMembers: opts.minMembers, max: maxUrls }).map(toolFor);
+  return clusterUrlTemplates(allowed, { origin, minMembers: opts.minMembers, max: maxUrls, maxTemplates: opts.maxTemplates }).map(toolFor);
 }

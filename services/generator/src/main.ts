@@ -31,11 +31,11 @@ async function main(): Promise<void> {
   const { inference, heal } = makeLLMClients();
 
   const store = new PostgresStore(createDb(databaseUrl), new FsArtifactStore(artifactRoot));
-  // Sub-page discovery (sitemap/robots) enriches generated servers with parameterized detail tools. OFF by
-  // default and opt-in via SUBPAGE_DISCOVERY=1: it makes the generator fetch /robots.txt + /sitemap.xml
-  // directly (honoring Disallow) rather than routing through the scraper's centralized legal layer, so it's
-  // an explicit choice. Best-effort and bounded - never blocks a generate job.
-  const subPagesOn = env("SUBPAGE_DISCOVERY", "0") === "1";
+  // Sub-page discovery (sitemap/robots) enriches generated servers with parameterized detail tools so a
+  // single link yields as many tools as the site exposes. ON by default; set SUBPAGE_DISCOVERY=0 to disable.
+  // It fetches /robots.txt + /sitemap.xml directly (honoring Disallow) rather than routing through the
+  // scraper's centralized legal layer - a deliberate posture choice. Best-effort + bounded; never blocks a job.
+  const subPagesOn = env("SUBPAGE_DISCOVERY", "1") !== "0";
   const discoverSubPages = subPagesOn ? (url: string) => discoverSubPageTools(url, httpFetchText()) : undefined;
   // Live tool verification (closed loop): execute generated tools against the real site and fold the result
   // into confidence (verified boosted, dead/blocked damped - never pruned). OFF by default; opt-in via
