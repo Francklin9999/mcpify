@@ -1,6 +1,7 @@
 import { generate, waitForArtifact, assistAgentStep, findServerForUrl, discoverTools, apiBase } from "./lib/api.js";
 import { buildCaptureBundle } from "./lib/capture.js";
 import { renderMarkdown } from "./lib/markdown.js";
+import { filterSafeSnapshot, privacyReportText } from "./lib/privacy.js";
 import { zipBlob } from "./lib/zip.js";
 import {
   runAgent,
@@ -633,37 +634,45 @@ async function readRecentCalls(tab) {
 async function buildPageContext() {
   const tab = await activeTab().catch(() => null);
   const [snapshot, recentCalls] = await Promise.all([readPageSnapshot(tab), readRecentCalls(tab)]);
+  const guarded = filterSafeSnapshot(snapshot, tab?.url || "");
+  const safeSnapshot = guarded.snapshot;
 
   const sections = [];
-  if (snapshot?.outline?.length) sections.push(`Page outline:\n${snapshot.outline.map((line) => `- ${line}`).join("\n")}`);
-  if (snapshot?.actions?.length) sections.push(`Visible actions:\n${snapshot.actions.map((line) => `- ${line}`).join("\n")}`);
-  if (snapshot?.visibleText) sections.push(`Visible text:\n${snapshot.visibleText}`);
-  if (recentCalls.length) sections.push(`Recent XHR/fetch calls captured by the extension:\n${recentCalls.map((line) => `- ${line}`).join("\n")}`);
+  if (safeSnapshot?.outline?.length) sections.push(`Page outline:\n${safeSnapshot.outline.map((line) => `- ${line}`).join("\n")}`);
+  if (safeSnapshot?.actions?.length) sections.push(`Visible actions:\n${safeSnapshot.actions.map((line) => `- ${line}`).join("\n")}`);
+  if (safeSnapshot?.visibleText) sections.push(`Visible text:\n${safeSnapshot.visibleText}`);
+  if (!guarded.report.restricted && recentCalls.length) sections.push(`Recent XHR/fetch calls captured by the extension:\n${recentCalls.map((line) => `- ${line}`).join("\n")}`);
 
   const context = {};
   if (isHttpUrl(tab?.url)) context.url = sanitizedUrl(tab.url);
-  if (tab?.title || snapshot?.title) context.title = tab?.title || snapshot.title;
+  if (tab?.title || safeSnapshot?.title) context.title = tab?.title || safeSnapshot.title;
+  if (guarded.report.restricted) {
+    context.visibleText = "Privacy guard: this page looks like checkout, account, payment, auth, or another private flow. Page text, forms, DOM, and network calls were withheld locally.";
+    return { context, privacyReport: guarded.report };
+  }
   if (sections.length) context.visibleText = truncate(sections.join("\n\n"), 11500);
-  return context;
+  return { context, privacyReport: guarded.report };
 }
 
 async function buildExtensionBundle(tab) {
   const [snapshot, calls] = await Promise.all([readPageSnapshot(tab), readCapturedCalls(tab)]);
-  if (!snapshot?.html) return null;
+  const guarded = filterSafeSnapshot(snapshot, tab?.url || "");
+  if (guarded.report.restricted || !guarded.snapshot?.html) return null;
+  const safeSnapshot = guarded.snapshot;
   const pageUrl = sanitizedUrl(tab?.url || snapshot.url);
   if (!pageUrl) return null;
   return buildCaptureBundle({
     url: pageUrl,
-    html: snapshot.html,
-    title: tab?.title || snapshot.title,
-    selectorsOfInterest: snapshot.selectorsOfInterest || [],
+    html: safeSnapshot.html,
+    title: tab?.title || safeSnapshot.title,
+    selectorsOfInterest: safeSnapshot.selectorsOfInterest || [],
     calls,
     page: {
-      headings: snapshot.outline || [],
-      visibleText: snapshot.visibleText || undefined,
-      actions: snapshot.actionItems || [],
-      forms: snapshot.forms || [],
-      appState: snapshot.appState || [],
+      headings: safeSnapshot.outline || [],
+      visibleText: safeSnapshot.visibleText || undefined,
+      actions: safeSnapshot.actionItems || [],
+      forms: safeSnapshot.forms || [],
+      appState: safeSnapshot.appState || [],
     },
     legalMode: "session",
   });
@@ -1001,7 +1010,9 @@ async function sendChat(text) {
   let activeRow = null;
 
   try {
-    const pageContext = await buildPageContext();
+    const { context: pageContext, privacyReport } = await buildPageContext();
+    const privacyNotice = privacyReportText(privacyReport);
+    if (privacyNotice) view.addText(privacyNotice);
     const outcome = await runAgent(history.slice(), {
       // Recompute specs each step so tools discovered mid-turn become callable immediately (browser_*
       // primitives + whatever discovered tools exist for this page right now).

@@ -105,8 +105,42 @@ function interpolateUrl(payload) {
 
 // in-page functions (serialized & injected - must be self-contained, no outer references)
 
+function privacyReportInPage() {
+  const clean = (v) => String(v == null ? "" : v).replace(/\s+/g, " ").trim();
+  const pathRe =
+    /(?:^|\/|\b)(checkout|payment|billing|shipping|order(?:s|[-_]?confirmation)?|cart|account|profile|settings|login|log[-_]?in|signin|sign[-_]?in|signup|sign[-_]?up|register|password|reset|auth|oauth|sso|session|wallet|address|invoice)(?:\/|\b|$)/i;
+  const fieldRe =
+    /(?:password|passcode|otp|2fa|mfa|token|secret|session|auth|cookie|csrf|card|cc-|credit|cvv|cvc|security[-_ ]?code|expiry|expiration|routing|iban|bank|ssn|sin|tax|address|phone|email)/i;
+  const textRe =
+    /(?:checkout|payment|billing|shipping address|card number|credit card|debit card|cvv|cvc|security code|expiration date|password|one[-_ ]?time code|verification code|social security|order confirmation|invoice)/i;
+  const longDigits = /\b(?:\d[ -]?){12,19}\b/;
+  const items = [];
+  const add = (kind, label, detail) => {
+    const key = kind + ":" + label + ":" + (detail || "");
+    if (!items.some((item) => item.key === key)) items.push({ key, kind, label, detail });
+  };
+  if (pathRe.test(location.href)) add("page", "Sensitive URL", "checkout/account/payment-style path");
+  if (textRe.test(document.title)) add("page", "Sensitive title", clean(document.title).slice(0, 80));
+  for (const form of Array.from(document.forms || [])) {
+    const fields = Array.from(form.elements || []);
+    const formText = clean([form.action, form.getAttribute("name"), form.id, form.getAttribute("aria-label")].filter(Boolean).join(" "));
+    if (pathRe.test(formText) || fieldRe.test(formText)) add("form", "Sensitive form", form.action || formText.slice(0, 80));
+    for (const field of fields) {
+      const fieldText = clean([field.getAttribute?.("name"), field.getAttribute?.("type"), field.getAttribute?.("autocomplete"), field.getAttribute?.("placeholder"), field.id].filter(Boolean).join(" "));
+      if (fieldRe.test(fieldText)) add("field", "Sensitive field", fieldText.slice(0, 80));
+    }
+  }
+  let bodyText = "";
+  try { bodyText = clean(document.body ? document.body.innerText : "").slice(0, 4000); } catch {}
+  if (textRe.test(bodyText) || longDigits.test(bodyText)) add("text", "Sensitive page text", "payment/auth/order details detected");
+  const publicItems = items.map(({ kind, label, detail }) => ({ kind, label, detail }));
+  return { restricted: publicItems.some((item) => ["page", "form", "field", "text"].includes(item.kind)), items: publicItems };
+}
+
 function snapshotInPage() {
   const doc = document;
+  const privacy = privacyReportInPage();
+  if (privacy.restricted) return { privacyBlocked: true, url: location.href, title: doc.title, privacy };
   const clean = (v) => String(v == null ? "" : v).replace(/\s+/g, " ").trim();
   // Broad enough to catch calendar day cells, dropdown options and other ARIA widgets - not just links/buttons.
   const selector = [
@@ -342,6 +376,8 @@ function selectValueOnElement(el, value) {
 }
 
 function readInPage() {
+  const privacy = privacyReportInPage();
+  if (privacy.restricted) return formatPrivacyBlocked({ url: location.href, title: document.title, privacy });
   const clean = (v) => String(v == null ? "" : v).replace(/[ \t]+/g, " ").replace(/\n\s*\n\s*\n+/g, "\n\n").trim();
   const body = document.body ? document.body.innerText : "";
   const text = clean(body);
@@ -349,6 +385,8 @@ function readInPage() {
 }
 
 function extractInPage(mode) {
+  const privacy = privacyReportInPage();
+  if (privacy.restricted) return { privacyBlocked: true, url: location.href, title: document.title, withheld: privacy.items };
   const doc = document;
   const loc = location;
   const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
@@ -494,6 +532,7 @@ function extractInPage(mode) {
 
 function formatSnapshot(data) {
   if (!data) return "Could not read the page (it may be a restricted or non-web page).";
+  if (data.privacyBlocked) return formatPrivacyBlocked(data);
   const lines = (data.elements || []).map(
     (e) =>
       "[" + e.ref + "] " + e.role + (e.type ? " type=" + e.type : "") + (e.state ? " (" + e.state + ")" : "") + (e.name ? ' "' + e.name + '"' : ""),
@@ -505,6 +544,18 @@ function formatSnapshot(data) {
     "\n\nINTERACTIVE ELEMENTS (pass a [ref] to browser_click / browser_type / browser_select_option):\n" +
     (lines.length ? lines.join("\n") : "(none found)") +
     "\n\nVISIBLE TEXT (excerpt):\n" + (data.text || "")
+  );
+}
+
+function formatPrivacyBlocked(data) {
+  const rows = (data?.privacy?.items || data?.withheld || [])
+    .slice(0, 8)
+    .map((item) => "- " + item.kind + ": " + item.label + (item.detail ? " (" + String(item.detail).slice(0, 90) + ")" : ""));
+  return (
+    "PRIVACY GUARD: Page content withheld locally before sending it to the agent.\n" +
+    "PAGE: " + (data?.title || "(untitled)") + "\nURL: " + (data?.url || "") +
+    "\n\nWITHHELD CONTEXT:\n" + (rows.length ? rows.join("\n") : "- page: sensitive flow detected") +
+    "\n\nOnly navigation away from this page or user-confirmed actions should continue."
   );
 }
 

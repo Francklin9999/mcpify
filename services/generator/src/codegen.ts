@@ -584,7 +584,10 @@ class PlaywrightBrowsing implements Browsing {
     const gate = await this.checkGate(undefined);
     if (gate.kind !== "ok") return this.raiseHandoff(gate, page.url(), () => this.runSteps(spec, args));
     this.pending = undefined;
-    if (extracted === undefined) extracted = htmlToText(await page.content());
+    if (extracted === undefined) {
+      const privacy = await pagePrivacy(page);
+      extracted = privacy.restricted ? formatPrivacyBlocked(privacy) : htmlToText(await page.content());
+    }
     return extracted;
   }
 
@@ -645,7 +648,12 @@ class PlaywrightBrowsing implements Browsing {
     return this.snapshotOrGate();
   }
 
-  async read(): Promise<string> { return htmlToText(await (await this.page()).content()); }
+  async read(): Promise<string> {
+    const page = await this.page();
+    const privacy = await pagePrivacy(page);
+    if (privacy.restricted) return formatPrivacyBlocked(privacy);
+    return htmlToText(await page.content());
+  }
 
   async extract(mode: string): Promise<unknown> {
     return extractData(await this.page(), "json:" + String(mode || "metadata").replace(/^json:/, ""));
@@ -703,9 +711,59 @@ async function evalWithRetry(page: any, fn: any, arg?: any): Promise<any> {
   }
 }
 
+async function pagePrivacy(page: any): Promise<{ restricted: boolean; url: string; title: string; items: Array<{ kind: string; label: string; detail?: string }> }> {
+  return evalWithRetry(page, () => {
+    const doc = (globalThis as any).document;
+    const loc = (globalThis as any).location;
+    const clean = (v: any) => String(v == null ? "" : v).replace(/\\s+/g, " ").trim();
+    const pathRe =
+      /(?:^|\\/|\\b)(checkout|payment|billing|shipping|order(?:s|[-_]?confirmation)?|cart|account|profile|settings|login|log[-_]?in|signin|sign[-_]?in|signup|sign[-_]?up|register|password|reset|auth|oauth|sso|session|wallet|address|invoice)(?:\\/|\\b|$)/i;
+    const fieldRe =
+      /(?:password|passcode|otp|2fa|mfa|token|secret|session|auth|cookie|csrf|card|cc-|credit|cvv|cvc|security[-_ ]?code|expiry|expiration|routing|iban|bank|ssn|sin|tax|address|phone|email)/i;
+    const textRe =
+      /(?:checkout|payment|billing|shipping address|card number|credit card|debit card|cvv|cvc|security code|expiration date|password|one[-_ ]?time code|verification code|social security|order confirmation|invoice)/i;
+    const longDigits = /\\b(?:\\d[ -]?){12,19}\\b/;
+    const items: Array<{ key: string; kind: string; label: string; detail?: string }> = [];
+    const add = (kind: string, label: string, detail?: string) => {
+      const key = kind + ":" + label + ":" + (detail || "");
+      if (!items.some((item) => item.key === key)) items.push({ key, kind, label, detail });
+    };
+    if (pathRe.test(loc.href)) add("page", "Sensitive URL", "checkout/account/payment-style path");
+    if (textRe.test(doc.title)) add("page", "Sensitive title", clean(doc.title).slice(0, 80));
+    for (const form of Array.from(doc.forms || []) as any[]) {
+      const fields = Array.from(form.elements || []) as any[];
+      const formText = clean([form.action, form.getAttribute?.("name"), form.id, form.getAttribute?.("aria-label")].filter(Boolean).join(" "));
+      if (pathRe.test(formText) || fieldRe.test(formText)) add("form", "Sensitive form", form.action || formText.slice(0, 80));
+      for (const field of fields) {
+        const fieldText = clean([field.getAttribute?.("name"), field.getAttribute?.("type"), field.getAttribute?.("autocomplete"), field.getAttribute?.("placeholder"), field.id].filter(Boolean).join(" "));
+        if (fieldRe.test(fieldText)) add("field", "Sensitive field", fieldText.slice(0, 80));
+      }
+    }
+    let bodyText = "";
+    try { bodyText = clean(doc.body ? doc.body.innerText : "").slice(0, 4000); } catch { /* ignore */ }
+    if (textRe.test(bodyText) || longDigits.test(bodyText)) add("text", "Sensitive page text", "payment/auth/order details detected");
+    const publicItems = items.map(({ kind, label, detail }) => ({ kind, label, detail }));
+    return { restricted: publicItems.some((item) => ["page", "form", "field", "text"].includes(item.kind)), url: loc.href, title: doc.title, items: publicItems };
+  });
+}
+
+function formatPrivacyBlocked(data: { url?: string; title?: string; items?: Array<{ kind: string; label: string; detail?: string }> }): string {
+  const rows = (data.items || [])
+    .slice(0, 8)
+    .map((item) => "- " + item.kind + ": " + item.label + (item.detail ? " (" + String(item.detail).slice(0, 90) + ")" : ""));
+  return (
+    "PRIVACY GUARD: Page content withheld locally before sending it to the agent.\\n" +
+    "PAGE: " + (data.title || "(untitled)") + "\\nURL: " + (data.url || "") +
+    "\\n\\nWITHHELD CONTEXT:\\n" + (rows.length ? rows.join("\\n") : "- page: sensitive flow detected") +
+    "\\n\\nOnly navigation away from this page or user-confirmed actions should continue."
+  );
+}
+
 // Compact, ref-annotated view of the live page: enumerated INTERACTIVE elements (each tagged in-page with
 // data-__mcp_ref so browser_click/type/select can resolve it) + title/url + a visible-text excerpt.
 async function snapshotText(page: any): Promise<string> {
+  const privacy = await pagePrivacy(page);
+  if (privacy.restricted) return formatPrivacyBlocked(privacy);
   const data = await evalWithRetry(page, () => {
     const doc = (globalThis as any).document;
     const loc = (globalThis as any).location;
@@ -750,6 +808,8 @@ async function snapshotText(page: any): Promise<string> {
 }
 
 async function extractData(page: any, mode: string, selectors?: string[]): Promise<unknown> {
+  const privacy = await pagePrivacy(page);
+  if (privacy.restricted) return { privacyBlocked: true, url: privacy.url, title: privacy.title, withheld: privacy.items };
   if (mode === "json:metadata" || mode === "json:product" || mode === "json:listing" || mode === "json:linkedin_jobs") {
     return evalWithRetry(page, (params: { extractMode: string; selectors?: string[] }) => {
       const extractMode = params.extractMode;
