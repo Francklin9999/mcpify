@@ -12,6 +12,7 @@ export * from "./version-write.js";
 export * from "./worker.js";
 export * from "./enqueue-server.js";
 export * from "./html-analysis.js";
+export * from "./tool-verifier.js";
 export * from "./adapters/scraper-http.js";
 export * from "./adapters/artifact-store.js";
 export * from "./adapters/postgres.js";

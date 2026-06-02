@@ -31,6 +31,12 @@ export interface GenerateDeps {
    * (deduped by name + endpoint signature). Best-effort: a failure or absence never blocks generation.
    */
   discoverSubPages?: (pageUrl: string) => Promise<ToolDefinition[]>;
+  /**
+   * Optional LIVE verification. When provided, the inferred tools are executed against the real site and
+   * returned confidence-annotated (verified tools boosted, dead/blocked damped - never pruned). Best-effort:
+   * a failure or absence leaves the tools untouched. Makes the generator prove its own output.
+   */
+  verifyTools?: (tools: ToolDefinition[], pageUrl: string) => Promise<ToolDefinition[]>;
 }
 
 export interface GenerateOutcome {
@@ -49,7 +55,9 @@ export async function generate(req: GenerateRequest, deps: GenerateDeps): Promis
 
   // Best-effort sub-page enrichment: fold in tools discovered from the site's own sitemap/robots, deduped
   // by name + endpoint signature so they never duplicate DOM-mined detail tools. Never blocks generation.
-  const tools = await withSubPageTools(result.tools, req.url, deps.discoverSubPages);
+  const enriched = await withSubPageTools(result.tools, req.url, deps.discoverSubPages);
+  // Optional closed-loop: verify tools against the live site and fold the result into confidence.
+  const tools = await withLiveVerification(enriched, req.url, deps.verifyTools);
   const confidence = tools === result.tools ? result.confidence : aggregateConfidence(tools.map((t) => t.confidence));
 
   const { serverId, version } = await deps.persistence.nextServer(req.url);
@@ -118,5 +126,19 @@ async function withSubPageTools(
     return merged.length ? [...tools, ...merged] : tools;
   } catch {
     return tools; // sub-page discovery is best-effort; a failure must never block generation
+  }
+}
+
+/** Run optional live verification; returns confidence-annotated tools, or the inputs on absence/failure. */
+async function withLiveVerification(
+  tools: ToolDefinition[],
+  pageUrl: string,
+  verify?: (tools: ToolDefinition[], pageUrl: string) => Promise<ToolDefinition[]>,
+): Promise<ToolDefinition[]> {
+  if (!verify) return tools;
+  try {
+    return await verify(tools, pageUrl);
+  } catch {
+    return tools; // verification is best-effort; a failure must never block generation
   }
 }

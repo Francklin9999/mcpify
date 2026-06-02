@@ -6,6 +6,8 @@ import { HttpScraper } from "./adapters/scraper-http.js";
 import { FsArtifactStore } from "./adapters/artifact-store.js";
 import { makeLLMClients } from "./llm-factory.js";
 import { discoverSubPageTools, httpFetchText } from "./sitemap-discovery.js";
+import { verifyAndAnnotate, httpProbe } from "./tool-verifier.js";
+import type { ToolDefinition } from "@mcp/types";
 
 /**
  * Deployable worker process: consumes `mcp-jobs` (BullMQ) and runs the enqueue shim for the Go monitor.
@@ -35,7 +37,12 @@ async function main(): Promise<void> {
   // an explicit choice. Best-effort and bounded - never blocks a generate job.
   const subPagesOn = env("SUBPAGE_DISCOVERY", "0") === "1";
   const discoverSubPages = subPagesOn ? (url: string) => discoverSubPageTools(url, httpFetchText()) : undefined;
-  const deps = { store, scraper: new HttpScraper(scraperUrl), inference, heal, discoverSubPages };
+  // Live tool verification (closed loop): execute generated tools against the real site and fold the result
+  // into confidence (verified boosted, dead/blocked damped - never pruned). OFF by default; opt-in via
+  // VERIFY_TOOLS=1, since it makes the generator issue live GET requests to the target site.
+  const verifyOn = env("VERIFY_TOOLS", "0") === "1";
+  const verifyTools = verifyOn ? async (tools: ToolDefinition[]) => (await verifyAndAnnotate(tools, httpProbe())).tools : undefined;
+  const deps = { store, scraper: new HttpScraper(scraperUrl), inference, heal, discoverSubPages, verifyTools };
 
   const worker = startWorker(connection, deps);
   const { server } = await startEnqueueServer(enqueuePort, connection);
