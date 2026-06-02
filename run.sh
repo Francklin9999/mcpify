@@ -147,10 +147,39 @@ assert_port_free "${ENQUEUE_PORT:-8081}" "worker enqueue"
 assert_port_free "$WEB_PORT" "web"
 
 # --- preflight ------------------------------------------------------------
-command -v node    >/dev/null || die "node is required (>=20)"
-command -v npm     >/dev/null || die "npm is required"
-command -v docker  >/dev/null || die "docker is required"
-command -v python3 >/dev/null || die "python3 is required (for the scraper)"
+# These four are SYSTEM tools we can't safely auto-install (OS-specific, needs root). Instead, when one is
+# missing we print the EXACT install command for THIS machine's package manager, report every missing tool
+# at once, and stop. (Everything else - npm packages, the scraper venv + its Playwright browser, the Docker
+# containers - run.sh installs automatically below.)
+pkg_hint() {
+  local pkg="$1"
+  if   command -v brew    >/dev/null 2>&1; then echo "brew install $pkg"
+  elif command -v dnf     >/dev/null 2>&1; then echo "sudo dnf install -y $pkg"
+  elif command -v apt-get >/dev/null 2>&1; then echo "sudo apt-get update && sudo apt-get install -y $pkg"
+  elif command -v pacman  >/dev/null 2>&1; then echo "sudo pacman -S $pkg"
+  elif command -v zypper  >/dev/null 2>&1; then echo "sudo zypper install -y $pkg"
+  elif command -v apk     >/dev/null 2>&1; then echo "sudo apk add $pkg"
+  else echo "install '$pkg' with your system package manager"
+  fi
+}
+
+MISSING=0
+require_tool() {
+  # $1=command  $2=human label  $3=package name  $4=optional docs URL
+  command -v "$1" >/dev/null 2>&1 && return 0
+  warn "$2 is required but was not found."
+  warn "    install:  $(pkg_hint "$3")"
+  [ -n "${4:-}" ] && warn "    or see:   $4"
+  MISSING=1
+}
+
+require_tool node    "Node.js (>=20)"     nodejs  "https://nodejs.org/en/download"
+require_tool npm     "npm"                npm
+require_tool docker  "Docker"             docker  "https://docs.docker.com/engine/install/"
+require_tool python3 "Python 3 (scraper)" python3 "https://www.python.org/downloads/"
+if [ "$MISSING" = "1" ]; then
+  die "install the missing prerequisite(s) listed above, then re-run ./run.sh"
+fi
 
 mkdir -p "$ARTIFACT_ROOT"
 

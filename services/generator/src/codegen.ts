@@ -99,12 +99,20 @@ const TOOLKIT_NAMES = [
 ] as const;
 
 /**
+ * Whether this server ships the browser toolkit (and therefore needs Playwright's Chromium binary). Single
+ * source of truth for codegen AND the installers, so the emitted toolkit and the auto-install step agree.
+ */
+function emitsBrowserToolkit(input: CodegenInput): boolean {
+  return input.browsing ?? input.tools.some((t) => t.execution.kind === "browser");
+}
+
+/**
  * The fixed browsing toolkit (NOT inferred tools - emitted directly so the frozen `01 S2` ExecutionStrategy
  * union stays untouched). Registered against the same persistent `browsing` session the shortcut tools use,
  * so the model can compose: snapshot -> click(ref) -> snapshot -> ... across many tool calls.
  */
 function browsingToolkitRegistrations(input: CodegenInput): string {
-  const emit = input.browsing ?? input.tools.some((t) => t.execution.kind === "browser");
+  const emit = emitsBrowserToolkit(input);
   if (!emit) return "";
   const inferred = new Set(input.tools.map((t) => t.name));
   const defs: { name: (typeof TOOLKIT_NAMES)[number]; description: string; shape: string; call: string }[] = [
@@ -1218,6 +1226,13 @@ export function registerHelperMjs(): string {
  */
 export function installSh(input: CodegenInput): string {
   const name = slugFromUrl(input.url);
+  // Browser servers need Playwright's Chromium binary (npm install only fetches the library). Best-effort so
+  // a failed download (offline/sandboxed) never aborts the install + registration of the HTTP tools.
+  const playwrightStep = emitsBrowserToolkit(input)
+    ? `echo "==> Installing Playwright's Chromium (needed by the browser_* tools) ..."
+npx --yes playwright install chromium || echo "WARN: 'npx playwright install chromium' failed - browser_* tools will not work until you run it manually (add --with-deps on Linux if system libraries are missing)." >&2
+`
+    : "";
   return `#!/usr/bin/env bash
 # install.sh - build this generated MCP server and register it with Claude Code user MCPs.
 #   bash install.sh                 install deps, build, and register
@@ -1240,7 +1255,7 @@ echo "==> Installing dependencies (npm install) ..."
 npm install
 echo "==> Building (npm run build) ..."
 npm run build
-
+${playwrightStep}
 REGISTER=1
 for arg in "$@"; do
   [ "$arg" = "--no-register" ] && REGISTER=0
@@ -1295,6 +1310,13 @@ echo "==> Done. Restart Claude Code or run /mcp to load \\"$SERVER_NAME\\"."
  */
 export function installPs1(input: CodegenInput): string {
   const name = slugFromUrl(input.url);
+  // Browser servers need Playwright's Chromium binary; best-effort (warn, don't abort) like install.sh.
+  const playwrightStep = emitsBrowserToolkit(input)
+    ? `Write-Host "==> Installing Playwright's Chromium (needed by the browser_* tools) ..."
+npx --yes playwright install chromium
+if ($LASTEXITCODE -ne 0) { Write-Warning "playwright install chromium failed - browser_* tools will not work until you run it manually." }
+`
+    : "";
   return `# install.ps1 - build this generated MCP server and register it with Claude Code user MCPs.
 #   powershell -ExecutionPolicy Bypass -File install.ps1
 #   powershell -ExecutionPolicy Bypass -File install.ps1 --no-register   (build only)
@@ -1316,7 +1338,7 @@ if ($LASTEXITCODE -ne 0) { Write-Error "npm install failed"; exit 1 }
 Write-Host "==> Building (npm run build) ..."
 npm run build
 if ($LASTEXITCODE -ne 0) { Write-Error "npm run build failed"; exit 1 }
-
+${playwrightStep}
 if ($args -contains "--no-register") {
   Write-Host "Build complete. Register manually in Claude Code user MCPs: command=$NodeBin args=$ServerJs"
   exit 0
@@ -1367,7 +1389,7 @@ Write-Host "==> Done. Restart Claude Code or run /mcp to load $ServerName."
 
 export function generateServer(input: CodegenInput): GeneratedServerArtifact {
   const snippet = configSnippet(input);
-  const readme = `# ${input.title} - MCP server\n\nAuto-generated from ${input.url} (v${input.version}). Runs locally and may use public HTTP calls plus Playwright-driven browser steps.\n\n## Install (one step)\n\nThis builds the server and registers it with Claude Code user MCPs, then restart Claude Code or run \`/mcp\`.\n\n\`\`\`bash\n# macOS / Linux\nbash install.sh\n\`\`\`\n\`\`\`powershell\n# Windows\npowershell -ExecutionPolicy Bypass -File install.ps1\n\`\`\`\n\nThe installer registers the server with an absolute \`node\` path in \`~/.claude.json\`, removes duplicate project-scoped Claude Code entries for the same server, and removes stale Claude Desktop entries for the same server. Set \`MCP_TARGET=desktop\` if you intentionally want the legacy Claude Desktop config path, or pass \`--no-register\` to build only.\n\n## Run manually\n\n\`\`\`bash\nnpm install\nnpm run build\nnpm start\n\`\`\`\n\nBrowser tools use Playwright. Run \`npx playwright install chromium\` once if you use the \`browser_*\` tools, and set \`MCP_BROWSER_PATH\` or \`MCP_BROWSER_CHANNEL=chrome\` if your local Chrome install is not auto-detected.\n\n## Signed-in & bot-protected pages (stealth + human handoff)\n\nThe browser session runs with light stealth (real Chrome flags, \`navigator.webdriver\` stripped). When a tool hits a sign-in wall or a CAPTCHA it does NOT fail - it returns \`PAUSED - human action needed\`, opens a visible browser window, and waits. Complete the sign-in/challenge in that window, then call \`browser_resume\` to continue.\n\n- \`MCP_BROWSER_PROFILE=<dir>\`: a dedicated Chrome profile dir so a one-time sign-in/clearance STICKS across restarts (recommended; never point at your live Chrome profile).\n- \`MCP_BROWSER_HEADLESS=0\`: stay headed the whole time (best for multi-step authenticated flows).\n- \`MCP_BROWSER_CHANNEL=chrome\`: drive your real installed Chrome instead of bundled Chromium (stronger stealth).\n- \`MCP_BROWSER_DRIVER=patchright\`: opt into a stealth-patched Playwright drop-in (install it yourself) for hard bot walls.\n- \`MCP_HANDOFF=off\`: disable the popup/handoff (detect-only).\n\nThe \`claude_code_config.json\` snippet is also included if you prefer to wire it up by hand (fix the absolute path).\n`;
+  const readme = `# ${input.title} - MCP server\n\nAuto-generated from ${input.url} (v${input.version}). Runs locally and may use public HTTP calls plus Playwright-driven browser steps.\n\n## Install (one step)\n\nThis builds the server and registers it with Claude Code user MCPs, then restart Claude Code or run \`/mcp\`.\n\n\`\`\`bash\n# macOS / Linux\nbash install.sh\n\`\`\`\n\`\`\`powershell\n# Windows\npowershell -ExecutionPolicy Bypass -File install.ps1\n\`\`\`\n\nThe installer registers the server with an absolute \`node\` path in \`~/.claude.json\`, removes duplicate project-scoped Claude Code entries for the same server, and removes stale Claude Desktop entries for the same server. Set \`MCP_TARGET=desktop\` if you intentionally want the legacy Claude Desktop config path, or pass \`--no-register\` to build only.\n\n## Run manually\n\n\`\`\`bash\nnpm install\nnpm run build\nnpm start\n\`\`\`\n\nBrowser tools use Playwright, and \`install.sh\`/\`install.ps1\` download the Chromium binary for you when this server has \`browser_*\` tools. To do it by hand instead: \`npx playwright install chromium\` (add \`--with-deps\` on Linux if system libraries are missing). Set \`MCP_BROWSER_PATH\` or \`MCP_BROWSER_CHANNEL=chrome\` to drive your own Chrome rather than the bundled Chromium.\n\n## Signed-in & bot-protected pages (stealth + human handoff)\n\nThe browser session runs with light stealth (real Chrome flags, \`navigator.webdriver\` stripped). When a tool hits a sign-in wall or a CAPTCHA it does NOT fail - it returns \`PAUSED - human action needed\`, opens a visible browser window, and waits. Complete the sign-in/challenge in that window, then call \`browser_resume\` to continue.\n\n- \`MCP_BROWSER_PROFILE=<dir>\`: a dedicated Chrome profile dir so a one-time sign-in/clearance STICKS across restarts (recommended; never point at your live Chrome profile).\n- \`MCP_BROWSER_HEADLESS=0\`: stay headed the whole time (best for multi-step authenticated flows).\n- \`MCP_BROWSER_CHANNEL=chrome\`: drive your real installed Chrome instead of bundled Chromium (stronger stealth).\n- \`MCP_BROWSER_DRIVER=patchright\`: opt into a stealth-patched Playwright drop-in (install it yourself) for hard bot walls.\n- \`MCP_HANDOFF=off\`: disable the popup/handoff (detect-only).\n\nThe \`claude_code_config.json\` snippet is also included if you prefer to wire it up by hand (fix the absolute path).\n`;
   return {
     serverId: input.serverId,
     version: input.version,

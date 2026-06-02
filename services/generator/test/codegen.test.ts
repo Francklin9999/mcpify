@@ -104,6 +104,35 @@ test("artifact ships one-step installers (install.sh/install.ps1) + a config hel
   // The server slug appears in both so the registered entry is named per-site.
   assert.match(sh, /SERVER_NAME="example-com"/);
   assert.match(ps1, /\$ServerName = "example-com"/);
+
+  // Portable paths only: the script resolves its OWN dir at runtime; nothing machine-specific is baked in.
+  assert.match(sh, /SCRIPT_DIR="\$\(cd "\$\(dirname/);
+  assert.match(ps1, /\$ScriptDir = \$PSScriptRoot/);
+  assert.doesNotMatch(sh, /\/home\/|\/Users\//, "install.sh must not hardcode a machine-specific path");
+  assert.doesNotMatch(ps1, /[Cc]:\\\\Users\\\\|\/home\//, "install.ps1 must not hardcode a machine-specific path");
+
+  // This artifact HAS a browser tool, so the installers auto-download Playwright's Chromium (best-effort).
+  assert.match(sh, /playwright install chromium/, "browser server's install.sh auto-installs the browser");
+  assert.match(sh, /\|\| echo "WARN/, "the Chromium download is best-effort (never aborts the install)");
+  assert.match(ps1, /playwright install chromium/, "browser server's install.ps1 auto-installs the browser");
+});
+
+test("HTTP-only servers do NOT trigger a Playwright browser download", () => {
+  const httpOnly = generateServer({
+    serverId: "55555555-5555-4555-8555-555555555555",
+    version: 1,
+    url: "https://example.com/api",
+    title: "API",
+    tools: [validTool], // an http tool, no browser tool
+    browsing: false,
+  });
+  const sh = httpOnly.files.find((f) => f.path === "install.sh")!.content;
+  const ps1 = httpOnly.files.find((f) => f.path === "install.ps1")!.content;
+  assert.doesNotMatch(sh, /playwright install chromium/, "no browser tools => no 170MB Chromium download");
+  assert.doesNotMatch(ps1, /playwright install chromium/);
+  // Still a complete installer.
+  assert.match(sh, /npm install/);
+  assert.match(sh, /mcp-register\.mjs/);
 });
 
 // The helper must be idempotent, preserve existing user MCPs, remove duplicate project-scoped entries,
