@@ -111,6 +111,23 @@ export class ForgeClient {
   downloadUrl(serverId: string, version: number): string {
     return `${this.base}/api/servers/${encodeURIComponent(serverId)}/download/${version}`;
   }
+
+  /**
+   * Fetch the runnable artifact (the same JSON the download URL serves) so it can be materialized locally.
+   * Validates it actually carries files - the download route can redirect to a remote store (e.g. R2) instead
+   * of returning inline files, in which case we fail clearly rather than writing an empty directory.
+   */
+  async fetchArtifact(serverId: string, version: number): Promise<{ serverId: string; version: number; files: { path: string; content: string }[]; entrypoint?: string }> {
+    const { ok, status, body } = await this.call(`/api/servers/${encodeURIComponent(serverId)}/download/${version}`);
+    if (!ok) throw new Error(`download failed (HTTP ${status}): ${describeError(body)}`);
+    if (!body || !Array.isArray(body.files) || body.files.length === 0) {
+      throw new Error(
+        `the Forge download did not return runnable files for ${serverId} v${version} ` +
+          `(it may store artifacts remotely; open ${this.downloadUrl(serverId, version)} to fetch them manually).`,
+      );
+    }
+    return body;
+  }
 }
 
 function describeError(body: any): string {

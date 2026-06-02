@@ -1,5 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { homedir, platform } from "node:os";
 import { ForgeClient, ForgeUnreachable, type JobState } from "./client.js";
 
 /**
@@ -29,6 +32,36 @@ function text(s: string): ToolResult {
 }
 function errorText(s: string): ToolResult {
   return { content: [{ type: "text", text: s }], isError: true };
+}
+
+function slug(value: string): string {
+  return String(value || "mcp-server").replace(/[^a-z0-9.-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "mcp-server";
+}
+
+/**
+ * Resolve an artifact file path under `targetDir`, or null if it escapes. The file list comes from whatever
+ * MCP_FORGE_API_BASE points at, so a hostile/buggy Forge could send `../../.bashrc`; we reject absolute paths
+ * and anything that resolves outside the target dir. This is the one security-critical line of the feature.
+ */
+function containedPath(targetDir: string, relPath: string): string | null {
+  if (!relPath || isAbsolute(relPath) || relPath.includes("\0")) return null;
+  const resolved = resolve(targetDir, relPath);
+  if (resolved !== targetDir && !resolved.startsWith(targetDir + sep)) return null;
+  return resolved;
+}
+
+/** Write an artifact's files into targetDir, containing every path. Returns the count or throws on escape. */
+function materializeFiles(targetDir: string, files: { path: string; content: string }[]): number {
+  mkdirSync(targetDir, { recursive: true });
+  let written = 0;
+  for (const file of files) {
+    const dest = containedPath(targetDir, file.path);
+    if (!dest) throw new Error(`refusing to write unsafe artifact path: ${file.path}`);
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, file.content ?? "");
+    written++;
+  }
+  return written;
 }
 
 // The done job's `result` is the GeneratedServerArtifact; it carries top-level `tools` (verified against
@@ -231,7 +264,58 @@ export function createServer(deps: ServerDeps): McpServer {
             `  ${url}`,
             ``,
             `It returns a JSON artifact (runnable files + install scripts). Save it, then run install.sh / ` +
-              `install.ps1 to register it into your MCP clients, or add ?format=zip to the URL for a zip.`,
+              `install.ps1 to register it into your MCP clients, or add ?format=zip to the URL for a zip. ` +
+              `Or use install_mcp_server to write it to disk ready to install.`,
+          ].join("\n"),
+        );
+      } catch (err) {
+        return errorText(forgeError(err));
+      }
+    },
+  );
+
+  register(
+    "install_mcp_server",
+    {
+      description:
+        "Write a generated MCP server's runnable files to a local directory, ready to install. Materializes " +
+        "the artifact (server source + package.json + the install.sh/install.ps1/mcp-register.mjs scripts) " +
+        "to disk and returns the directory + the one command to finish installing it into your MCP clients. " +
+        "Does NOT run the installer for you (it builds with npm and edits client configs - run it yourself).",
+      inputSchema: {
+        serverId: z.string(),
+        version: z.number().optional().describe("Defaults to the server's current version."),
+        dir: z.string().optional().describe("Target directory (absolute). Defaults to ~/.mcp-forge/servers/<id>-v<n>."),
+      },
+    },
+    async (args) => {
+      const serverId = String(args.serverId ?? "").trim();
+      if (!serverId) return errorText("serverId is required.");
+      try {
+        const detail = await client.serverDetail(serverId);
+        const version = typeof args.version === "number" ? args.version : Number(detail?.currentVersion ?? 1);
+        const artifact = await client.fetchArtifact(serverId, version);
+        const targetDir =
+          typeof args.dir === "string" && args.dir.trim()
+            ? resolve(args.dir.trim())
+            : join(process.env.MCP_FORGE_INSTALL_DIR?.trim() || join(homedir(), ".mcp-forge", "servers"), `${slug(serverId)}-v${version}`);
+        const count = materializeFiles(targetDir, artifact.files);
+        const hasSh = artifact.files.some((f) => f.path === "install.sh");
+        const cmd =
+          platform() === "win32"
+            ? `powershell -ExecutionPolicy Bypass -File "${join(targetDir, "install.ps1")}"`
+            : `bash "${join(targetDir, "install.sh")}"`;
+        return text(
+          [
+            `Wrote ${count} file(s) to:`,
+            `  ${targetDir}`,
+            ``,
+            hasSh
+              ? `Finish installing (builds + registers into every detected MCP client - Claude, Codex, Cursor, ...):`
+              : `Install scripts were not present in this artifact; build/run it manually:`,
+            `  ${hasSh ? cmd : `cd "${targetDir}" && npm install && npm run build`}`,
+            ``,
+            `After it registers, restart your MCP client (in Claude Code, run /mcp) to load the new tools.`,
           ].join("\n"),
         );
       } catch (err) {

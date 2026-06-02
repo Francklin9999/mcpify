@@ -16,6 +16,7 @@ just calls a running MCP Forge instance over HTTP.
 | `search_mcp_catalog({ q?, tier? })` | Search servers Forge has already generated. |
 | `get_mcp_server({ serverId })` | Tools, versions, confidence, download URL for one server. |
 | `download_mcp_server({ serverId, version? })` | The download URL + summary for a server's runnable artifact. |
+| `install_mcp_server({ serverId, version?, dir? })` | Write the server's runnable files (incl. `install.sh`/`install.ps1`/`mcp-register.mjs`) to a local dir, **ready to install**, and return the one command to finish. |
 
 Generation (scrape + LLM + codegen) can take minutes, so `forge_mcp_server` never blocks open-ended: it
 returns a `jobId` you poll with `forge_job_status`. If a job stays `queued`, the Forge **generator worker**
@@ -51,5 +52,13 @@ For Claude Desktop / Cursor / Windsurf, add the equivalent `mcpServers` entry po
 ## The recursion
 
 The servers this forges ship their own one-step installer that registers into every detected MCP client. So:
-**an agent calls `forge_mcp_server(url)` → gets a new MCP server → installs it → now has new tools** — MCP
-Forge, all the way down.
+
+1. `forge_mcp_server("https://rubygems.org")` → a new MCP server (tools + serverId).
+2. `install_mcp_server({ serverId })` → writes its files to `~/.mcp-forge/servers/<id>-v<n>/`, ready to install.
+3. Run the returned command (`bash install.sh`) → it builds and registers the new server into Claude / Codex /
+   Cursor / Windsurf / VS Code (the multi-client installer baked into the artifact).
+4. Restart the client → **new tools available.**
+
+MCP Forge, all the way down. `install_mcp_server` writes files only and never runs the installer for you
+(it builds with npm and edits client configs); it contains every write under the target dir, so a malformed
+artifact path can't escape it.

@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, readFileSync, rmSync, mkdtempSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ForgeClient, type FetchLike } from "../src/client.js";
@@ -46,7 +49,7 @@ test("exposes the meta toolset", async () => {
   const { client: mcp } = await connect({ client });
   const { tools } = await mcp.listTools();
   const names = tools.map((t) => t.name).sort();
-  assert.deepEqual(names, ["download_mcp_server", "forge_job_status", "forge_mcp_server", "get_mcp_server", "search_mcp_catalog"]);
+  assert.deepEqual(names, ["download_mcp_server", "forge_job_status", "forge_mcp_server", "get_mcp_server", "install_mcp_server", "search_mcp_catalog"]);
 });
 
 test("forge_mcp_server: enqueue -> poll -> done returns the new server's tools + download URL", async () => {
@@ -163,4 +166,69 @@ test("get_mcp_server + download_mcp_server return detail and a download URL", as
   assert.match(got.content[0].text, /download\/2/);
   const dl: any = await mcp.callTool({ name: "download_mcp_server", arguments: { serverId: "s9" } });
   assert.match(dl.content[0].text, /\/api\/servers\/s9\/download\/2/);
+});
+
+// install_mcp_server: materialize the artifact's files (incl. the install scripts) to a local dir.
+const ARTIFACT_FILES = {
+  serverId: "s5",
+  version: 1,
+  files: [
+    { path: "server.ts", content: "// generated server" },
+    { path: "package.json", content: "{}" },
+    { path: "install.sh", content: "#!/usr/bin/env bash\necho install" },
+    { path: "install.ps1", content: "Write-Host install" },
+    { path: "mcp-register.mjs", content: "// register" },
+  ],
+};
+
+function installRoutes(detail: any, artifact: any) {
+  return [
+    { match: (u: string) => u.includes("/api/servers/s5/download/"), res: () => ({ body: artifact }) },
+    { match: (u: string) => u.includes("/api/servers/s5"), res: () => ({ body: detail }) },
+  ];
+}
+
+test("install_mcp_server writes the artifact files to disk + returns the install command", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "forge-install-"));
+  try {
+    const { fetchImpl } = fakeFetch(installRoutes({ serverId: "s5", title: "S5", currentVersion: 1 }, ARTIFACT_FILES));
+    const client = new ForgeClient({ base: "http://forge.test", fetchImpl });
+    const { client: mcp } = await connect({ client });
+    const target = join(dir, "out");
+    const r: any = await mcp.callTool({ name: "install_mcp_server", arguments: { serverId: "s5", dir: target } });
+    assert.equal(r.isError, undefined);
+    assert.ok(existsSync(join(target, "server.ts")), "server.ts written");
+    assert.ok(existsSync(join(target, "install.sh")), "install.sh written");
+    assert.ok(existsSync(join(target, "mcp-register.mjs")), "register helper written");
+    assert.equal(readFileSync(join(target, "package.json"), "utf8"), "{}");
+    assert.match(r.content[0].text, /install\.sh|install\.ps1/);
+    assert.match(r.content[0].text, /restart your MCP client/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("install_mcp_server REFUSES a path-traversal artifact entry (security guard)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "forge-evil-"));
+  try {
+    const evil = { serverId: "s5", version: 1, files: [{ path: "../../escape.sh", content: "pwned" }] };
+    const { fetchImpl } = fakeFetch(installRoutes({ serverId: "s5", currentVersion: 1 }, evil));
+    const client = new ForgeClient({ base: "http://forge.test", fetchImpl });
+    const { client: mcp } = await connect({ client });
+    const r: any = await mcp.callTool({ name: "install_mcp_server", arguments: { serverId: "s5", dir: join(dir, "out") } });
+    assert.equal(r.isError, true);
+    assert.match(r.content[0].text, /unsafe artifact path/);
+    assert.ok(!existsSync(join(dir, "escape.sh")), "the escaping file must NOT be written outside the target");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("install_mcp_server errors clearly when the download returns no inline files", async () => {
+  const { fetchImpl } = fakeFetch(installRoutes({ serverId: "s5", currentVersion: 1 }, { serverId: "s5", version: 1, files: [] }));
+  const client = new ForgeClient({ base: "http://forge.test", fetchImpl });
+  const { client: mcp } = await connect({ client });
+  const r: any = await mcp.callTool({ name: "install_mcp_server", arguments: { serverId: "s5", dir: "/tmp/forge-none" } });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /did not return runnable files/);
 });
