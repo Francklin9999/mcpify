@@ -5,13 +5,14 @@ import {
   text,
   integer,
   real,
+  boolean,
   timestamp,
   jsonb,
   bigserial,
   primaryKey,
   foreignKey,
 } from "drizzle-orm/pg-core";
-import type { ToolDefinition } from "@mcp/types";
+import type { ToolDefinition, GeneratedServerArtifact } from "@mcp/types";
 
 /**
  * Postgres schema for the registry of record (`02-data-model.md`).
@@ -124,6 +125,30 @@ export const processedJobs = pgTable("processed_jobs", {
   processedAt: timestamp("processed_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// catalog: the browsable directory of pre-generated MCP servers, keyed by domain (formerly MongoDB Atlas).
+// DELIBERATELY separate from `servers`: catalog entries are a discovery directory, NOT operational servers,
+// so the monitor (which polls `servers WHERE status='active'`) must never health-check or "heal" them.
+// `tools` is read for listings; the full runnable `artifact` is selected only on the download path.
+export const catalog = pgTable("catalog", {
+  domain: text("domain").primaryKey(),
+  serverId: uuid("server_id"),
+  origin: text("origin").notNull(),
+  title: text("title").notNull(),
+  tier: text("tier").notNull().default("auto_gen"),
+  confidence: real("confidence").notNull().default(0),
+  installCount: integer("install_count").notNull().default(0),
+  status: text("status").notNull().default("active"),
+  version: integer("version").notNull().default(1),
+  toolCount: integer("tool_count").notNull().default(0),
+  localTestPassed: boolean("local_test_passed").notNull().default(false),
+  tags: jsonb("tags").$type<string[]>().notNull().default([]),
+  tools: jsonb("tools").$type<ToolDefinition[]>().notNull().default([]),
+  artifact: jsonb("artifact").$type<GeneratedServerArtifact>(),
+  seededBy: text("seeded_by"), // tags rows written by a seed run, so a later run can retire stale ones
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const schema = {
   servers,
   serverVersions,
@@ -131,4 +156,5 @@ export const schema = {
   healthEvents,
   contributions,
   processedJobs,
+  catalog,
 };

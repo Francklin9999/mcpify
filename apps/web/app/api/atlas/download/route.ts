@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { GeneratedServerArtifact } from "@mcp/types";
-import { toolsCollection } from "@/lib/mongo";
+import { catalogConfigured, findCatalogArtifact } from "@/lib/catalog-store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -13,7 +13,7 @@ function fileName(value: string): string {
  * GET /api/atlas/download?domain=example.com
  * GET /api/atlas/download?serverId=uuid
  *
- * Returns the generated MCP server artifact stored in MongoDB. The artifact includes runnable files,
+ * Returns the generated MCP server artifact stored in the Postgres catalog. The artifact includes runnable files,
  * the entrypoint, Claude Code config snippet, and structured tools for direct client integration.
  */
 export async function GET(req: Request): Promise<Response> {
@@ -26,20 +26,9 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ error: "domain or serverId required" }, { status: 400 });
   }
 
-  const col = await toolsCollection();
-  if (!col) return NextResponse.json({ error: "MongoDB not configured" }, { status: 503 });
+  if (!catalogConfigured()) return NextResponse.json({ error: "catalog not configured" }, { status: 503 });
 
-  const doc = await col.findOne(
-    {
-      ...(domain ? { domain } : { serverId }),
-      status: "active",
-      "localTest.passed": true,
-      "artifact.files.0": { $exists: true },
-      "artifact.tools.1": { $exists: true },
-      toolCount: { $gte: 2 },
-    },
-    { projection: { _id: 0, artifact: 1, domain: 1, serverId: 1, version: 1 } },
-  );
+  const doc = await findCatalogArtifact(String(domain || serverId)).catch(() => null);
   if (!doc) return NextResponse.json({ error: "artifact not found" }, { status: 404 });
 
   const artifact = GeneratedServerArtifact.safeParse(doc.artifact);

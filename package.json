@@ -12,6 +12,7 @@
   },
   "scripts": {
     "sync:extension-config": "node scripts/sync-extension-config.mjs",
+    "seed:catalog": "node scripts/seed-catalog.mjs",
     "build": "npm run build --workspaces --if-present",
     "build:phase0": "npm run build --workspace=@mcp/types && npm run build --workspace=@mcp/db",
     "pretest": "npm run build:phase0",

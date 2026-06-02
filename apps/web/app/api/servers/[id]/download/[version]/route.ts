@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { GeneratedServerArtifact } from "@mcp/types";
 import { artifactFromFileUrl } from "@/lib/artifacts";
-import { toolsCollection } from "@/lib/mongo";
+import { findCatalogArtifact } from "@/lib/catalog-store";
 import { getServerVersion } from "@/lib/registry";
 import { buildZip } from "@/lib/zip";
 
@@ -13,23 +13,12 @@ const Params = z.object({
   version: z.coerce.number().int().positive(),
 });
 
-async function artifactFromAtlas(serverId: string, version: number) {
-  const col = await toolsCollection();
-  if (!col) return null;
-  const doc = await col.findOne(
-    {
-      serverId,
-      version,
-      status: "active",
-      "localTest.passed": true,
-      "artifact.files.0": { $exists: true },
-      "artifact.tools.1": { $exists: true },
-      toolCount: { $gte: 2 },
-    },
-    { projection: { _id: 0, artifact: 1 } },
-  );
-  const parsed = GeneratedServerArtifact.safeParse(doc?.artifact);
-  return parsed.success ? parsed.data : null;
+async function artifactFromCatalog(serverId: string, version: number) {
+  const doc = await findCatalogArtifact(serverId).catch(() => null);
+  if (!doc) return null;
+  const parsed = GeneratedServerArtifact.safeParse(doc.artifact);
+  if (!parsed.success || parsed.data.version !== version) return null;
+  return parsed.data;
 }
 
 function slug(value: string) {
@@ -60,8 +49,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   const version = await getServerVersion(parsed.data.id, parsed.data.version);
   if (!version) {
-    const atlasArtifact = await artifactFromAtlas(parsed.data.id, parsed.data.version);
-    if (atlasArtifact) return wantsZip ? zipResponse(atlasArtifact, atlasArtifact.serverId) : NextResponse.json(atlasArtifact);
+    const catalogArtifact = await artifactFromCatalog(parsed.data.id, parsed.data.version);
+    if (catalogArtifact) return wantsZip ? zipResponse(catalogArtifact, catalogArtifact.serverId) : NextResponse.json(catalogArtifact);
     return NextResponse.json({ error: "version not found" }, { status: 404 });
   }
 

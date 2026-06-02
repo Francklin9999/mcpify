@@ -1,12 +1,6 @@
 import { DEFAULT_API_BASE } from "./lib/config.js";
-import { ATLAS_DEFAULTS, getAtlasSettings, setAtlasSettings } from "./lib/atlas.js";
 
 const api = document.getElementById("api");
-const atlasEndpoint = document.getElementById("atlasEndpoint");
-const atlasApiKey = document.getElementById("atlasApiKey");
-const atlasDataSource = document.getElementById("atlasDataSource");
-const atlasDatabase = document.getElementById("atlasDatabase");
-const atlasCollection = document.getElementById("atlasCollection");
 const status = document.getElementById("status");
 const themeBtn = document.getElementById("theme");
 const LEGACY_DEFAULT_API_BASES = new Set(["http://localhost:3000"]);
@@ -49,24 +43,9 @@ chrome.storage.sync.get("apiBase").then(({ apiBase }) => {
   api.value = normalizeApiBase(apiBase);
 });
 
-getAtlasSettings().then((settings) => {
-  atlasEndpoint.value = settings.endpoint || "";
-  atlasApiKey.value = settings.apiKey || "";
-  atlasDataSource.value = settings.dataSource || ATLAS_DEFAULTS.dataSource;
-  atlasDatabase.value = settings.database || ATLAS_DEFAULTS.database;
-  atlasCollection.value = settings.collection || ATLAS_DEFAULTS.collection;
-});
-
 document.getElementById("save").addEventListener("click", async () => {
   const value = normalizeApiBase(api.value);
   await chrome.storage.sync.set({ apiBase: value });
-  await setAtlasSettings({
-    endpoint: atlasEndpoint.value,
-    apiKey: atlasApiKey.value,
-    dataSource: atlasDataSource.value,
-    database: atlasDatabase.value,
-    collection: atlasCollection.value,
-  });
   status.textContent = "Saved.";
   setTimeout(() => (status.textContent = ""), 1500);
 });

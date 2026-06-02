@@ -1,10 +1,11 @@
 import type { RegistryEntry, ServerVersion } from "@mcp/types";
 
 /**
- * Pure adapters between MongoDB Atlas catalog documents and the registry/detail shapes the web app
- * already renders. Kept free of I/O so they are unit-testable without a live MongoDB. The actual
- * Atlas reads/writes live in registry.ts / server-detail.ts / api/discover and are always best-effort:
- * when MONGODB_URI is unset (the default), none of this runs and the app behaves exactly as before.
+ * Pure adapters between catalog records and the registry/detail shapes the web app already renders. Kept
+ * free of I/O so they are unit-testable without a live database. The actual catalog reads/writes live in
+ * catalog-store.ts (Postgres) and are always best-effort: when DATABASE_URL is unset, none of this runs.
+ * `AtlasDoc` is the historical record shape (the catalog was originally in MongoDB Atlas); the adapters are
+ * shape-only, so the same code serves the Postgres-backed catalog unchanged.
  */
 
 export type AtlasDoc = Record<string, any>;
@@ -50,7 +51,7 @@ function toolCountOf(doc: AtlasDoc): number {
   return 0;
 }
 
-/** Map a MongoDB Atlas catalog document to a RegistryEntry, or null if it lacks a usable identity. */
+/** Map a catalog record (AtlasDoc shape) to a RegistryEntry, or null if it lacks a usable identity. */
 export function atlasDocToEntry(doc: AtlasDoc): RegistryEntry | null {
   const domain = typeof doc?.domain === "string" ? doc.domain : "";
   const origin = originOf(doc, domain);
@@ -147,6 +148,38 @@ export function atlasDocToDetail(doc: AtlasDoc): AtlasServerDetail | null {
     downloadUrl: `/api/atlas/download?${selector}&version=${entry.currentVersion}`,
     downloadName: `${(domain || entry.serverId).replace(/[^a-z0-9.-]/gi, "-")}-v${entry.currentVersion}.artifact.json`,
   };
+}
+
+/**
+ * Map a catalog upsert POST body to the columns it explicitly sets (pure, unit-tested). KEY invariant: when
+ * the body has no `artifact`, the result has no `artifact` key - so the catalog upsert's UPDATE path can
+ * never clobber a previously-stored artifact on a partial (e.g. tools-only) write. `toolCount` is derived
+ * from `tools` when not given. Kept here (the pure, dependency-free module) so it's testable without a DB.
+ */
+export function bodyToColumns(body: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const b = body || {};
+  if (typeof b.serverId === "string") out.serverId = b.serverId;
+  if (typeof b.origin === "string") out.origin = b.origin;
+  if (typeof b.title === "string") out.title = b.title;
+  if (typeof b.tier === "string") out.tier = b.tier;
+  if (typeof b.confidence === "number") out.confidence = b.confidence;
+  if (typeof b.installCount === "number") out.installCount = b.installCount;
+  if (typeof b.status === "string") out.status = b.status;
+  if (typeof b.version === "number") out.version = b.version;
+  if (Array.isArray(b.tags)) out.tags = b.tags;
+  if (Array.isArray(b.tools)) {
+    out.tools = b.tools;
+    out.toolCount = typeof b.toolCount === "number" ? b.toolCount : b.tools.length;
+  } else if (typeof b.toolCount === "number") {
+    out.toolCount = b.toolCount;
+  }
+  const localTest = b.localTest as { passed?: unknown } | undefined;
+  if (localTest && typeof localTest.passed === "boolean") out.localTestPassed = localTest.passed;
+  if (typeof b.localTestPassed === "boolean") out.localTestPassed = b.localTestPassed;
+  // artifact is set ONLY when explicitly provided - never defaulted, never nulled by a partial write.
+  if (b.artifact && typeof b.artifact === "object") out.artifact = b.artifact;
+  return out;
 }
 
 /** Build the version row shape the existing server detail page already renders. */

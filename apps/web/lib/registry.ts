@@ -1,9 +1,9 @@
 import { and, desc, eq, ilike, or } from "drizzle-orm";
 import { serverVersions, servers } from "@mcp/db";
 import { RegistryEntry, ServerTier, ServerVersion, type RegistryEntry as RegistryEntryT, type ServerTier as ServerTierT, type ServerVersion as ServerVersionT } from "@mcp/types";
-import { atlasDocToEntry, atlasDocToVersion, filterEntries } from "@/lib/atlas-catalog";
+import { atlasDocToEntry, atlasDocToVersion, filterEntries, mergeRegistry } from "@/lib/atlas-catalog";
 import { db } from "@/lib/db";
-import { toolsCollection } from "@/lib/mongo";
+import { listCatalog, findCatalogEntry } from "@/lib/catalog-store";
 import { sampleRegistry, sampleVersions } from "@/lib/sample-data";
 
 type SearchParams = {
@@ -57,25 +57,9 @@ function filterSamples(params: SearchParams): RegistryEntryT[] {
     .sort((a, b) => b.confidence - a.confidence);
 }
 
-function workingAtlasFilter(extra: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    status: "active",
-    "artifact.files.0": { $exists: true },
-    "artifact.tools.1": { $exists: true },
-    "localTest.passed": true,
-    toolCount: { $gte: 2 },
-    ...extra,
-  };
-}
-
-async function listAtlasRegistry(params: SearchParams): Promise<RegistryEntryT[]> {
-  const col = await toolsCollection();
-  if (!col) return [];
-  const docs = await col
-    .find(workingAtlasFilter(), { projection: { _id: 0 } })
-    .sort({ confidence: -1, toolCount: -1, title: 1 })
-    .limit(100)
-    .toArray();
+// The catalog (formerly Atlas) is the browsable directory of pre-generated servers, now in Postgres.
+async function listCatalogRegistry(params: SearchParams): Promise<RegistryEntryT[]> {
+  const docs = await listCatalog({ q: params.q, limit: 100 }).catch(() => []);
   return filterEntries(
     docs.flatMap((doc) => {
       const entry = atlasDocToEntry(doc);
@@ -85,10 +69,8 @@ async function listAtlasRegistry(params: SearchParams): Promise<RegistryEntryT[]
   );
 }
 
-async function getAtlasServerDetail(serverId: string): Promise<(RegistryEntryT & { versions: ServerVersionT[] }) | null> {
-  const col = await toolsCollection();
-  if (!col) return null;
-  const doc = await col.findOne(workingAtlasFilter({ serverId }), { projection: { _id: 0 } });
+async function getCatalogServerDetail(serverId: string): Promise<(RegistryEntryT & { versions: ServerVersionT[] }) | null> {
+  const doc = await findCatalogEntry(serverId).catch(() => null);
   const entry = doc ? atlasDocToEntry(doc) : null;
   const version = doc ? atlasDocToVersion(doc) : null;
   if (!doc || !entry || !version) return null;
@@ -103,8 +85,6 @@ async function getAtlasServerDetail(serverId: string): Promise<(RegistryEntryT &
 }
 
 export async function listRegistry(params: SearchParams = {}): Promise<RegistryEntryT[]> {
-  const atlas = await listAtlasRegistry(params).catch(() => []);
-  if (atlas.length) return atlas.sort((a, b) => b.confidence - a.confidence);
   if (!hasDatabase()) return filterSamples(params);
 
   const conds = [];
@@ -119,22 +99,25 @@ export async function listRegistry(params: SearchParams = {}): Promise<RegistryE
     .where(conds.length ? and(...conds) : undefined)
     .orderBy(desc(servers.confidence))
     .limit(100);
-  return rows.flatMap((row) => {
+  const generated = rows.flatMap((row) => {
     const normalized = normalizeRegistryRow(row);
     return normalized ? [normalized] : [];
   });
+  // Show BOTH the user's generated servers AND the catalog directory, deduped by url (generated wins).
+  const catalogEntries = await listCatalogRegistry(params);
+  return mergeRegistry(generated, catalogEntries).sort((a, b) => b.confidence - a.confidence);
 }
 
 export async function getServerDetail(serverId: string): Promise<(RegistryEntryT & { versions: ServerVersionT[] }) | null> {
   if (!hasDatabase()) {
     const entry = sampleRegistry.find((item) => item.serverId === serverId);
     if (entry) return { ...entry, versions: sampleVersions.filter((version) => version.serverId === serverId) };
-    return getAtlasServerDetail(serverId);
+    return getCatalogServerDetail(serverId);
   }
 
   const [server] = await db().select().from(servers).where(eq(servers.serverId, serverId)).limit(1);
   const entry = server ? normalizeRegistryRow(server) : null;
-  if (!entry) return getAtlasServerDetail(serverId);
+  if (!entry) return getCatalogServerDetail(serverId);
   const rows = await db()
     .select()
     .from(serverVersions)

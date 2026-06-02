@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { MongoClient } from "mongodb";
+import { createDb, catalog } from "../packages/db/dist/src/index.js";
+import { and, eq, notInArray } from "drizzle-orm";
 import { GeneratedServerArtifact, ToolDefinition } from "../packages/types/dist/src/index.js";
 import { generateServer } from "../services/generator/dist/src/codegen.js";
 
@@ -319,8 +320,8 @@ async function validateSite(candidate) {
 }
 
 async function main() {
-  const uri = process.env.MONGODB_URI?.trim();
-  if (!uri) throw new Error("MONGODB_URI is not set. Add it to .env or the environment.");
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+  if (!databaseUrl) throw new Error("DATABASE_URL is not set. Add it to .env or the environment.");
 
   mkdirSync(OUT_DIR, { recursive: true });
   const selected = [];
@@ -345,32 +346,24 @@ async function main() {
     }));
     writeFileSync(join(OUT_DIR, `${candidate.domain.replace(/[^a-z0-9.-]/gi, "_")}.artifact.json`), JSON.stringify(artifact, null, 2));
 
+    // Shaped to the Postgres `catalog` columns (formerly a MongoDB doc).
     selected.push({
       domain: candidate.domain,
-      origin: candidate.origin,
-      url: candidate.origin,
       serverId,
-      version: 1,
-      currentVersion: 1,
+      origin: candidate.origin,
       title: candidate.title,
       tier: candidate.tier,
       status: "active",
       confidence: candidate.confidence,
       installCount: candidate.installCount,
+      version: 1,
       toolCount: candidate.tools.length,
+      localTestPassed: true,
       tags: candidate.tags,
       tools: candidate.tools,
       artifact,
-      downloadUrl: `/api/atlas/download?domain=${encodeURIComponent(candidate.domain)}`,
-      installUrl: `/api/atlas/download?domain=${encodeURIComponent(candidate.domain)}`,
-      localTest: {
-        passed: true,
-        checkedAt: new Date().toISOString(),
-        mode: "tool-contract + generated-artifact + live-public-endpoint",
-        tests: local.tests,
-      },
       seededBy: SEEDER_ID,
-      updatedAt: new Date().toISOString(),
+      updatedAt: new Date(),
     });
     console.log(`ok ${selected.length}/${TARGET_COUNT}: ${candidate.domain} (${candidate.tools.length} tool(s))`);
   }
@@ -379,30 +372,25 @@ async function main() {
     throw new Error(`Only ${selected.length} sites passed validation; need ${TARGET_COUNT}. Rejected: ${JSON.stringify(rejected.slice(0, 10), null, 2)}`);
   }
 
-  const client = new MongoClient(uri);
-  await client.connect();
-  try {
-    const db = client.db(process.env.MONGODB_DATABASE || "mcp_forge");
-    const col = db.collection(process.env.MONGODB_COLLECTION || "tools");
-    await col.createIndex({ domain: 1 }, { unique: true });
-    await col.createIndex({ title: "text", domain: "text", "tools.name": "text", "tools.description": "text" });
-    const writes = await Promise.all(selected.map((doc) => col.updateOne(
-      { domain: doc.domain },
-      { $set: doc, $setOnInsert: { createdAt: new Date().toISOString() } },
-      { upsert: true },
-    )));
-    await col.updateMany(
-      { seededBy: SEEDER_ID, domain: { $nin: selected.map((doc) => doc.domain) } },
-      { $set: { status: "broken", updatedAt: new Date().toISOString(), staleReason: "not selected by latest validated seed run" } },
-    );
-    const upserted = writes.filter((w) => w.upsertedCount).length;
-    const modified = writes.filter((w) => w.modifiedCount).length;
-    console.log(`seeded ${selected.length} MongoDB records (${upserted} inserted, ${modified} updated)`);
-    console.log(`artifacts written to ${OUT_DIR}`);
-    console.log(JSON.stringify({ count: selected.length, reallyGood: selected.filter((x) => x.tags.includes("really_good")).length }, null, 2));
-  } finally {
-    await client.close();
+  const db = createDb(databaseUrl);
+  // Upsert each validated catalog row by domain (full overwrite of the seed-owned fields).
+  for (const row of selected) {
+    const { domain, ...rest } = row;
+    await db
+      .insert(catalog)
+      .values(row)
+      .onConflictDoUpdate({ target: catalog.domain, set: rest });
   }
+  // Retire previously-seeded domains that did NOT pass this run (mirrors the old Mongo housekeeping).
+  // notInArray expands to a proper SQL list; a raw `NOT IN ${jsArray}` would bind the array as one param.
+  const keep = selected.map((r) => r.domain);
+  await db
+    .update(catalog)
+    .set({ status: "broken", updatedAt: new Date() })
+    .where(and(eq(catalog.seededBy, SEEDER_ID), notInArray(catalog.domain, keep.length ? keep : [""])));
+  console.log(`seeded ${selected.length} catalog rows into Postgres`);
+  console.log(`artifacts written to ${OUT_DIR}`);
+  console.log(JSON.stringify({ count: selected.length, reallyGood: selected.filter((x) => x.tags.includes("really_good")).length }, null, 2));
 }
 
 main().catch((err) => {

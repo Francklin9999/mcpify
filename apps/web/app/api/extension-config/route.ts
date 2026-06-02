@@ -4,8 +4,8 @@ export const dynamic = "force-dynamic";
 
 /**
  * GET /api/extension-config
- * Reserved for browser-extension defaults. MongoDB Atlas is server-side only
- * (MONGODB_URI), so no credentials are sent to the browser.
+ * Reserved for browser-extension defaults. The server catalog is server-side only
+ * (Postgres), so no database credentials are ever sent to the browser.
  */
 export async function GET(): Promise<Response> {
   return NextResponse.json({});

@@ -71,7 +71,7 @@ Replace every `‹…›` with your real measured number before you present.
 `[DEMO]` Open the web library on a generated record.
 
 `[SAY]`
-> "Generation is only the first step. Every generated server is saved with its tools, confidence score, artifact, and latest parsed time, so users can find it again, download it, and keep using it. The system stays simple: Postgres is the source of truth, artifacts are stored as files, and MongoDB Atlas can cache per-domain tools for fast repeat visits."
+> "Generation is only the first step. Every generated server is saved with its tools, confidence score, artifact, and latest parsed time, so users can find it again, download it, and keep using it. The system stays simple: Postgres is the source of truth, artifacts are stored as files, and a Postgres-backed catalog caches per-domain tools for fast repeat visits."
 
 ---
 

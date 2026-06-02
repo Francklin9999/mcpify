@@ -29,8 +29,9 @@ locally — so an LLM can actually *act* on that site, using your machine and yo
 - **LLM providers (pluggable)** — one factory, swapped by the `LLM_PROVIDER` env var:
   **OpenAI `gpt-5.4` (default)**, **Anthropic Claude**, or **Google Gemini** — with a keyless heuristic
   fallback when no key is set. Same inference + self-heal interface for all three.
-- **MongoDB Atlas** — a curated server catalog merged into the web library, detail pages, and downloads,
-  plus a **per-domain tool cache** so repeat generations of the same site are fast.
+- **Server catalog (Postgres)** — a curated directory of pre-generated servers merged into the web library,
+  detail pages, and downloads, plus a **per-domain tool cache** so repeat generations of the same site are
+  fast. Lives in the `catalog` table (no separate database); seed it with `npm run seed:catalog`.
 - **Chrome extension** — see below.
 
 ## The Chrome extension
@@ -80,7 +81,7 @@ none, for the heuristic fallback):
 cp .env.example .env
 ```
 
-Key surface: `LLM_PROVIDER` + `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`, `MONGODB_URI`,
+Key surface: `LLM_PROVIDER` + `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`,
 and the Postgres/Redis infra URLs (defaults match docker-compose). See `.env.example` for the annotated list.
 
 ### LLM providers
@@ -126,7 +127,7 @@ cd ../../apps/web && npm run build && \
 </details>
 
 **Chrome extension:** `chrome://extensions` → enable Developer mode → **Load unpacked** → select
-`apps/extension` (no build). API base and Atlas config are managed from the extension settings.
+`apps/extension` (no build). The API base URL is managed from the extension settings.
 
 ## Production stack
 

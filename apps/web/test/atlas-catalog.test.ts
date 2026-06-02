@@ -5,6 +5,7 @@ import {
   atlasDocToEntry,
   atlasDocToDetail,
   atlasDocToVersion,
+  bodyToColumns,
   catalogKey,
   domainFromUrl,
   filterEntries,
@@ -124,4 +125,28 @@ test("atlasDocToVersion builds a version row with atlas download metadata", () =
   assert.equal(v!.toolCount, 2);
   assert.equal(v!.createdBy, "atlas-seed");
   assert.match(v!.artifactUrl, /^https:\/\/atlas\.local\/api\/atlas\/download\?serverId=/);
+});
+
+// bodyToColumns powers the catalog upsert's MERGE semantics. The critical invariant: a partial write must
+// never carry an `artifact` key (so the DB UPDATE can't null a previously-stored artifact).
+test("bodyToColumns: a tools-only write sets tools+toolCount but NOT artifact (never clobbers a stored artifact)", () => {
+  const cols = bodyToColumns({ domain: "x.com", tools: [{ name: "a" }, { name: "b" }] });
+  assert.deepEqual(cols.tools, [{ name: "a" }, { name: "b" }]);
+  assert.equal(cols.toolCount, 2, "toolCount derived from tools length");
+  assert.equal("artifact" in cols, false, "no artifact key on a tools-only write");
+});
+
+test("bodyToColumns: artifact is carried through ONLY when explicitly provided", () => {
+  const withArtifact = bodyToColumns({ domain: "x.com", artifact: { serverId: "s", version: 1, files: [] } });
+  assert.ok(withArtifact.artifact, "artifact present when provided");
+  const without = bodyToColumns({ domain: "x.com", title: "X" });
+  assert.equal("artifact" in without, false);
+});
+
+test("bodyToColumns: localTest.passed maps to localTestPassed; explicit toolCount wins", () => {
+  assert.equal(bodyToColumns({ localTest: { passed: true } }).localTestPassed, true);
+  assert.equal(bodyToColumns({ tools: [{ name: "a" }], toolCount: 5 }).toolCount, 5);
+  // Unknown / wrong-typed fields are dropped, not forwarded.
+  assert.equal("bogus" in bodyToColumns({ bogus: 1, confidence: "x" as unknown as number }), false);
+  assert.equal("confidence" in bodyToColumns({ confidence: "x" as unknown as number }), false);
 });
