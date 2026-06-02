@@ -1,0 +1,95 @@
+[
+  {
+    "method": "POST",
+    "urlPattern": "/1/indexes/Item_dev/query",
+    "rawUrl": "https://uj5wyc0l7x-dsn.algolia.net/1/indexes/Item_dev/query?x-algolia-agent=Algolia%20for%20JavaScript%20(4.13.1)&x-algolia-api-key=28f0e1ec37a5e792e6845e67da5f20dd&x-algolia-application-id=UJ5WYC0L7X",
+    "requestHeaders": {
+      "content-type": "application/json"
+    },
+    "requestBodySchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "hitsPerPage": {
+          "type": "integer"
+        },
+        "analyticsTags": {
+          "type": "array"
+        },
+        "tagFilters": {
+          "type": "array"
+        },
+        "advancedSyntax": {
+          "type": "boolean"
+        }
+      }
+    },
+    "responseSchema": {
+      "type": "object",
+      "properties": {
+        "hits": {
+          "type": "array"
+        },
+        "nbHits": {
+          "type": "integer"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "nbPages": {
+          "type": "integer"
+        },
+        "query": {
+          "type": "string"
+        }
+      }
+    },
+    "statusCode": 200,
+    "contentType": "application/json"
+  },
+  {
+    "method": "GET",
+    "urlPattern": "/1/settings",
+    "rawUrl": "https://telemetry.algolia.com/1/settings?applications=UJ5WYC0L7X",
+    "requestHeaders": {
+      "accept": "application/json"
+    },
+    "statusCode": 200,
+    "contentType": "application/json"
+  },
+  {
+    "method": "GET",
+    "urlPattern": "/1/isalive",
+    "rawUrl": "https://t5-in-1.algolia.net/1/isalive?probe=1",
+    "requestHeaders": {
+      "accept": "*/*"
+    },
+    "statusCode": 200,
+    "contentType": "text/plain"
+  },
+  {
+    "method": "POST",
+    "urlPattern": "/g/collect",
+    "rawUrl": "https://www.google-analytics.com/g/collect?v=2&tid=G-J377Z0GR6G&en=page_view",
+    "requestHeaders": {
+      "content-type": "text/plain"
+    },
+    "statusCode": 204,
+    "contentType": "text/plain"
+  },
+  {
+    "method": "POST",
+    "urlPattern": "/j/collect",
+    "rawUrl": "https://www.google-analytics.com/j/collect?v=1&t=pageview&tid=UA-32446386-3",
+    "requestHeaders": {
+      "content-type": "text/plain"
+    },
+    "statusCode": 200,
+    "contentType": "text/plain"
+  }
+]

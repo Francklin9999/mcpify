@@ -43,6 +43,26 @@ test("drops mis-mined auth/account navigation tools", () => {
   assert.ok(names.includes("search") && names.includes("get_thing"), "real tools kept");
 });
 
+test("drops SaaS telemetry hosts and liveness/health probes (dynamic-app infra noise)", () => {
+  const httpAt = (name: string, raw: string): ReturnType<typeof http> => {
+    const t = http(name, new URL(raw).pathname);
+    if (t.execution.kind === "http") t.execution.request.rawUrl = raw;
+    return t;
+  };
+  const out = cleanupTools(
+    [
+      httpAt("post_query", "https://x9-dsn.algolia.net/1/indexes/Item/query"),
+      httpAt("get_settings", "https://telemetry.algolia.com/1/settings"),
+      httpAt("get_isalive", "https://t5-in-1.algolia.net/1/isalive"),
+      httpAt("get_health", "https://api.example.com/healthz"),
+      httpAt("get_metrics", "https://rum.example.com/v1/track"),
+    ],
+    "https://app.example.com/",
+  );
+  const names = out.map((t) => t.name);
+  assert.deepEqual(names, ["post_query"], `only the real data endpoint survives, got: ${names.join(", ")}`);
+});
+
 test("does NOT drop legitimate detail pages that merely contain user/account-ish segments", () => {
   // These are exactly the sub-page tools we want to keep - segment-anchored regex must not catch them.
   const out = cleanupTools(

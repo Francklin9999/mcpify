@@ -5,10 +5,12 @@ import type { ToolDefinition } from "@mcp/types";
  * incremental `discoverMore`) so EVERY artifact-producing path benefits. It fixes two classes of defect the
  * upstream miners leave behind:
  *
- *  1. Mis-mined auth/account navigation. The query-link miner turns a page's `Sign in` / `Sign up` link into
- *     a `browse_listing GET /login?return_to=…` or `GET /users/signup?ssrc=…` tool. Those target auth flows
- *     a stateless GET tool can never drive - pure noise that makes a server look like it "calls the same
- *     thing over and over". This aligns with the existing stance of skipping login/auth FORMS (heuristic).
+ *  1. Mis-mined noise tools. The query-link miner turns a page's `Sign in` / `Sign up` link into a
+ *     `browse_listing GET /login?return_to=…` tool; dynamic (React/Next/SPA) apps additionally spray
+ *     telemetry/RUM beacons and liveness probes (`telemetry.…/settings`, `/isalive`) that the source-side
+ *     noise filter misses for less-common vendors. None can be driven as a data tool - pure noise that makes
+ *     a server look like it "calls the same thing over and over". Drops auth flows, infra/telemetry hosts,
+ *     and health probes (aligning with the existing stance of skipping login/auth FORMS).
  *
  *  2. A percent-encoded path placeholder in a browser navigate step. When a detail template like
  *     `/catalogue/{id}/index.html` is run through `new URL().toString()`, `{id}` becomes `%7Bid%7D`; the
@@ -25,8 +27,23 @@ import type { ToolDefinition } from "@mcp/types";
 // `/user/{id}` or `/account/{id}` - only whole segments such as `/login` or `/users/signup` match.
 const AUTH_PATH_RE = /(?:^|\/)(?:log[-_]?in|sign[-_]?in|sign[-_]?up|signin|signup|register|logout|sso|oauth2?|password[-_]?reset)(?:\/|$)/i;
 
+// SaaS/infra endpoints that fire as XHR but are NEVER a site's data API. Dynamic (React/Next/SPA) apps spray
+// these on load: liveness/health probes and telemetry/RUM/monitoring hosts. The less-common vendors slip past
+// the source-side noise filter (e.g. telemetry.algolia.com's /1/settings, an /isalive probe) and would
+// otherwise ship as junk tools. Path probes are segment-anchored so a real `/healthcare/{id}` page is safe.
+const PROBE_PATH_RE = /(?:^|\/)(?:isalive|alive|health(?:z|check)?|ping|heartbeat|liveness|readiness)(?:\/|$)/i;
+const INFRA_HOST_RE = /(?:^|\.)(?:telemetry|rum|metrics|beacon|stats|sentry|datadog|newrelic|nr-data|amplitude|mixpanel|track(?:ing)?)\./i;
+
 // Tools that are always kept regardless of where they point (the floor + the page-level metadata tool).
 const PROTECTED_NAMES = new Set(["fetch_page_content", "extract_page_metadata"]);
+
+function hostOf(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).hostname;
+  } catch {
+    return "";
+  }
+}
 
 function pagePath(pageUrl: string): string | null {
   try {
@@ -54,12 +71,17 @@ function repairTool(tool: ToolDefinition): ToolDefinition {
   return changed ? { ...tool, execution: { ...tool.execution, steps } } : tool;
 }
 
-function isAuthJunk(tool: ToolDefinition, capturedPath: string | null): boolean {
+/**
+ * A mis-mined, never-useful HTTP tool: an auth/account flow, a SaaS telemetry/monitoring host, or a
+ * liveness/health probe. Never drops the content floor or the page the user actually captured.
+ */
+function isJunkTool(tool: ToolDefinition, capturedPath: string | null): boolean {
   if (PROTECTED_NAMES.has(tool.name)) return false;
   if (tool.execution.kind !== "http") return false;
   const pattern = tool.execution.request.urlPattern;
   if (capturedPath && pattern === capturedPath) return false; // never drop the page the user captured
-  return AUTH_PATH_RE.test(pattern);
+  if (AUTH_PATH_RE.test(pattern) || PROBE_PATH_RE.test(pattern)) return true;
+  return INFRA_HOST_RE.test(hostOf(tool.execution.request.rawUrl));
 }
 
 /**
@@ -68,5 +90,5 @@ function isAuthJunk(tool: ToolDefinition, capturedPath: string | null): boolean 
  */
 export function cleanupTools(tools: ToolDefinition[], pageUrl: string): ToolDefinition[] {
   const capturedPath = pagePath(pageUrl);
-  return tools.map(repairTool).filter((tool) => !isAuthJunk(tool, capturedPath));
+  return tools.map(repairTool).filter((tool) => !isJunkTool(tool, capturedPath));
 }

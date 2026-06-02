@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Adversarial: base href on a sibling host (www vs apex)</title>
+  <!-- Page captured at https://shop.example.com/c/sale ; <base> points at the www host. A browser sends
+       every relative link to www.shop.example.com, so the detail tools should target THAT host - not vanish
+       because they look "cross-origin" relative to the apex page URL. -->
+  <base href="https://www.shop.example.com/">
+</head>
+<body>
+  <form action="search" method="get"><input type="search" name="q" placeholder="Search"></form>
+  <ul>
+    <li><a href="product/sku-1001">Item 1</a></li>
+    <li><a href="product/sku-1002">Item 2</a></li>
+    <li><a href="product/sku-1003">Item 3</a></li>
+    <li><a href="product/sku-1004">Item 4</a></li>
+    <li><a href="product/sku-1005">Item 5</a></li>
+  </ul>
+</body>
+</html>

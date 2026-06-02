@@ -1,0 +1,66 @@
+[
+  {
+    "method": "GET",
+    "urlPattern": "/pages/ajax-javascript/",
+    "rawUrl": "https://www.scrapethissite.com/pages/ajax-javascript/?ajax=true&year=2015",
+    "requestHeaders": {
+      "accept": "application/json",
+      "x-requested-with": "XMLHttpRequest"
+    },
+    "responseSchema": {
+      "type": "array"
+    },
+    "statusCode": 200,
+    "contentType": "application/json"
+  },
+  {
+    "method": "POST",
+    "urlPattern": "/g/collect",
+    "rawUrl": "https://www.google-analytics.com/g/collect?v=2&tid=G-09N5RQCFG4&en=page_view",
+    "requestHeaders": {
+      "content-type": "text/plain"
+    },
+    "statusCode": 204,
+    "contentType": "text/plain"
+  },
+  {
+    "method": "POST",
+    "urlPattern": "/ccm/collect",
+    "rawUrl": "https://www.google.com/ccm/collect?en=page_view&tid=AW-950945448",
+    "requestHeaders": {
+      "content-type": "text/plain"
+    },
+    "statusCode": 200,
+    "contentType": "text/html"
+  },
+  {
+    "method": "POST",
+    "urlPattern": "/rmkt/collect/950945448/",
+    "rawUrl": "https://www.google.com/rmkt/collect/950945448/?random=1780380394401&cv=11",
+    "requestHeaders": {
+      "content-type": "text/plain"
+    },
+    "statusCode": 200,
+    "contentType": "text/html"
+  },
+  {
+    "method": "GET",
+    "urlPattern": "/privacy_sandbox/pixel/register/trigger/",
+    "rawUrl": "https://www.facebook.com/privacy_sandbox/pixel/register/trigger/?id=764287443701341&ev=PageView",
+    "requestHeaders": {
+      "accept": "*/*"
+    },
+    "statusCode": 200,
+    "contentType": "image/gif"
+  },
+  {
+    "method": "GET",
+    "urlPattern": "/static/css/bootstrap.min.css",
+    "rawUrl": "https://www.scrapethissite.com/static/css/bootstrap.min.css",
+    "requestHeaders": {
+      "accept": "text/css"
+    },
+    "statusCode": 200,
+    "contentType": "text/css"
+  }
+]
