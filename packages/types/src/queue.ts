@@ -63,7 +63,22 @@ export const DiscoverJob = z.object({
 });
 export type DiscoverJob = z.infer<typeof DiscoverJob>;
 
+/**
+ * `deepen` is produced by the GENERATOR itself, once, right after a successful `generate`: it captures a few
+ * of the site's sub-pages (from its sitemap) and runs INCREMENTAL discovery over them to maximize the tools
+ * a single link yields. It writes exactly ONE merged version (the handler accumulates sequentially, never
+ * fanned out). Runaway-safe: a `deepen` job NEVER enqueues another job. Additive extension of the frozen
+ * `01 S4` union; the Go monitor still only produces `regenerate`/`self_heal`.
+ */
+export const DeepenJob = z.object({
+  kind: z.literal("deepen"),
+  serverId: z.string().uuid(),
+  url: z.string().url(),
+  legalMode: LegalMode,
+});
+export type DeepenJob = z.infer<typeof DeepenJob>;
+
 /** The full job space, discriminated on `kind` - the entire Go->Node decoupling contract (`01 S4`). */
-export const Job = z.discriminatedUnion("kind", [GenerateJob, RegenerateJob, SelfHealJob, DiscoverJob]);
+export const Job = z.discriminatedUnion("kind", [GenerateJob, RegenerateJob, SelfHealJob, DiscoverJob, DeepenJob]);
 export type Job = z.infer<typeof Job>;
 export type JobKind = Job["kind"];

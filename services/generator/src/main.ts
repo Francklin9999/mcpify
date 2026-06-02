@@ -7,7 +7,9 @@ import { FsArtifactStore } from "./adapters/artifact-store.js";
 import { makeLLMClients } from "./llm-factory.js";
 import { discoverSubPageTools, httpFetchText } from "./sitemap-discovery.js";
 import { verifyAndAnnotate, httpProbe } from "./tool-verifier.js";
-import type { ToolDefinition } from "@mcp/types";
+import { Queue } from "bullmq";
+import { randomUUID } from "node:crypto";
+import { QUEUE_NAME, type LegalMode, type ToolDefinition } from "@mcp/types";
 
 /**
  * Deployable worker process: consumes `mcp-jobs` (BullMQ) and runs the enqueue shim for the Go monitor.
@@ -42,7 +44,20 @@ async function main(): Promise<void> {
   // VERIFY_TOOLS=1, since it makes the generator issue live GET requests to the target site.
   const verifyOn = env("VERIFY_TOOLS", "0") === "1";
   const verifyTools = verifyOn ? async (tools: ToolDefinition[]) => (await verifyAndAnnotate(tools, httpProbe())).tools : undefined;
-  const deps = { store, scraper: new HttpScraper(scraperUrl), inference, heal, discoverSubPages, verifyTools };
+  // Deepen pass: after a generate, enqueue ONE follow-up job that captures a few sub-pages and mines them for
+  // more tools. OPT-IN via DEEPEN_DISCOVERY=1: measured added-tool yield over representative same-site page
+  // pairs (with the keyless heuristic) is ~0 - discoverMore's name+sig dedup eats the re-mined structural
+  // patterns - while it costs ~3 extra sub-page captures + 3 inference passes per generate. Enable it when
+  // using a strong LLM inference client (which may extract page-specific tools the heuristic can't), or for
+  // sites with genuinely distinct sub-page types. Uses a producer Queue; the deepen job never re-enqueues.
+  const deepenOn = subPagesOn && env("DEEPEN_DISCOVERY", "0") === "1";
+  const producerQueue = deepenOn ? new Queue(QUEUE_NAME, { connection }) : undefined;
+  const enqueueDeepen = producerQueue
+    ? async (j: { serverId: string; url: string; legalMode: LegalMode }) => {
+        await producerQueue.add("deepen", { kind: "deepen", ...j }, { jobId: randomUUID() });
+      }
+    : undefined;
+  const deps = { store, scraper: new HttpScraper(scraperUrl), inference, heal, discoverSubPages, verifyTools, enqueueDeepen };
 
   const worker = startWorker(connection, deps);
   const { server } = await startEnqueueServer(enqueuePort, connection);
@@ -50,6 +65,7 @@ async function main(): Promise<void> {
 
   const shutdown = async () => {
     await worker.close();
+    if (producerQueue) await producerQueue.close();
     server.close();
     process.exit(0);
   };
