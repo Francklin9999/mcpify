@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest an idea or improvement for MCP Forge
+title: "[Feature]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which component?
+      options:
+        - "Standalone MCP server (mcp-forge / npx)"
+        - "Web app + backend"
+        - "Chrome extension"
+        - "Shared packages"
+        - "Cross-cutting"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the use case or pain point. "I'm trying to ... but ..."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I'm willing to open a PR for this

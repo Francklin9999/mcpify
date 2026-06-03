@@ -18,6 +18,7 @@ from typing import Any, Optional
 
 from .capture import FetchResult, RawNetworkCall
 from .contracts import ElementRef
+from .ssrf import url_allowed
 
 # Why page_setup instead of Scrapling's native capture_xhr:
 #   - capture_xhr="" is coerced to None (disabled); ".*" captures, BUT the wrapped Response drops the HTTP
@@ -27,6 +28,11 @@ from .contracts import ElementRef
 # All verified against a real Chromium (tests/test_tiers_real.py).
 
 _MAX_JSON_BODY_BYTES = 512_000
+
+
+def _response_url(resp: Any, fallback: str) -> str:
+    value = getattr(resp, "url", None) or getattr(resp, "final_url", None) or fallback
+    return str(value)
 
 
 def _selectors_of_interest(page: Any) -> list[ElementRef]:
@@ -82,6 +88,11 @@ def _make_network_capturer() -> tuple[Any, list[RawNetworkCall]]:
             return None
 
     def page_setup(page: Any) -> None:
+        try:
+            page.route("**/*", lambda route, request: route.abort() if not url_allowed(str(request.url)) else route.continue_())
+        except Exception:
+            pass
+
         def on_response(resp: Any) -> None:
             try:
                 req = resp.request
@@ -119,6 +130,8 @@ class Tier1Fetcher:
         resp = Fetcher.get(url, stealthy_headers=True, timeout=10, retries=1)
         if resp is None or getattr(resp, "status", 0) >= 400:
             return None
+        if not url_allowed(_response_url(resp, url)):
+            return None
         return FetchResult(
             html=str(resp.html_content),
             status=int(resp.status),
@@ -141,6 +154,8 @@ class Tier2Fetcher:
         resp = DynamicFetcher.fetch(url, network_idle=True, page_setup=page_setup, headless=True, timeout=10_000, retries=1)
         if resp is None:
             return None
+        if not url_allowed(_response_url(resp, url)):
+            return None
         return FetchResult(
             html=str(resp.html_content),
             status=int(getattr(resp, "status", 200)),
@@ -162,6 +177,8 @@ class Tier3Fetcher:
         page_setup, calls = _make_network_capturer()
         resp = StealthyFetcher.fetch(url, network_idle=True, page_setup=page_setup, headless=True, timeout=10_000, retries=1)
         if resp is None:
+            return None
+        if not url_allowed(_response_url(resp, url)):
             return None
         return FetchResult(
             html=str(resp.html_content),

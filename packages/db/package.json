@@ -1,6 +1,7 @@
 {
   "name": "@mcp/db",
   "version": "0.0.0",
+  "private": true,
   "description": "Postgres schema (Drizzle) + migrations. See docs/02-data-model.md.",
   "type": "module",
   "main": "./dist/src/index.js",

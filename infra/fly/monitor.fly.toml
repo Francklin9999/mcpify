@@ -1,6 +1,6 @@
 # MCP Forge — Fly.io: monitor (Go poller, background; no inbound port).
 # Deploy from the repo root:  fly deploy --config infra/fly/monitor.fly.toml
-# Secrets:  fly secrets set DATABASE_URL=... -a mcp-forge-monitor
+# Secrets:  fly secrets set DATABASE_URL=... ENQUEUE_TOKEN=... -a mcp-forge-monitor
 app = "mcp-forge-monitor"
 primary_region = "iad"
 

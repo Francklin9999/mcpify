@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 )
 
 type Enqueuer interface {
@@ -34,6 +35,9 @@ func (e *HTTPEnqueuer) Enqueue(ctx context.Context, job any) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if token := os.Getenv("ENQUEUE_TOKEN"); token != "" {
+		req.Header.Set("X-Enqueue-Token", token)
+	}
 	resp, err := e.Client.Do(req)
 	if err != nil {
 		return err

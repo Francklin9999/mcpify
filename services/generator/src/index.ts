@@ -17,4 +17,8 @@ export * from "./adapters/scraper-http.js";
 export * from "./adapters/artifact-store.js";
 export * from "./adapters/postgres.js";
 export { OpenAIInferenceClient, OpenAIHealClient } from "./openai-client.js";
+export { ClaudeInferenceClient, ClaudeHealClient } from "./claude-client.js";
+export { GeminiInferenceClient, GeminiHealClient } from "./gemini-client.js";
 export { HeuristicInferenceClient, HeuristicHealClient } from "./heuristic-inference.js";
+export * from "./llm-prompts.js";
+export * from "./llm-factory.js";

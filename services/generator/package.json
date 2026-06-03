@@ -1,10 +1,17 @@
 {
   "name": "@mcp/generator",
   "version": "0.0.0",
+  "private": true,
   "description": "Inference + codegen + self-healer. See docs/services/generator.md.",
   "type": "module",
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" },
+    "./lean": { "types": "./dist/src/lean.d.ts", "default": "./dist/src/lean.js" },
+    "./dist/src/*": "./dist/src/*",
+    "./package.json": "./package.json"
+  },
   "scripts": {
     "build": "npm run build --workspace=@mcp/types && tsc -p tsconfig.json",
     "worker": "node dist/src/main.js",

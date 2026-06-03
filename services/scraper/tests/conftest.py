@@ -1,8 +1,14 @@
 import json
+import os
 import sys
 from pathlib import Path
 
 import pytest
+
+# Keep unit tests hermetic: the /capture SSRF guard resolves hostnames, but tests post example.com with a fake
+# controller and must not depend on DNS. Default the opt-out on for the suite (test_ssrf.py clears it to test
+# the guard itself). Production leaves it unset = guard active.
+os.environ.setdefault("SCRAPER_ALLOW_PRIVATE_HOSTS", "1")
 
 # Make the `scraper` package importable when running pytest from the package dir.
 _PKG_ROOT = Path(__file__).resolve().parents[1]

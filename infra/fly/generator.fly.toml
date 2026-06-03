@@ -1,7 +1,7 @@
 # MCP Forge — Fly.io: generator (BullMQ worker + enqueue API, private).
 # Reachable by the monitor at http://mcp-forge-generator.internal:8081/enqueue
 # Deploy from the repo root:  fly deploy --config infra/fly/generator.fly.toml
-# Secrets:  fly secrets set DATABASE_URL=... REDIS_URL=... OPENAI_API_KEY=... -a mcp-forge-generator
+# Secrets:  fly secrets set DATABASE_URL=... REDIS_URL=... ENQUEUE_TOKEN=... OPENAI_API_KEY=... -a mcp-forge-generator
 app = "mcp-forge-generator"
 primary_region = "iad"
 

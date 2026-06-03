@@ -31,8 +31,15 @@ function zipResponse(artifact: GeneratedServerArtifact, nameHint: string) {
     ...artifact.files,
     { path: "artifact.json", content: JSON.stringify(artifact, null, 2) },
   ];
-  const bytes = buildZip(entries, root);
-  return new Response(bytes, {
+  let bytes: Uint8Array;
+  try {
+    bytes = buildZip(entries, root);
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 413 });
+  }
+  const body = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(body).set(bytes);
+  return new Response(body, {
     headers: {
       "content-type": "application/zip",
       "content-disposition": `attachment; filename="${root}.zip"`,

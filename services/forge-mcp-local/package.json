@@ -1,0 +1,62 @@
+{
+  "name": "mcp-forge",
+  "version": "0.1.0",
+  "description": "Self-contained MCP server that turns any website into a runnable MCP server, in-process. Host-as-brain by default (no API key); optional OpenAI/Anthropic/Gemini/Groq/Ollama/... or a custom inference URL.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Franck Fongang",
+  "homepage": "https://github.com/FranckFongang/mcp-forge/tree/main/services/forge-mcp-local#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FranckFongang/mcp-forge.git",
+    "directory": "services/forge-mcp-local"
+  },
+  "bugs": {
+    "url": "https://github.com/FranckFongang/mcp-forge/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "mcp-server",
+    "code-generation",
+    "scraper",
+    "ai-tools",
+    "llm"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "mcp-forge": "dist/main.bundle.mjs"
+  },
+  "files": [
+    "dist/main.bundle.mjs",
+    "server.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "npm run build --workspace=@mcp/generator && tsc -p tsconfig.json",
+    "bundle": "npm run build && esbuild src/main.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/main.bundle.mjs --external:@modelcontextprotocol/sdk --external:zod --external:openai --external:@anthropic-ai/sdk --external:@google/generative-ai",
+    "start": "node dist/src/main.js",
+    "prepublishOnly": "npm run bundle",
+    "test": "npm run build && node test/providers.mjs && node test/persistence.mjs && node test/smoke.mjs && node test/emit.mjs && node test/local-e2e.mjs && node test/security.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.54.0",
+    "@google/generative-ai": "^0.24.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "openai": "^6.39.1",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@mcp/generator": "0.0.0",
+    "@mcp/types": "0.0.0",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,58 +1,58 @@
 import { z } from "zod";
-import { JsonSchema, IsoDateTime } from "./common.js";
+import { JsonSchema, IsoDateTime, LIMITS } from "./common.js";
 import { LegalMode, isSecretHeader, isSecretField } from "./legal.js";
 
 /** Scrapling adaptive-tracking handle: an element addressed by role with selector fallbacks (`01 S1`). */
 export const ElementRef = z.object({
-  role: z.string(),
-  selector: z.string(),
-  fallbackSelectors: z.array(z.string()).optional(),
+  role: z.string().max(128),
+  selector: z.string().max(2_000),
+  fallbackSelectors: z.array(z.string().max(2_000)).max(10).optional(),
 });
 export type ElementRef = z.infer<typeof ElementRef>;
 
 export const PageField = z.object({
-  name: z.string(),
-  type: z.string(),
-  label: z.string().optional(),
-  placeholder: z.string().optional(),
+  name: z.string().max(256),
+  type: z.string().max(64),
+  label: z.string().max(512).optional(),
+  placeholder: z.string().max(512).optional(),
   required: z.boolean(),
-  selector: z.string().optional(),
+  selector: z.string().max(2_000).optional(),
 });
 export type PageField = z.infer<typeof PageField>;
 
 export const PageForm = z.object({
-  selector: z.string(),
+  selector: z.string().max(2_000),
   method: z.enum(["GET", "POST"]),
   action: z.string().url().optional(),
   purpose: z.enum(["search", "auth", "form", "filter"]),
-  submitLabel: z.string().optional(),
-  submitSelector: z.string().optional(),
-  fields: z.array(PageField),
+  submitLabel: z.string().max(512).optional(),
+  submitSelector: z.string().max(2_000).optional(),
+  fields: z.array(PageField).max(100),
 });
 export type PageForm = z.infer<typeof PageForm>;
 
 export const PageAction = z.object({
   kind: z.enum(["link", "button", "input", "select", "menuitem"]),
-  label: z.string(),
-  selector: z.string(),
+  label: z.string().max(512),
+  selector: z.string().max(2_000),
   href: z.string().url().optional(),
 });
 export type PageAction = z.infer<typeof PageAction>;
 
 export const AppStateSummary = z.object({
-  source: z.string(),
-  keys: z.array(z.string()).optional(),
+  source: z.string().max(512),
+  keys: z.array(z.string().max(256)).max(200).optional(),
   schema: JsonSchema.optional(),
-  types: z.array(z.string()).optional(),
+  types: z.array(z.string().max(256)).max(100).optional(),
 });
 export type AppStateSummary = z.infer<typeof AppStateSummary>;
 
 export const PageSnapshot = z.object({
-  visibleText: z.string().optional(),
-  headings: z.array(z.string()).optional(),
-  actions: z.array(PageAction).optional(),
-  forms: z.array(PageForm).optional(),
-  appState: z.array(AppStateSummary).optional(),
+  visibleText: z.string().max(12_000).optional(),
+  headings: z.array(z.string().max(512)).max(100).optional(),
+  actions: z.array(PageAction).max(300).optional(),
+  forms: z.array(PageForm).max(50).optional(),
+  appState: z.array(AppStateSummary).max(50).optional(),
 });
 export type PageSnapshot = z.infer<typeof PageSnapshot>;
 
@@ -62,10 +62,10 @@ export type PageSnapshot = z.infer<typeof PageSnapshot>;
  */
 export const NetworkCapture = z
   .object({
-    method: z.string(),
-    urlPattern: z.string(),
-    rawUrl: z.string().url(),
-    requestHeaders: z.record(z.string(), z.string()),
+    method: z.string().max(16),
+    urlPattern: z.string().max(4_000),
+    rawUrl: z.string().url().max(4_000),
+    requestHeaders: z.record(z.string().max(256), z.string().max(LIMITS.maxHeaderValue)),
     requestBodySchema: JsonSchema.optional(),
     responseSchema: JsonSchema.optional(),
     statusCode: z.number().int(),
@@ -74,6 +74,13 @@ export const NetworkCapture = z
   // FAIL-CLOSED legal backstop (`04`): the contract REJECTS any un-scrubbed secret-list header. Producers
   // must call `scrubHeaders` before constructing this - if they forget, parse() throws instead of leaking.
   .superRefine((cap, ctx) => {
+    if (Object.keys(cap.requestHeaders).length > LIMITS.maxHeaders) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["requestHeaders"],
+        message: `too many request headers; max ${LIMITS.maxHeaders}`,
+      });
+    }
     for (const key of Object.keys(cap.requestHeaders)) {
       if (isSecretHeader(key) || isSecretField(key)) {
         ctx.addIssue({
@@ -98,11 +105,11 @@ export const CaptureBundle = z.object({
   legalMode: LegalMode,
   tier: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
   dom: z.object({
-    html: z.string(),
-    domHash: z.string(),
-    selectorsOfInterest: z.array(ElementRef).optional(),
+    html: z.string().max(LIMITS.maxHtml),
+    domHash: z.string().max(128),
+    selectorsOfInterest: z.array(ElementRef).max(200).optional(),
   }),
-  network: z.array(NetworkCapture),
+  network: z.array(NetworkCapture).max(LIMITS.maxNetworkCalls),
   page: PageSnapshot.optional(),
   meta: z.object({
     title: z.string().optional(),

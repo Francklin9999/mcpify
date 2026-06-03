@@ -13,6 +13,7 @@ async function main(): Promise<void> {
   const server = createServer({ client });
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  setInterval(() => undefined, 2_147_483_647);
 }
 
 main().catch((err) => {

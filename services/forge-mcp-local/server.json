@@ -1,0 +1,72 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.FranckFongang/mcp-forge",
+  "title": "MCP Forge",
+  "description": "Turn any website into a runnable MCP server, in-process. Host-as-brain by default (no API key); optional OpenAI/Anthropic/Gemini/Groq/Ollama/custom inference.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/FranckFongang/mcp-forge",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/FranckFongang/mcp-forge/tree/main/services/forge-mcp-local#readme",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "mcp-forge",
+      "version": "0.1.0",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "FORGE_INFERENCE",
+          "description": "Server-side inference for forge_generate: host (default, no key) | heuristic | openai | claude | gemini | groq | together | openrouter | deepseek | mistral | fireworks | xai | ollama | lmstudio | vllm | openai-compatible | http. Accepts provider/model too.",
+          "isRequired": false,
+          "default": "host"
+        },
+        {
+          "name": "FORGE_MODEL",
+          "description": "Override the model for the selected provider.",
+          "isRequired": false
+        },
+        {
+          "name": "OPENAI_API_KEY",
+          "description": "API key when FORGE_INFERENCE=openai.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "ANTHROPIC_API_KEY",
+          "description": "API key when FORGE_INFERENCE=claude.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "GEMINI_API_KEY",
+          "description": "API key when FORGE_INFERENCE=gemini.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "FORGE_OPENAI_BASE_URL",
+          "description": "Base URL when FORGE_INFERENCE=openai-compatible (any OpenAI-compatible endpoint).",
+          "isRequired": false
+        },
+        {
+          "name": "FORGE_INFERENCE_URL",
+          "description": "Custom inference endpoint when FORGE_INFERENCE=http (bring your own logic).",
+          "isRequired": false
+        },
+        {
+          "name": "MCP_FORGE_HOME",
+          "description": "Where generated servers + registry.json are written (default ~/.mcp-forge).",
+          "isRequired": false
+        },
+        {
+          "name": "SCRAPER_URL",
+          "description": "Optional: use a full Playwright scraper service for JS-rendered sites instead of the built-in static-fetch capture.",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 name: mcp-forge
 
 x-app-env: &app-env
-  DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-mcp}
+  DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env to a strong value before deploying}@postgres:5432/${POSTGRES_DB:-mcp}
   REDIS_URL: redis://redis:6379
   ARTIFACT_ROOT: /data/artifacts
   LLM_PROVIDER: ${LLM_PROVIDER:-openai}
@@ -14,12 +14,16 @@ x-app-env: &app-env
   GEMINI_MODEL: ${GEMINI_MODEL:-}
   AGENT_MODEL: ${AGENT_MODEL:-}
   AGENT_REASONING: ${AGENT_REASONING:-}
+  FORGE_API_KEY: ${FORGE_API_KEY:?set FORGE_API_KEY in .env to a long random value before deploying}
+  FORGE_RATE_LIMIT_RPM: ${FORGE_RATE_LIMIT_RPM:-60}
+  FORGE_TRUST_PROXY: ${FORGE_TRUST_PROXY:-1}
+  ENQUEUE_TOKEN: ${ENQUEUE_TOKEN:?set ENQUEUE_TOKEN in .env to a long random value before deploying}
 
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env to a strong value before deploying}
       POSTGRES_DB: ${POSTGRES_DB:-mcp}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -48,7 +52,7 @@ services:
       dockerfile: infra/docker/web.Dockerfile
     command: ["node", "packages/db/scripts/apply-migrations.mjs"]
     environment:
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-mcp}
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env to a strong value before deploying}@postgres:5432/${POSTGRES_DB:-mcp}
     depends_on:
       postgres:
         condition: service_healthy
@@ -99,8 +103,9 @@ services:
       context: ..
       dockerfile: infra/docker/monitor.Dockerfile
     environment:
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-mcp}
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env to a strong value before deploying}@postgres:5432/${POSTGRES_DB:-mcp}
       ENQUEUE_URL: http://generator:8081/enqueue
+      ENQUEUE_TOKEN: ${ENQUEUE_TOKEN:?set ENQUEUE_TOKEN in .env to a long random value before deploying}
       POLL_INTERVAL: ${POLL_INTERVAL:-60s}
     depends_on:
       postgres:

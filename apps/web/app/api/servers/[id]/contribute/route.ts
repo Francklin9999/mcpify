@@ -3,6 +3,7 @@ import { z } from "zod";
 import { ContributeRequest, type DiscoverJob } from "@mcp/types";
 import { storeContribution } from "@/lib/contributions";
 import { jobQueue } from "@/lib/db";
+import { readJsonWithLimit } from "@/lib/request-body";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const serverId = ServerIdParam.safeParse(id);
   if (!serverId.success) return NextResponse.json({ error: "invalid server id" }, { status: 400 });
 
-  const parsed = ContributeRequest.safeParse(await req.json().catch(() => null));
+  const body = await readJsonWithLimit(req, 512_000);
+  if (!body.ok) return NextResponse.json({ error: body.error }, { status: body.status });
+  const parsed = ContributeRequest.safeParse(body.value);
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
   const { bundleRef } = await storeContribution(serverId.data, parsed.data.bundle);
