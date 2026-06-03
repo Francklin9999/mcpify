@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 import { AssistRequest, type AssistStepResponse, type AssistToolCall } from "@mcp/types";
+import { readJsonWithLimit } from "@/lib/request-body";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -311,7 +312,9 @@ function agentFallback(req: AssistRequest): Response {
 }
 
 export async function POST(req: Request): Promise<Response> {
-  const parsed = AssistRequest.safeParse(await req.json().catch(() => null));
+  const body = await readJsonWithLimit(req, 512_000);
+  if (!body.ok) return NextResponse.json({ error: body.error }, { status: body.status });
+  const parsed = AssistRequest.safeParse(body.value);
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
   const apiKey = activeApiKey();

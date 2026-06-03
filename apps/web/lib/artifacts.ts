@@ -3,13 +3,28 @@ import { join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { GeneratedServerArtifact, type GeneratedServerArtifact as GeneratedServerArtifactT } from "@mcp/types";
 
-async function collectFiles(root: string, dir = root): Promise<{ path: string; content: string }[]> {
+const MAX_ARTIFACT_FILES = 64;
+const MAX_ARTIFACT_BYTES = 2_000_000;
+const MAX_ARTIFACT_DEPTH = 8;
+
+async function collectFiles(
+  root: string,
+  dir = root,
+  depth = 0,
+  state = { files: 0, bytes: 0 },
+): Promise<{ path: string; content: string }[]> {
+  if (depth > MAX_ARTIFACT_DEPTH) throw new Error("artifact directory is too deep");
   const entries = await readdir(dir, { withFileTypes: true });
   const files = await Promise.all(
     entries.map(async (entry) => {
       const fullPath = join(dir, entry.name);
-      if (entry.isDirectory()) return collectFiles(root, fullPath);
+      if (entry.isDirectory()) return collectFiles(root, fullPath, depth + 1, state);
       if (!entry.isFile()) return [];
+      state.files += 1;
+      if (state.files > MAX_ARTIFACT_FILES) throw new Error("artifact has too many files");
+      const info = await stat(fullPath);
+      state.bytes += info.size;
+      if (state.bytes > MAX_ARTIFACT_BYTES) throw new Error("artifact is too large");
       return [{ path: relative(root, fullPath), content: await readFile(fullPath, "utf8") }];
     }),
   );
@@ -26,7 +41,8 @@ export async function artifactFromFileUrl(
   const rootStat = await stat(root).catch(() => null);
   if (!rootStat?.isDirectory()) return null;
 
-  const files = await collectFiles(root);
+  const files = await collectFiles(root).catch(() => []);
+  if (!files.length) return null;
   const configSnippet = files.find((file) => file.path === "claude_code_config.json")?.content ?? "{}";
   const parsed = GeneratedServerArtifact.safeParse({
     serverId,

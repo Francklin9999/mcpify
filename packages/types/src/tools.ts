@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { JsonSchema, Confidence } from "./common.js";
+import { JsonSchema, Confidence, LIMITS } from "./common.js";
 import { NetworkCapture, ElementRef } from "./capture.js";
 
 /** Execution kinds - the `ExecutionStrategy` discriminants. Exported so the DB `execution_kind` enum can
@@ -9,10 +9,10 @@ export type ExecutionKind = (typeof EXECUTION_KINDS)[number];
 
 /** How a ToolDefinition's input fields fill a discovered request. */
 export const ParamMapping = z.record(
-  z.string(),
+  z.string().max(128),
   z.object({
     in: z.enum(["path", "query", "header", "body"]),
-    key: z.string(),
+    key: z.string().max(256),
   }),
 );
 export type ParamMapping = z.infer<typeof ParamMapping>;
@@ -21,7 +21,7 @@ export type ParamMapping = z.infer<typeof ParamMapping>;
 export const BrowserStep = z.object({
   action: z.enum(["navigate", "fill", "click", "selectOption", "pressKey", "waitFor", "extract"]),
   target: ElementRef.optional(),
-  value: z.string().optional(),
+  value: z.string().max(4_000).optional(),
 });
 export type BrowserStep = z.infer<typeof BrowserStep>;
 
@@ -38,15 +38,15 @@ export const ExecutionStrategy = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("browser"),
-    steps: z.array(BrowserStep),
+    steps: z.array(BrowserStep).max(50),
   }),
 ]);
 export type ExecutionStrategy = z.infer<typeof ExecutionStrategy>;
 
 /** One inferred MCP tool. `name` is snake_case; `inputSchema` is zod-validated before codegen (`generator.md`). */
 export const ToolDefinition = z.object({
-  name: z.string().regex(/^[a-z][a-z0-9_]*$/, "name must be snake_case"),
-  description: z.string().min(1),
+  name: z.string().max(64).regex(/^[a-z][a-z0-9_]*$/, "name must be snake_case"),
+  description: z.string().min(1).max(1_000),
   inputSchema: JsonSchema,
   execution: ExecutionStrategy,
   confidence: Confidence,
@@ -57,7 +57,7 @@ export type ToolDefinition = z.infer<typeof ToolDefinition>;
 export const InferenceResult = z.object({
   url: z.string().url(),
   bundleId: z.string().uuid(),
-  tools: z.array(ToolDefinition),
+  tools: z.array(ToolDefinition).max(LIMITS.maxTools),
   confidence: Confidence,
   modelVersion: z.string(),
 });

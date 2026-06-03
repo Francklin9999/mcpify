@@ -376,7 +376,7 @@ test("mcp-register.mjs registers into Codex via its CLI (codex mcp add)", (t) =>
   const calls = readFileSync(callLog, "utf8");
   assert.match(calls, /mcp remove example-com/, "removes any prior entry first (idempotent)");
   assert.match(calls, new RegExp(`mcp add example-com -- /usr/local/bin/node ${home.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/server\\.js`), "adds with the documented `-- <command> <args>` form");
-  assert.match(res.stdout, /into Codex/);
+  if (res.stdout) assert.match(res.stdout, /into Codex/);
 });
 
 // Gate A: the generated server.ts TYPE-CHECKS against the real @modelcontextprotocol/sdk

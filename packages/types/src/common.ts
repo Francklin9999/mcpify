@@ -8,6 +8,18 @@ import { z } from "zod";
 export const JsonSchema = z.record(z.string(), z.unknown());
 export type JsonSchema = z.infer<typeof JsonSchema>;
 
+export const LIMITS = {
+  maxString: 8_000,
+  maxLongText: 120_000,
+  maxHtml: 200_000,
+  maxHeaders: 64,
+  maxHeaderValue: 2_000,
+  maxNetworkCalls: 200,
+  maxTools: 128,
+  maxGeneratedFiles: 64,
+  maxGeneratedFileBytes: 1_000_000,
+} as const;
+
 /** ISO-8601 timestamp (offsets allowed). Used on every `*At` field. */
 export const IsoDateTime = z.string().datetime({ offset: true });
 

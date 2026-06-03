@@ -8,6 +8,7 @@ import { servers, tools as toolsTable } from "@mcp/db";
 import { discoverMore } from "@mcp/generator/dist/src/incremental.js";
 import { makeLLMClients } from "@mcp/generator/dist/src/llm-factory.js";
 import { db, jobQueue } from "@/lib/db";
+import { readJsonWithLimit } from "@/lib/request-body";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -46,7 +47,9 @@ function unionByName(primary: ToolDef[], extra: ToolDef[]): ToolDef[] {
 // serverId is given - grows the persisted server by enqueuing a discover job that carries the ALREADY-FOUND
 // tools (so the worker merges them model-free, never re-inferring the same material).
 export async function POST(req: Request): Promise<Response> {
-  const parsed = DiscoverRequest.safeParse(await req.json().catch(() => null));
+  const requestBody = await readJsonWithLimit(req, 512_000);
+  if (!requestBody.ok) return NextResponse.json({ error: requestBody.error }, { status: requestBody.status });
+  const parsed = DiscoverRequest.safeParse(requestBody.value);
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
   const { currentTools, bundle, serverId } = parsed.data;

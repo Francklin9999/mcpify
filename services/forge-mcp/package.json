@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "bin": {
-    "mcp-forge": "dist/src/main.js"
+    "mcp-forge-remote": "dist/src/main.js"
   },
   "scripts": {
     "build": "npm run build --workspace=@mcp/types && tsc -p tsconfig.json",

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { JsonSchema } from "./common.js";
+import { JsonSchema, LIMITS } from "./common.js";
 import { LegalMode } from "./legal.js";
 import { CaptureBundle } from "./capture.js";
 import { GeneratedServerArtifact } from "./artifact.js";
@@ -52,7 +52,7 @@ export type ContributeRequest = z.infer<typeof ContributeRequest>;
 
 export const AssistMessage = z.object({
   role: z.enum(["user", "assistant"]),
-  content: z.string(),
+  content: z.string().max(16_000),
 });
 export type AssistMessage = z.infer<typeof AssistMessage>;
 
@@ -63,16 +63,16 @@ export type AssistMessage = z.infer<typeof AssistMessage>;
  * list of a generated server's tools; `tools` (below) is the actionable set for the agent loop.
  */
 export const AssistToolSpec = z.object({
-  name: z.string().regex(/^[a-z][a-z0-9_]*$/),
-  description: z.string().min(1),
+  name: z.string().max(64).regex(/^[a-z][a-z0-9_]*$/),
+  description: z.string().min(1).max(1_000),
   parameters: JsonSchema,
 });
 export type AssistToolSpec = z.infer<typeof AssistToolSpec>;
 
 /** One tool the model wants the side panel to run, with arguments parsed from the model's call. */
 export const AssistToolCall = z.object({
-  id: z.string().optional(),
-  name: z.string(),
+  id: z.string().max(256).optional(),
+  name: z.string().max(64),
   arguments: z.record(z.string(), z.unknown()).default({}),
 });
 export type AssistToolCall = z.infer<typeof AssistToolCall>;
@@ -88,21 +88,21 @@ export const AssistStepResponse = z.object({
 export type AssistStepResponse = z.infer<typeof AssistStepResponse>;
 
 export const AssistRequest = z.object({
-  messages: z.array(AssistMessage).min(1),
+  messages: z.array(AssistMessage).min(1).max(40),
   pageContext: z
     .object({
       url: z.string().url().optional(),
-      title: z.string().optional(),
+      title: z.string().max(512).optional(),
       visibleText: z.string().max(12000).optional(),
     })
     .optional(),
-  availableTools: z.array(ToolDefinition).optional(),
+  availableTools: z.array(ToolDefinition).max(LIMITS.maxTools).optional(),
   /**
    * Actionable live-tab tools for the side-panel agent loop. When present, /api/assist runs ONE function-
    * calling step and returns an AssistStepResponse (JSON) instead of a streamed text turn. Additive: absent
    * => the legacy streamed-chat behavior is unchanged.
    */
-  tools: z.array(AssistToolSpec).optional(),
+  tools: z.array(AssistToolSpec).max(64).optional(),
 });
 export type AssistRequest = z.infer<typeof AssistRequest>;
 
@@ -113,14 +113,14 @@ export type AssistRequest = z.infer<typeof AssistRequest>;
  * sent only the delta (token-efficient); when nothing is new, `added` is empty and no model call happens.
  */
 export const DiscoverRequest = z.object({
-  currentTools: z.array(ToolDefinition),
+  currentTools: z.array(ToolDefinition).max(LIMITS.maxTools),
   bundle: CaptureBundle,
   serverId: z.string().uuid().optional(),
 });
 export type DiscoverRequest = z.infer<typeof DiscoverRequest>;
 
 export const DiscoverResponse = z.object({
-  added: z.array(ToolDefinition),
-  tools: z.array(ToolDefinition),
+  added: z.array(ToolDefinition).max(LIMITS.maxTools),
+  tools: z.array(ToolDefinition).max(LIMITS.maxTools),
 });
 export type DiscoverResponse = z.infer<typeof DiscoverResponse>;

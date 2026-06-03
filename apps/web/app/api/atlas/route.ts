@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { catalogConfigured, listCatalog, findCatalogByDomain, upsertCatalog } from "@/lib/catalog-store";
+import { readJsonWithLimit } from "@/lib/request-body";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -50,9 +51,13 @@ export async function GET(req: Request): Promise<Response> {
  * Body: { domain, origin?, serverId?, tools?, version?, title? }
  */
 export async function POST(req: Request): Promise<Response> {
-  const body = await req.json().catch(() => null);
-  const domain = body?.domain?.trim();
-  if (!domain) return NextResponse.json({ error: "domain required" }, { status: 400 });
+  const parsed = await readJsonWithLimit(req, 256_000);
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: parsed.status });
+  const body = parsed.value && typeof parsed.value === "object" && !Array.isArray(parsed.value)
+    ? parsed.value as Record<string, unknown>
+    : null;
+  const domain = typeof body?.domain === "string" ? body.domain.trim() : "";
+  if (!body || !domain) return NextResponse.json({ error: "domain required" }, { status: 400 });
 
   if (!catalogConfigured()) return NextResponse.json({ error: "catalog not configured" }, { status: 503 });
 

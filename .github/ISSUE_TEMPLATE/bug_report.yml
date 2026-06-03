@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a problem with MCP Forge
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug! Please search existing issues first.
+        For security vulnerabilities, **do not** file a public issue — see [SECURITY.md](../blob/main/SECURITY.md).
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which component?
+      options:
+        - "Standalone MCP server (mcp-forge / npx)"
+        - "Web app + backend (generator / scraper / monitor / web)"
+        - "Chrome extension"
+        - "Shared packages (@mcp/types, @mcp/db)"
+        - "Not sure"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Configure mcp-forge with ...
+        2. Ask the agent to ...
+        3. See error ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / output
+      description: Paste any error output. This will be rendered as code, no need for backticks.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: "mcp-forge 0.1.0 / commit abc1234"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "OS, Node version, MCP client (Claude Code / Cursor / Codex / ...)"
+    validations:
+      required: true

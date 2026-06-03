@@ -1,4 +1,6 @@
 const encoder = new TextEncoder();
+const MAX_ZIP_FILES = 66;
+const MAX_ZIP_INPUT_BYTES = 3_000_000;
 
 function toDosTime(date: Date) {
   const year = Math.max(1980, date.getFullYear());
@@ -31,7 +33,12 @@ function join(parts: Uint8Array[]) {
 }
 
 function normalizePath(path: string) {
-  return String(path || "file").replace(/\\/g, "/").replace(/^\/+/, "").split("/").filter(Boolean).join("/");
+  return String(path || "file")
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .split("/")
+    .filter((part) => part && part !== "." && part !== "..")
+    .join("/");
 }
 
 function fileEntry(path: string, content: string, stamp: { time: number; date: number }) {
@@ -51,11 +58,15 @@ function fileEntry(path: string, content: string, stamp: { time: number; date: n
 }
 
 export function buildZip(entries: { path: string; content: string }[], root = "mcp-server") {
+  if (entries.length > MAX_ZIP_FILES) throw new Error(`too many files for zip; max ${MAX_ZIP_FILES}`);
   const stamp = toDosTime(new Date());
   const locals: Uint8Array[] = [];
   const centrals: Uint8Array[] = [];
   let offset = 0;
+  let inputBytes = 0;
   for (const entry of entries) {
+    inputBytes += encoder.encode(String(entry.content ?? "")).byteLength;
+    if (inputBytes > MAX_ZIP_INPUT_BYTES) throw new Error(`zip input too large; max ${MAX_ZIP_INPUT_BYTES} bytes`);
     const record = fileEntry(`${normalizePath(root)}/${normalizePath(entry.path)}`, entry.content, stamp);
     locals.push(record.localHeader, record.data);
     centrals.push(record.centralHeader(offset));

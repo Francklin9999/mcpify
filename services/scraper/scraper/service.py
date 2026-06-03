@@ -8,14 +8,19 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .capture import EscalationController, empty_bundle
 from .contracts import CaptureBundle, LegalMode
 from .robots import robots_allows
+from .ssrf import host_is_internal as _host_is_internal
+from .ssrf import url_allowed as _url_allowed
 from .tiers import Tier1Fetcher, Tier2Fetcher, Tier3Fetcher
+
+
+__all__ = ["_host_is_internal", "_url_allowed", "create_app", "app"]
 
 
 class CaptureRequest(BaseModel):
@@ -45,6 +50,14 @@ def create_app(controller: Optional[EscalationController] = None) -> FastAPI:
 
     @app.post("/capture", response_model=CaptureBundle, response_model_exclude_none=True)
     def capture(req: CaptureRequest) -> CaptureBundle:
+        # SSRF guard: this server-side fetcher must not be aimed at internal/loopback/metadata targets via a
+        # caller-supplied URL. Reject non-public or non-http(s) URLs before robots.txt or any tier fetch runs.
+        if not _url_allowed(req.url):
+            raise HTTPException(
+                status_code=400,
+                detail="refusing to fetch a non-public or non-http(s) URL (SSRF guard); "
+                "set SCRAPER_ALLOW_PRIVATE_HOSTS=1 to allow internal hosts you control.",
+            )
         # session is extension-only - the server-side scraper never acts in a user's session.
         if req.legalMode == "session":
             return empty_bundle(req.url, req.legalMode, robots_allowed=False)

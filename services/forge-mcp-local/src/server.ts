@@ -1,0 +1,251 @@
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import { ToolDefinition, GenerateRequest, aggregateConfidence, type LegalMode, type RegistryEntry } from "@mcp/types";
+import { generate, generateServer } from "@mcp/generator/lean";
+import { chooseScraper } from "./scraper.js";
+import { selectInference } from "./select-inference.js";
+import { buildInferencePayload } from "./inference-clients.js";
+import { FsPersistence, installHint } from "./persistence.js";
+
+type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
+const text = (s: string): ToolResult => ({ content: [{ type: "text", text: s }] });
+const errorText = (s: string): ToolResult => ({ content: [{ type: "text", text: s }], isError: true });
+
+// Same TS2589 workaround the generated servers + forge-mcp use: the SDK's generic deep-instantiates over zod.
+type Register = (
+  name: string,
+  config: { description?: string; inputSchema?: z.ZodRawShape },
+  cb: (args: Record<string, unknown>) => Promise<ToolResult>,
+) => void;
+
+function toolSummary(tools: { name?: string; description?: string }[]): string {
+  return tools.length
+    ? tools.map((t) => `  - ${t?.name ?? "(unnamed)"}: ${String(t?.description ?? "").slice(0, 100)}`).join("\n")
+    : "  (no tools)";
+}
+
+/**
+ * Validate a caller-supplied URL at the tool boundary (defense-in-depth; codegen also sanitizes). Enforces an
+ * http(s)-only scheme and rejects line terminators / control chars (which a crafted page could try to smuggle
+ * in to break out of the generated server's header comment). Returns the trimmed URL or an error message.
+ */
+function validateUrl(raw: unknown): { ok: true; url: string } | { ok: false; msg: string } {
+  const url = String(raw ?? "").trim();
+  if (!url) return { ok: false, msg: "url is required (e.g. https://rubygems.org)." };
+  for (const ch of url) {
+    const c = ch.codePointAt(0) ?? 0;
+    if (c < 0x20 || c === 0x7f || c === 0x2028 || c === 0x2029) {
+      return { ok: false, msg: "url must not contain line breaks or control characters." };
+    }
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { ok: false, msg: `not a valid URL: ${url}` };
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return { ok: false, msg: `unsupported URL scheme '${parsed.protocol}' - only http and https are allowed.` };
+  }
+  return { ok: true, url };
+}
+
+export function createServer(): McpServer {
+  const server = new McpServer({ name: "mcp-forge", version: "0.1.0" });
+  const register = server.registerTool.bind(server) as unknown as Register;
+  const inference = selectInference();
+
+  // ---- HOST-AS-BRAIN PATH (the default): scrape, then let the CALLING model design the tools. ----
+
+  register(
+    "forge_scrape",
+    {
+      description:
+        "STEP 1 of building an MCP server from a website WITHOUT any API key: scrape the URL and return its " +
+        "structured analysis (page type, forms, links, candidate API endpoints, observed network, a DOM sample). " +
+        "YOU (the calling model) then decide the tool set and call forge_emit_server with it. This is the " +
+        "recommended path - no LLM key needed, because you are the brain (like how Playwright MCP works).",
+      inputSchema: {
+        url: z.string().describe("The website to analyze, e.g. https://rubygems.org"),
+        legalMode: z.enum(["safe", "full_scrape"]).optional().describe("Scrape mode; default 'safe'."),
+      },
+    },
+    async (args) => {
+      const v = validateUrl(args.url);
+      if (!v.ok) return errorText(v.msg);
+      const url = v.url;
+      const legalMode = (typeof args.legalMode === "string" ? args.legalMode : "safe") as LegalMode;
+      try {
+        const { scraper, kind } = chooseScraper();
+        const bundle = await scraper.capture(url, legalMode);
+        const analysis = buildInferencePayload(bundle);
+        return text(
+          [
+            `Scraped ${url} (scraper: ${kind}).`,
+            ``,
+            `PAGE ANALYSIS (use this to design tools):`,
+            JSON.stringify(analysis),
+            ``,
+            `NEXT: design MCP tools from the above, then call forge_emit_server({ url, tools: [...] }).`,
+            `Each tool must match this shape (see ToolDefinition):`,
+            `  { "name": "snake_case_name", "description": "...", "inputSchema": { "type":"object", "properties": {...} },`,
+            `    "execution": { "kind": "http", "request": { "method":"GET", "urlPattern":"/path", "rawUrl":"https://...", "statusCode":200, "contentType":"application/json" }, "paramMapping": {} },`,
+            `    "confidence": 0.7 }`,
+          ].join("\n"),
+        );
+      } catch (err) {
+        return errorText(`forge_scrape failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+  );
+
+  register(
+    "forge_emit_server",
+    {
+      description:
+        "STEP 2: turn tool definitions YOU designed (from forge_scrape) into a runnable MCP server on disk. " +
+        "Deterministic codegen - no LLM involved. Writes the server's source + install scripts to a local " +
+        "directory and returns the path plus the one command to install it into your MCP clients.",
+      inputSchema: {
+        url: z.string().describe("The source website these tools came from."),
+        title: z.string().optional().describe("Human title for the server (defaults to the URL)."),
+        tools: z.array(z.unknown()).describe("Array of ToolDefinition objects (see forge_scrape output for the shape)."),
+      },
+    },
+    async (args) => {
+      const v = validateUrl(args.url);
+      if (!v.ok) return errorText(v.msg);
+      const url = v.url;
+      const rawTools = Array.isArray(args.tools) ? args.tools : [];
+      if (!rawTools.length) return errorText("tools is required: an array of ToolDefinition objects.");
+
+      const valid: ToolDefinition[] = [];
+      const errors: string[] = [];
+      rawTools.forEach((t, i) => {
+        const parsed = ToolDefinition.safeParse(t);
+        if (parsed.success) valid.push(parsed.data);
+        else errors.push(`  tool[${i}]: ${parsed.error.issues.map((x) => `${x.path.join(".")} ${x.message}`).join("; ")}`);
+      });
+      if (!valid.length) {
+        return errorText(`No valid tools. Fix these and retry:\n${errors.join("\n") || "  (all tools failed validation)"}`);
+      }
+
+      try {
+        const title = (typeof args.title === "string" && args.title.trim()) || url;
+        const persistence = new FsPersistence();
+        const { serverId, version } = await persistence.nextServer(url);
+        const browsing = valid.some((t) => t.execution.kind === "browser");
+        const artifact = generateServer({ serverId, version, url, title, tools: valid, browsing });
+        const dir = await persistence.saveArtifact(artifact);
+        const written = artifact.files.length;
+        const entry: RegistryEntry = {
+          serverId,
+          url,
+          title,
+          tier: "auto_gen",
+          confidence: aggregateConfidence(valid.map((t) => t.confidence)),
+          installCount: 0,
+          lastParsedAt: new Date().toISOString(),
+          status: "active",
+          currentVersion: version,
+        };
+        await persistence.writeRegistry(entry, valid, dir);
+        const hasSh = artifact.files.some((f) => f.path === "install.sh");
+        return text(
+          [
+            `Built MCP server "${title}" with ${valid.length} tool(s)${errors.length ? ` (${errors.length} invalid skipped)` : ""}.`,
+            `Wrote ${written} file(s) to:`,
+            `  ${dir}`,
+            ``,
+            toolSummary(valid),
+            ``,
+            `Install it into your MCP clients:`,
+            `  ${installHint(dir, hasSh)}`,
+            errors.length ? `\nSkipped invalid tools:\n${errors.join("\n")}` : ``,
+          ].join("\n"),
+        );
+      } catch (err) {
+        return errorText(`forge_emit_server failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+  );
+
+  // ---- ONE-SHOT PATH: server-side inference (for non-agentic clients, or when you WANT a configured model). ----
+
+  register(
+    "forge_generate",
+    {
+      description:
+        `One-shot: scrape a URL and build a runnable MCP server in a single call, using the server-side ` +
+        `inference configured via FORGE_INFERENCE (currently: ${inference.label}). Prefer forge_scrape + ` +
+        `forge_emit_server when you are an agent (no API key, higher quality). Use this for non-agentic clients ` +
+        `or when you specifically want a configured provider/local model to do the inference.`,
+      inputSchema: {
+        url: z.string().describe("The website to turn into an MCP server."),
+        legalMode: z.enum(["safe", "full_scrape"]).optional().describe("Scrape mode; default 'safe'."),
+      },
+    },
+    async (args) => {
+      const v = validateUrl(args.url);
+      if (!v.ok) return errorText(v.msg);
+      const legalMode = (typeof args.legalMode === "string" ? args.legalMode : "safe") as LegalMode;
+      // Validate (don't cast) the request against the contract - this is the only gate on legalMode's
+      // full_scrape acknowledgement invariant, and gives a real error instead of a confusing downstream throw.
+      const reqParsed = GenerateRequest.safeParse({
+        url: v.url,
+        legalMode,
+        acknowledgedFullScrape: legalMode === "full_scrape",
+      });
+      if (!reqParsed.success) {
+        return errorText(`invalid request: ${reqParsed.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ")}`);
+      }
+      try {
+        const { scraper } = chooseScraper();
+        const persistence = new FsPersistence();
+        const outcome = await generate(reqParsed.data, { scraper, inference: inference.client, persistence });
+        const dir = persistence.dirFor(outcome.serverId) ?? "(unknown)";
+        const tools = Array.isArray(outcome.artifact.tools) ? outcome.artifact.tools : [];
+        const hasSh = outcome.artifact.files.some((f) => f.path === "install.sh");
+
+        // Make a degraded inference path VISIBLE: any heuristic run (explicit, host-default, OR a fallback
+        // because a requested provider's key was missing) must say so - inference.label carries the reason.
+        const degraded = inference.hostBrain || inference.mode === "heuristic";
+        const note = degraded
+          ? `\nNote: inference used the keyless heuristic (${inference.label}). For higher-quality tools, set ` +
+            `FORGE_INFERENCE to a provider/model (with its API key), or use forge_scrape + forge_emit_server.`
+          : ``;
+
+        // A broken / zero-tool result must NOT be presented as success with install instructions.
+        if (outcome.status === "broken" || outcome.toolCount === 0) {
+          return errorText(
+            [
+              `forge_generate produced NO usable tools for ${v.url} (status: ${outcome.status}).`,
+              `Likely causes: the site is JS-rendered (set SCRAPER_URL to a Playwright scraper), it is bot-protected,`,
+              `or inference returned nothing usable.`,
+              dir !== "(unknown)" ? `Any partial files were written to: ${dir}` : ``,
+              note.trim(),
+            ].filter(Boolean).join("\n"),
+          );
+        }
+
+        return text(
+          [
+            `Generated MCP server from ${v.url} using inference: ${inference.label}.`,
+            `status: ${outcome.status}   tools: ${outcome.toolCount}   confidence: ${outcome.confidence.toFixed(2)}`,
+            ``,
+            toolSummary(tools),
+            ``,
+            `Wrote files to:`,
+            `  ${dir}`,
+            `Install it into your MCP clients:`,
+            `  ${installHint(dir, hasSh)}${note}`,
+          ].join("\n"),
+        );
+      } catch (err) {
+        return errorText(`forge_generate failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+  );
+
+  return server;
+}

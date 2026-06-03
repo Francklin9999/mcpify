@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, isAbsolute, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { r2Keys, type GeneratedServerArtifact } from "@mcp/types";
 
@@ -17,12 +17,23 @@ export class FsArtifactStore implements ArtifactStore {
 
   async save(artifact: GeneratedServerArtifact): Promise<string> {
     const key = r2Keys.artifact(artifact.serverId, artifact.version); // artifacts/{serverId}/{version}.zip
-    const dir = `${this.root}/${key}`;
+    const dir = resolve(this.root, key);
     for (const file of artifact.files) {
-      const dest = `${dir}/${file.path}`;
+      const dest = containedPath(dir, file.path);
       await mkdir(dirname(dest), { recursive: true });
       await writeFile(dest, file.content);
     }
     return pathToFileURL(dir).href;
   }
+}
+
+function containedPath(targetDir: string, relPath: string): string {
+  if (!relPath || isAbsolute(relPath) || relPath.includes("\0")) {
+    throw new Error(`refusing to write unsafe artifact path: ${relPath}`);
+  }
+  const resolved = resolve(targetDir, relPath);
+  if (resolved !== targetDir && !resolved.startsWith(targetDir + sep)) {
+    throw new Error(`refusing to write unsafe artifact path: ${relPath}`);
+  }
+  return resolved;
 }

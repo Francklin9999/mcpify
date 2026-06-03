@@ -31,6 +31,7 @@ test("execution_kind enum matches EXECUTION_KINDS contract", () => {
 // Shape sanity
 test("schema exports the expected tables", () => {
   assert.deepEqual(Object.keys(schema).sort(), [
+    "catalog",
     "contributions",
     "healthEvents",
     "processedJobs",
