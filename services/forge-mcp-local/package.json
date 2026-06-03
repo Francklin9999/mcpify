@@ -5,14 +5,14 @@
   "type": "module",
   "license": "MIT",
   "author": "Franck Fongang",
-  "homepage": "https://github.com/FranckFongang/mcp-forge/tree/main/services/forge-mcp-local#readme",
+  "homepage": "https://github.com/Francklin9999/mcpify/tree/main/services/forge-mcp-local#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/FranckFongang/mcp-forge.git",
+    "url": "git+https://github.com/Francklin9999/mcpify.git",
     "directory": "services/forge-mcp-local"
   },
   "bugs": {
-    "url": "https://github.com/FranckFongang/mcp-forge/issues"
+    "url": "https://github.com/Francklin9999/mcpify/issues"
   },
   "keywords": [
     "mcp",

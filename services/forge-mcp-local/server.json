@@ -1,14 +1,14 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.FranckFongang/mcp-forge",
+  "name": "io.github.Francklin9999/mcpify",
   "title": "MCP Forge",
   "description": "Turn any website into a runnable MCP server, in-process. Host-as-brain by default (no API key); optional OpenAI/Anthropic/Gemini/Groq/Ollama/custom inference.",
   "version": "0.1.0",
   "repository": {
-    "url": "https://github.com/FranckFongang/mcp-forge",
+    "url": "https://github.com/Francklin9999/mcpify",
     "source": "github"
   },
-  "websiteUrl": "https://github.com/FranckFongang/mcp-forge/tree/main/services/forge-mcp-local#readme",
+  "websiteUrl": "https://github.com/Francklin9999/mcpify/tree/main/services/forge-mcp-local#readme",
   "packages": [
     {
       "registryType": "npm",

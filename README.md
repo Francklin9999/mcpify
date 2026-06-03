@@ -12,7 +12,7 @@ server you run locally — so an LLM can actually *act* on that site, using your
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![npm](https://img.shields.io/npm/v/mcp-forge?label=mcp-forge)](https://www.npmjs.com/package/mcp-forge)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-43853d.svg)](https://nodejs.org)
-[![CI](https://github.com/FranckFongang/mcp-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/FranckFongang/mcp-forge/actions/workflows/ci.yml)
+[![CI](https://github.com/Francklin9999/mcpify/actions/workflows/ci.yml/badge.svg)](https://github.com/Francklin9999/mcpify/actions/workflows/ci.yml)
 
 </div>
 

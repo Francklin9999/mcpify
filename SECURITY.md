@@ -14,7 +14,7 @@ published release of `mcp-forge` on npm.
 
 **Please do not open a public GitHub issue for security vulnerabilities.**
 
-Instead, use **[GitHub Security Advisories](https://github.com/FranckFongang/mcp-forge/security/advisories/new)**
+Instead, use **[GitHub Security Advisories](https://github.com/Francklin9999/mcpify/security/advisories/new)**
 to report privately. Include:
 
 - A description of the issue and its impact.

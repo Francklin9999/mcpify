@@ -22,7 +22,7 @@ See the [monorepo layout](./README.md#monorepo-layout) in the README. The short 
 ## Getting started
 
 ```bash
-git clone https://github.com/FranckFongang/mcp-forge.git
+git clone https://github.com/Francklin9999/mcpify.git
 cd mcp-forge
 npm install
 npm run build            # build all workspaces
@@ -84,7 +84,7 @@ PR; merging that publishes to npm (with provenance, via trusted publishing).
 
 ## Reporting bugs / requesting features
 
-Use the [issue templates](https://github.com/FranckFongang/mcp-forge/issues/new/choose). For security issues,
+Use the [issue templates](https://github.com/Francklin9999/mcpify/issues/new/choose). For security issues,
 **do not** open a public issue — see [SECURITY.md](./SECURITY.md).
 
 By contributing, you agree your contributions are licensed under the [MIT License](./LICENSE).
