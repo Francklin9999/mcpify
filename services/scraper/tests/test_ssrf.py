@@ -50,6 +50,26 @@ def test_opt_out_allows_everything(monkeypatch):
     assert _url_allowed("http://127.0.0.1/") is True
 
 
+class _FakeResp:
+    """Stand-in for a Scrapling response exposing the post-redirect URL via `.url`."""
+
+    def __init__(self, final_url):
+        self.url = final_url
+
+
+def test_redirect_to_internal_is_rejected_post_fetch(monkeypatch):
+    # The tiers re-check the FINAL response URL (after redirects) with url_allowed(_response_url(...)). A public
+    # URL that 30x-redirects to an internal host must be rejected so its content is never returned (SSRF).
+    monkeypatch.delenv("SCRAPER_ALLOW_PRIVATE_HOSTS", raising=False)
+    from scraper.tiers import _response_url
+
+    redirected = _response_url(_FakeResp("http://169.254.169.254/latest/meta-data/"), "https://public.example/")
+    assert _url_allowed(redirected) is False
+
+    stayed_public = _response_url(_FakeResp("http://93.184.216.34/landing"), "https://public.example/")
+    assert _url_allowed(stayed_public) is True
+
+
 def test_dns_resolution_to_private_address_is_blocked(monkeypatch):
     monkeypatch.setattr(
         "scraper.ssrf.socket.getaddrinfo",
