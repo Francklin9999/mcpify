@@ -114,7 +114,8 @@ tools, `{ "tools": [...] }`, or a JSON string of the same.
 | Var | Default | Meaning |
 |-----|---------|---------|
 | `MCP_FORGE_HOME` | `~/.mcp-forge` | Where generated servers + `registry.json` are written. |
-| `FORGE_BROWSER` | *(on)* | In-process stealth browser capture (renders JS + captures XHR/fetch traffic) for dynamic / bot-walled sites. Set `0` to force the cheap static-only fetch. Needs Chromium: `npx playwright install chromium`. |
+| `FORGE_BROWSER` | *(on)* | In-process stealth browser capture (renders JS + captures XHR/fetch traffic) for dynamic / bot-walled sites. Chromium auto-installs on first use. Set `0` to force the cheap static-only fetch. |
+| `FORGE_NO_BROWSER_INSTALL` | *(off)* | Set `1` to never auto-download Chromium (capture stays static unless a browser is already present). |
 | `SCRAPER_DISCOVERY_MODE` | `1` | Escalate to the browser even on server-rendered pages so their API traffic is captured into tools. `0` keeps the static result when it's sufficient. |
 | `SCRAPER_INTERACT` | `1` | During a browser capture, scroll / submit a search / click "load more" to surface action-only XHR. |
 | `MCP_BROWSER_CHANNEL` | *(unset)* | Drive your real installed Chrome (`chrome`) instead of bundled Chromium — stronger stealth. |
@@ -136,20 +137,24 @@ npm run build   # build @mcp/generator + this package
 npm test        # 4 suites: provider resolution, stdio boot, emit-server e2e, full local pipeline (no key, no network)
 ```
 
+## Install footprint
+
+`npx -y anymcp` is tiny: the whole server is a single bundled file, and the only dependency is
+**`playwright-core`** (the browser engine, **no bundled browsers**). Install is ~2s / ~14MB — there is **no
+500MB browser download at install time**. The first time you scrape a *dynamic* site, the server downloads
+**one** Chromium (~one-time, ~20-40s, progress shown in your client's logs), then caches it. Static / server-
+rendered sites need no browser at all.
+
 ## Dynamic / bot-walled sites
 
-By default the server captures with an **in-process stealth browser** (Playwright): it renders client-side JS
-and captures the page's XHR/fetch traffic, so it builds tools for SPAs and anti-bot-protected sites with **no
-backend**. It needs a Chromium binary once:
-
-```bash
-npx playwright install chromium
-```
+By default the server captures with an **in-process stealth browser**: it renders client-side JS and captures
+the page's XHR/fetch traffic, so it builds tools for SPAs and anti-bot-protected sites with **no backend** and
+**no manual setup** — Chromium auto-installs on first use.
 
 Stealth mirrors the generated servers (AutomationControlled off, `navigator.webdriver` stripped). For hard
 walls, set `MCP_BROWSER_CHANNEL=chrome` to drive your real Chrome, or `MCP_BROWSER_DRIVER=patchright`. Set
-`FORGE_BROWSER=0` to skip the browser entirely (static-only). If Chromium isn't installed, the server
-automatically falls back to the static fetch.
+`FORGE_BROWSER=0` to skip the browser entirely (static-only), or `FORGE_NO_BROWSER_INSTALL=1` to never
+auto-download. If the browser is unavailable, capture falls back to the static fetch.
 
 ## Limitations (honest)
 

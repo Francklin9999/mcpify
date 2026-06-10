@@ -25,11 +25,13 @@ interface RawCall {
   contentType: string;
 }
 
-/** Lazy-load Chromium from a stealth-patched driver if requested, else plain playwright. Null when none install. */
+const dynamicImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
+
+/** Lazy-load Chromium: a stealth-patched driver if requested, else playwright-core (lean, no auto-download)
+ *  or full playwright. Null when none is installed. */
 async function importChromium(): Promise<any | null> {
-  const dynamicImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
   const preferred = process.env["MCP_BROWSER_DRIVER"];
-  for (const mod of [preferred, "playwright"]) {
+  for (const mod of [preferred, "playwright-core", "playwright"]) {
     if (!mod) continue;
     try {
       const m = await dynamicImport(mod);
@@ -42,13 +44,62 @@ async function importChromium(): Promise<any | null> {
   return null;
 }
 
+let installAttempted = false;
+/**
+ * Ensure a Chromium binary exists, installing it ONCE on first use (playwright-core ships no browser binary,
+ * so the npm install stays tiny). Best-effort + bounded; FORGE_NO_BROWSER_INSTALL=1 opts out. Progress goes to
+ * stderr (the MCP client's logs) since the first install takes ~20-40s.
+ */
+async function ensureChromiumInstalled(chromium: any): Promise<void> {
+  const fs: any = await dynamicImport("node:fs");
+  try {
+    if (chromium?.executablePath && fs.existsSync(chromium.executablePath())) return;
+  } catch {
+    /* fall through to install */
+  }
+  if (installAttempted || process.env["FORGE_NO_BROWSER_INSTALL"] === "1") return;
+  installAttempted = true;
+  try {
+    const cp: any = await dynamicImport("node:child_process");
+    const mod: any = await dynamicImport("node:module");
+    const path: any = await dynamicImport("node:path");
+    const require = mod.createRequire(import.meta.url);
+    // playwright-core/cli.js isn't an exported subpath, so resolve the package main and walk to its dir.
+    let cliPath = "";
+    for (const pkg of ["playwright-core", "playwright"]) {
+      try {
+        let dir = path.dirname(require.resolve(pkg));
+        for (let i = 0; i < 5 && !fs.existsSync(path.join(dir, "package.json")); i++) dir = path.dirname(dir);
+        const cli = path.join(dir, "cli.js");
+        if (fs.existsSync(cli)) {
+          cliPath = cli;
+          break;
+        }
+      } catch {
+        /* not resolvable; try the next */
+      }
+    }
+    if (!cliPath) return;
+    console.error("[anymcp] Installing Chromium for browser capture (one-time, ~20-40s)...");
+    await new Promise<void>((resolve) => {
+      const child = cp.spawn(process.execPath, [cliPath, "install", "chromium"], { stdio: ["ignore", "inherit", "inherit"], timeout: 180_000 });
+      child.on("close", () => resolve());
+      child.on("error", () => resolve());
+    });
+    console.error("[anymcp] Chromium install finished.");
+  } catch {
+    /* best-effort: if install fails, capture falls back to static */
+  }
+}
+
 /** Whether a browser capture is possible here (playwright installed + a launchable Chromium). Cheap, cached. */
 let availableCache: boolean | undefined;
 export async function playwrightAvailable(): Promise<boolean> {
   if (process.env["FORGE_BROWSER"] === "0") return false; // config toggle, not cached
   if (availableCache !== undefined) return availableCache;
   const chromium = await importChromium();
-  if (!chromium) return (availableCache = false);
+  if (!chromium) return (availableCache = false); // playwright-core not installed -> static-only
+  await ensureChromiumInstalled(chromium); // first-run binary fetch (playwright-core ships none)
   try {
     const browser = await chromium.launch({ headless: true, chromiumSandbox: false, args: ["--no-sandbox"], timeout: 8_000 });
     await browser.close();
@@ -190,7 +241,8 @@ export class NodePlaywrightScraper implements Scraper {
   async capture(url: string, legalMode: LegalMode): Promise<CaptureBundle> {
     await assertPublicHttpUrl(url, { allowEnv: "FORGE_ALLOW_PRIVATE_HOSTS" });
     const chromium = await importChromium();
-    if (!chromium) throw new Error("playwright is not installed (run `npx playwright install chromium`)");
+    if (!chromium) throw new Error("playwright-core is not installed (add it, or set FORGE_BROWSER=0 for static-only)");
+    await ensureChromiumInstalled(chromium); // first-run binary fetch if a probe didn't already do it
 
     const channel = process.env["MCP_BROWSER_CHANNEL"] || undefined;
     const executablePath = process.env["MCP_BROWSER_PATH"] || undefined;
