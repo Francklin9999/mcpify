@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { verifyTools, verificationTargets, annotateConfidence, httpProbe, type ProbeFn } from "../src/tool-verifier.js";
+import { verifyTools, verifyAndFilter, verificationTargets, annotateConfidence, httpProbe, type ProbeFn } from "../src/tool-verifier.js";
 import type { ToolDefinition } from "@mcp/types";
 
 const httpTool = (name: string, method: string, urlPattern: string, rawUrl: string, paramMapping: Record<string, { in: string; key: string }> = {}): ToolDefinition => ({
@@ -48,6 +48,26 @@ test("HTTP 404 is dead", async () => {
   const r = await verifyTools([httpTool("x", "GET", "/x", "https://site/x")], fakeProbe({ "https://site/x": { status: 404, body: "not found" } }));
   assert.equal(r.verifications[0]!.status, "dead");
   assert.equal(r.dead, 1);
+});
+
+test("verifyAndFilter drops a dead tool (the books.toscrape prefix bug) but keeps live + not_verifiable ones", async () => {
+  // get_product_page has a WRONG template that 404s live (the dropped-/catalogue/ class of bug); fetch_page
+  // and a browser tool must survive. This is exactly the safety net for the standalone emit path.
+  const tools = [
+    httpTool("get_product_page", "GET", "/{id}/index.html", "https://books.toscrape.com/in-her-wake_980/index.html", { id: { in: "path", key: "id" } }),
+    httpTool("fetch_page_content", "GET", "/", "https://books.toscrape.com/"),
+    browserTool("list_page_items"),
+  ];
+  const probe = fakeProbe({
+    "https://books.toscrape.com/in-her-wake_980/index.html": { status: 404, body: "404 Not Found" },
+    "https://books.toscrape.com/": { status: 200, body: "<html>Books to Scrape</html>" },
+  });
+  const { tools: kept, dropped, report } = await verifyAndFilter(tools, probe);
+  assert.deepEqual(kept.map((t) => t.name).sort(), ["fetch_page_content", "list_page_items"]);
+  assert.equal(dropped.length, 1);
+  assert.equal(dropped[0]!.name, "get_product_page");
+  assert.equal(dropped[0]!.status, "dead");
+  assert.equal(report.verified, 1); // fetch_page_content verified live
 });
 
 test("200 with an anti-bot challenge body is BLOCKED, never verified", async () => {

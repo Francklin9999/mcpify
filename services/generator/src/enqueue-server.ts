@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { Queue } from "bullmq";
 import { Job, QUEUE_NAME } from "@mcp/types";
+import { defaultQueueOptions } from "./job-defaults.js";
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -76,7 +77,7 @@ function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
  * Redis internals on the Node side so Go never has to replicate them.
  */
 export async function startEnqueueServer(port: number, connection: { host: string; port: number }): Promise<{ server: Server; queue: Queue }> {
-  const queue = new Queue(QUEUE_NAME, { connection });
+  const queue = new Queue(QUEUE_NAME, defaultQueueOptions(connection));
   const server = createServer(async (req, res) => {
     if (req.method === "OPTIONS") {
       res.writeHead(204, CORS_HEADERS);

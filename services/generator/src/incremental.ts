@@ -4,18 +4,12 @@ import { parseCandidates, validateCandidates, type InferenceClient } from "./inf
 import { cleanupTools } from "./tool-cleanup.js";
 
 /**
- * Incremental tool discovery (`continuous generation`). As a reactive page changes, new structure appears -
- * a new endpoint fires, a new form/list/detail-pattern renders. This module finds the tools for ONLY that
- * new material and merges them into an existing toolset, so:
- *   - the model is never re-sent material it already turned into tools (token budget), and
- *   - when nothing new appeared, NO model call happens at all (`calledModel:false`).
- *
- * It is PERSISTENCE-AGNOSTIC: the current toolset IS the state. Coverage (what's already tooled) is derived
- * from the existing tools' execution targets, so no extra per-server state or migration is needed for v1.
+ * Incremental tool discovery: find tools for only the NEW material in a changed page and merge into the
+ * existing toolset. The model is never re-sent already-tooled material, and no model call happens when
+ * nothing is new. Persistence-agnostic: the current toolset is the state (coverage is derived from it).
  */
 
-/** What the existing toolset already targets. Templated so an infinite-scroll page's many product links
- *  collapse to ONE sig (`GET /item/{id}`), never an unbounded stream of "new" material. */
+/** What the existing toolset targets. Templated so many product links collapse to one sig (`GET /item/{id}`). */
 export interface Coverage {
   names: Set<string>;
   sigs: Set<string>;
@@ -85,9 +79,8 @@ export interface DiscoveryDelta {
 }
 
 /**
- * Diff a fresh capture against what's already covered. Returns only-new material + whether anything
- * tool-bearing is new (`hasNew`). App-state changes are surfaced as context but don't flip `hasNew` on their
- * own (they're hints, not endpoints - gating a paid call on them would be noisy).
+ * Diff a fresh capture against coverage. Returns only-new material + `hasNew`. App-state changes are context
+ * only and don't flip `hasNew` (they're hints, not endpoints).
  */
 export function computeDelta(bundle: CaptureBundle, coverage: Coverage): { delta: DiscoveryDelta; hasNew: boolean } {
   const analysis = analyzeBundleHtml(bundle);
@@ -136,11 +129,7 @@ export function computeDelta(bundle: CaptureBundle, coverage: Coverage): { delta
   return { delta, hasNew };
 }
 
-/**
- * Merge already-found `candidates` into `currentTools` WITHOUT any model call - dedup by name and by covered
- * endpoint sig. Used by the worker when a synchronous /api/discover pass already paid for the inference, so
- * persistence doesn't re-infer the same material.
- */
+/** Merge candidates into currentTools with no model call - dedup by name and endpoint sig. */
 export function mergeCandidates(currentTools: ToolDefinition[], candidates: ToolDefinition[]): { tools: ToolDefinition[]; added: ToolDefinition[] } {
   const coverage = coverageOf(currentTools);
   const { tools: added } = validateCandidates(candidates, {
@@ -165,11 +154,9 @@ export interface DiscoverMoreOutcome {
 }
 
 /**
- * Discover ADDITIONAL tools from a new capture and merge them with `currentTools`. The paid path
- * (`client.proposeMoreTools`) is sent ONLY the delta; a client without it falls back to a full
- * `proposeTools` (fine for the free heuristic - the validator still filters down to genuinely-new tools).
- * New candidates are dropped if their name OR their endpoint sig already exists (kills synonym/duplicate
- * capabilities the more this runs).
+ * Discover additional tools from a new capture and merge with currentTools. The paid path is sent only the
+ * delta; a client without proposeMoreTools falls back to full proposeTools. Candidates whose name or endpoint
+ * sig already exists are dropped.
  */
 export async function discoverMore(
   currentTools: ToolDefinition[],
@@ -190,8 +177,7 @@ export async function discoverMore(
       return s !== "" && coverage.sigs.has(s);
     },
   });
-  // Same final pass as inferTools: repair encoded placeholders + drop mis-mined auth navigation from the
-  // newly discovered tools (this path bypasses inferTools by calling the client directly).
+  // Same final pass as inferTools (this path calls the client directly).
   const added = cleanupTools(validated, bundle.url);
 
   return { tools: [...currentTools, ...added], added, droppedCount, calledModel: true, delta };

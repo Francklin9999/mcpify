@@ -4,18 +4,11 @@ import { cleanupTools } from "./tool-cleanup.js";
 import type { DiscoveryDelta } from "./incremental.js";
 
 /**
- * Inference: CaptureBundle -> validated ToolDefinition[] (`01 S2`, `services/generator.md`).
- * The model call lives behind `InferenceClient` so this module is testable with zero network.
- * This module's real job is the VALIDATION GATE: parse the model's JSON, drop tools that fail the
- * contract zod, dedup by name, and never crash on garbage output.
+ * Inference: CaptureBundle -> validated ToolDefinition[]. The model call is behind InferenceClient (testable
+ * with zero network). The core job is the validation gate: parse JSON, drop tools failing the contract, dedup.
  */
 
-/**
- * Baseline content tool, synthesized from the bundle URL. Floor applied by `inferTools` when an inference
- * source returns zero usable tools (e.g. a content site with no API traffic, or a model that emitted
- * nothing valid). Guarantees every site yields a usable, runnable server instead of a broken zero-tool one.
- * Source-agnostic: applies to heuristic, OpenAI, and Claude paths alike.
- */
+/** Baseline content tool, synthesized from the bundle URL - the floor applied when inference yields nothing. */
 export function contentToolFor(bundle: CaptureBundle): ToolDefinition {
   let path = "/";
   try {
@@ -45,12 +38,7 @@ export function contentToolFor(bundle: CaptureBundle): ToolDefinition {
 export interface InferenceClient {
   /** Returns the model's raw JSON text proposing tools (an array, or `{ tools: [...] }`). */
   proposeTools(bundle: CaptureBundle): Promise<string>;
-  /**
-   * Optional INCREMENTAL proposal: given only newly-discovered page material (the delta) plus the names of
-   * tools already produced, propose ADDITIONAL distinct tools - same JSON-string shape as `proposeTools`.
-   * This is the token-efficient path: the model never re-sees material it already turned into tools.
-   * Clients that omit it fall back (in `discoverMore`) to a `proposeTools` call over a delta-only bundle.
-   */
+  /** Optional incremental proposal over the delta only; clients that omit it fall back to proposeTools. */
   proposeMoreTools?(delta: DiscoveryDelta): Promise<string>;
 }
 
@@ -98,9 +86,8 @@ function executionSignature(tool: ToolDefinition): string {
 }
 
 /**
- * The VALIDATION GATE shared by full and incremental inference: parse -> contract-validate -> dedup by name
- * (MCP registerTool throws on a duplicate; DB tools PK is (server_id, version, name)) -> optional drop. Pure;
- * never throws on garbage.
+ * The validation gate: parse -> contract-validate -> dedup by name and execution signature -> optional drop.
+ * Pure; never throws on garbage.
  */
 export function validateCandidates(candidates: unknown[], opts: ValidateOptions = {}): { tools: ToolDefinition[]; droppedCount: number } {
   const tools: ToolDefinition[] = [];
@@ -146,15 +133,12 @@ export async function inferTools(
   modelVersion = activeModelVersion(),
 ): Promise<InferenceOutcome> {
   const raw = await client.proposeTools(bundle);
-  // Site recipes are merged first so a bot-walled / weak snapshot still yields the obvious deterministic tools.
+  // Recipes first, so a bot-walled / weak snapshot still yields the obvious deterministic tools.
   const candidates = [...siteRecipeTools(bundle), ...parseCandidates(raw)];
   const { tools, droppedCount } = validateCandidates(candidates);
 
-  // Final pass: repair encoded path placeholders and drop mis-mined auth/account navigation.
   const cleaned = cleanupTools(tools, bundle.url);
-
-  // Floor: never ship a zero-tool (broken) server - give every site the content-fetch baseline. Applied
-  // AFTER cleanup so a degenerate page whose only tool was auth junk still gets the content baseline.
+  // Floor (after cleanup): never ship a zero-tool server.
   if (cleaned.length === 0) cleaned.push(contentToolFor(bundle));
 
   const confidence = aggregateConfidence(cleaned.map((t) => t.confidence));

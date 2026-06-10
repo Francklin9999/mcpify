@@ -1,25 +1,13 @@
 import type { ToolDefinition } from "@mcp/types";
+import { readResponseTextWithLimit } from "./http-limits.js";
+import { assertPublicHttpUrl } from "./url-safety.js";
 
 /**
- * Closed-loop LIVE verification: prove a generated tool actually works against the real site, instead of
- * only being structurally valid. For each tool we (1) re-execute its captured target to confirm the
- * endpoint is still live, and (2) - the real proof - substitute a FRESH, never-captured value into the
- * tool's `{param}` template and confirm it still returns real content, demonstrating the tool generalizes
- * to unseen inputs (not just "the one URL we scraped is up").
- *
- * Honest by construction:
- *   - SAFETY: only idempotent GET/HEAD are ever replayed. A POST/PUT/PATCH/DELETE tool is reported
- *     `not_verifiable` - we never fire a write against someone's live site to "test" it.
- *   - 200 != verified: a bot wall / captcha returns HTTP 200 with a challenge body, so the response body is
- *     checked for anti-bot markers and classified `blocked`, never `verified`.
- *   - Placeholder targets (recipe tools whose rawUrl is a stand-in like `/dp/B000000000`, or any unresolved
- *     `{param}`) are `not_verifiable`, not `dead` - re-fetching a placeholder would be a false negative.
- *   - The denominator is reported three ways (verified / dead+blocked / not_verifiable) so a headline like
- *     "6/7 verified" can never hide skipped tools.
- *
- * It ANNOTATES (a confidence nudge), it does not prune: removing a tool on a signal with known failure modes
- * is the irreversible half, left to an explicit opt-in. Pure core + an injected probe, so it tests offline
- * and runs live without the module knowing about the network.
+ * Live tool verification: probe each tool against the real site to prove it works, not just that it's
+ * structurally valid. Only idempotent GET/HEAD are replayed (writes are reported not_verifiable, never
+ * fired); a 200 carrying an anti-bot challenge is `blocked`, not `verified`; placeholder targets are
+ * not_verifiable. verifyAndAnnotate nudges confidence without pruning; verifyAndFilter is the opt-in prune.
+ * Pure core + an injected probe, so it tests offline.
  */
 
 export type VerifyStatus = "verified" | "dead" | "blocked" | "not_verifiable";
@@ -197,27 +185,47 @@ export async function verifyAndAnnotate(
   return { tools: annotated, report };
 }
 
+/**
+ * Verify live, then drop the `dead` tools (404/network-error/empty body on their own captured URL). `blocked`
+ * (may work in the user's session) and `not_verifiable` (writes, browser, placeholder) are kept + annotated.
+ * Returns kept tools, dropped names+reasons, and the report.
+ */
+export async function verifyAndFilter(
+  tools: ToolDefinition[],
+  probe: ProbeFn,
+  opts: { freshValues?: Record<string, string>; dropBlocked?: boolean } = {},
+): Promise<{ tools: ToolDefinition[]; dropped: Array<{ name: string; status: VerifyStatus; reason?: string }>; report: VerifyReport }> {
+  const { tools: annotated, report } = await verifyAndAnnotate(tools, probe, opts);
+  const byName = new Map(report.verifications.map((v) => [v.name, v]));
+  const kept: ToolDefinition[] = [];
+  const dropped: Array<{ name: string; status: VerifyStatus; reason?: string }> = [];
+  for (const tool of annotated) {
+    const v = byName.get(tool.name);
+    const isDead = v?.status === "dead" || (opts.dropBlocked && v?.status === "blocked");
+    if (isDead) dropped.push({ name: tool.name, status: v!.status, reason: v!.reason });
+    else kept.push(tool);
+  }
+  return { tools: kept, dropped, report };
+}
+
 /** Bounded, GET/HEAD-only live probe for production/CLI use. Never throws; returns null on any failure. */
 export function httpProbe(opts: { timeoutMs?: number; maxBytes?: number } = {}): ProbeFn {
   const timeoutMs = opts.timeoutMs ?? 12_000;
   const maxBytes = opts.maxBytes ?? 200_000;
   return async (url, method) => {
     if (!/^https?:\/\//i.test(url) || (method !== "GET" && method !== "HEAD")) return null;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      await assertPublicHttpUrl(url);
       const res = await fetch(url, {
         method,
-        signal: controller.signal,
+        signal: AbortSignal.timeout(timeoutMs),
         redirect: "follow",
         headers: { accept: "text/html,application/json,*/*", "user-agent": "Mozilla/5.0 (compatible; MCPForge-verify/1.0)" },
       });
-      const body = method === "HEAD" ? "" : (await res.text()).slice(0, maxBytes);
+      const body = method === "HEAD" ? "" : await readResponseTextWithLimit(res, maxBytes);
       return { status: res.status, body };
     } catch {
       return null;
-    } finally {
-      clearTimeout(timer);
     }
   };
 }

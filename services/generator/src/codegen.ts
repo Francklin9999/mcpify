@@ -1,5 +1,7 @@
 import type { ToolDefinition, GeneratedServerArtifact } from "@mcp/types";
 import { emitGateRuntime } from "./browser-gate.js";
+import { emitOpenCliBrowsingRuntime, type BrowserBackend } from "./opencli-backend.js";
+import { emitPopupRuntime } from "./popups.js";
 
 /**
  * Codegen: ToolDefinition[] -> a runnable MCP server artifact (`01 S3`, `services/generator.md`).
@@ -19,6 +21,13 @@ export interface CodegenInput {
    * Defaults to "any browser tool present" when undefined. Set true to force it on for interactive sites.
    */
   browsing?: boolean;
+  /**
+   * Default browser backend baked into the generated server: "playwright" (standalone headless Chromium, the
+   * default) or "opencli" (drives the user's real logged-in Chrome via the opencli Browser Bridge, for dynamic /
+   * bot-walled sites). Computed upstream via chooseBrowserBackend(); always overridable at runtime with
+   * MCP_BROWSER_BACKEND. Undefined => "playwright".
+   */
+  dynamicBackend?: BrowserBackend;
 }
 
 function slugFromUrl(url: string): string {
@@ -60,22 +69,55 @@ function urlTemplate(rawUrl: string, urlPattern: string): string {
   }
 }
 
+// PUT/PATCH/DELETE are always writes; a POST is a write only if its name/description reads as a mutation
+// (so a read-only search/GraphQL POST isn't gated).
+const MUTATION_RE =
+  /\b(create|creat|update|delete|deletes|remove|removes|destroy|add|adds|insert|submit|save|saves|buy|purchase|order|checkout|pay|payment|send|sends|post|posts|upload|cancel|book|reserve|register|signup|subscribe|unsubscribe|edit|modify|patch|put|set|enable|disable|approve|reject|like|follow|unfollow|vote|comment|rename|move|merge|deploy|publish|revoke|grant|invite)\b/i;
+
+function isWriteHttpTool(tool: ToolDefinition): boolean {
+  if (tool.execution.kind !== "http") return false;
+  const method = String(tool.execution.request.method || "GET").toUpperCase();
+  if (method === "PUT" || method === "PATCH" || method === "DELETE") return true;
+  if (method === "POST") return MUTATION_RE.test(tool.name) || MUTATION_RE.test(tool.description);
+  return false;
+}
+
+/** Merge extra zod entries into a `{ ... }` raw-shape source, skipping keys that already exist. */
+function mergeShape(baseShape: string, extras: Array<{ key: string; entry: string }>): string {
+  if (!extras.length) return baseShape;
+  const inner = baseShape.trim().replace(/^\{/, "").replace(/\}$/, "").trim();
+  const have = new Set([...inner.matchAll(/"([^"]+)"\s*:/g)].map((m) => m[1]));
+  const additions = extras.filter((e) => !have.has(e.key)).map((e) => `${JSON.stringify(e.key)}: ${e.entry}`);
+  const parts = [inner, ...additions].filter((p) => p && p.length);
+  return `{ ${parts.join(", ")} }`;
+}
+
 function toolRegistration(tool: ToolDefinition): string {
-  const shape = zodRawShapeSource(tool.inputSchema);
+  const baseShape = zodRawShapeSource(tool.inputSchema);
   if (tool.execution.kind === "http") {
     const req = tool.execution.request;
+    const write = isWriteHttpTool(tool);
+    const json = /json/i.test(req.contentType || "") || /json/i.test(req.requestHeaders?.["accept"] || "");
     const spec = {
       method: req.method,
       urlTemplate: urlTemplate(req.rawUrl, req.urlPattern),
       headers: req.requestHeaders,
       paramMapping: tool.execution.paramMapping,
+      write,
+      json,
     };
+    // Write tools gain an optional `dryRun`; read-only JSON tools gain an optional `select` (dot-path projection).
+    const extras: Array<{ key: string; entry: string }> = [];
+    if (write) extras.push({ key: "dryRun", entry: 'z.boolean().optional().describe("Preview the request (method, URL, body) WITHOUT sending it.")' });
+    else if (json) extras.push({ key: "select", entry: 'z.string().optional().describe("Comma-separated dot-paths to project from the JSON response, e.g. \\"id,name,owner.login\\". Omit for the full response.")' });
+    const shape = mergeShape(baseShape, extras);
     return `  register(
     ${JSON.stringify(tool.name)},
     { description: ${JSON.stringify(tool.description)}, inputSchema: ${shape} },
     async (args) => callHttp(${JSON.stringify(spec)}, args),
   );`;
   }
+  const shape = baseShape;
   const spec = { steps: tool.execution.steps };
   return `  register(
     ${JSON.stringify(tool.name)},
@@ -95,6 +137,7 @@ const TOOLKIT_NAMES = [
   "browser_back",
   "browser_read_page",
   "browser_extract",
+  "browser_dismiss",
   "browser_resume",
 ] as const;
 
@@ -177,6 +220,13 @@ function browsingToolkitRegistrations(input: CodegenInput): string {
       call: 'browsing.extract(String(args.mode || "metadata"))',
     },
     {
+      name: "browser_dismiss",
+      description:
+        "Dismiss a blocking pop-up on the current page - a cookie/GDPR consent banner or newsletter/consent overlay - by accepting it (curated CMP selectors + consent-scoped accept buttons). Call this when a snapshot shows a consent wall before you can interact. Returns a fresh snapshot. Safe: only clicks consent controls, never page content.",
+      shape: "{}",
+      call: "(browsing.dismiss ? browsing.dismiss() : browsing.snapshot())",
+    },
+    {
       name: "browser_resume",
       description:
         "Resume after a PAUSED handoff. If a previous browser tool returned 'PAUSED - human action needed' (a sign-in wall or CAPTCHA), the user completes it in the opened browser window, then you call this to continue. Re-runs the paused action and returns its result - or tells you it's still blocked.",
@@ -233,12 +283,16 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { pathToFileURL } from "node:url";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 
 type HttpToolSpec = {
   method: string;
   urlTemplate: string;
   headers: Record<string, string>;
   paramMapping: Record<string, { in: "path" | "query" | "header" | "body"; key: string }>;
+  write?: boolean; // mutates data: gated behind MCP_ALLOW_WRITES + per-call dryRun
+  json?: boolean; // JSON response: enables pretty-print + the select projection
 };
 
 type BrowserElementRef = {
@@ -262,6 +316,246 @@ type StepExecutor = (spec: BrowserToolSpec, args: Record<string, unknown>) => Pr
 // The site this server was generated from. The persistent session opens here on first use, and relative
 // browser_navigate targets resolve against it.
 const SITE_URL = ${jsLiteral(input.url)};
+const HTTP_TIMEOUT_MS = Number(process.env.MCP_HTTP_TIMEOUT_MS || 20_000);
+const HTTP_MAX_RESPONSE_BYTES = Number(process.env.MCP_HTTP_MAX_RESPONSE_BYTES || 1_000_000);
+const DNS_LOOKUP_TIMEOUT_MS = Number(process.env.MCP_DNS_LOOKUP_TIMEOUT_MS || 5_000);
+// Idempotent (GET/HEAD) requests retry on network error / 429 / 5xx with exponential backoff; writes never retry.
+const HTTP_MAX_RETRIES = Math.max(0, Math.min(5, Number(process.env.MCP_HTTP_MAX_RETRIES || 2)));
+// Write tools (POST-mutation/PUT/PATCH/DELETE) refuse to fire unless this is set - so an agent can't silently
+// mutate the site. Per-call dryRun previews without sending regardless of this flag.
+const HTTP_ALLOW_WRITES = process.env.MCP_ALLOW_WRITES === "1";
+// The server's own origin. Credentials from the environment are attached ONLY to requests to this origin -
+// never leaked cross-origin (e.g. if a redirect or an inferred tool URL points to a third-party host).
+const SITE_ORIGIN = (() => { try { return new URL(SITE_URL).origin; } catch { return ""; } })();
+
+function cleanHostname(hostname: string): string {
+  return hostname.replace(/^\\[|\\]$/g, "").toLowerCase();
+}
+
+function ipv4ToNumber(value: string): number | null {
+  const parts = value.split(".");
+  if (parts.length !== 4) return null;
+  let out = 0;
+  for (const part of parts) {
+    if (!/^\\d+$/.test(part)) return null;
+    const n = Number(part);
+    if (n < 0 || n > 255) return null;
+    out = (out << 8) + n;
+  }
+  return out >>> 0;
+}
+
+function inRange(value: number, base: string, maskBits: number): boolean {
+  const baseNum = ipv4ToNumber(base);
+  if (baseNum == null) return false;
+  const mask = maskBits === 0 ? 0 : (0xffffffff << (32 - maskBits)) >>> 0;
+  return (value & mask) === (baseNum & mask);
+}
+
+function isPrivateOrReservedIp(address: string): boolean {
+  const host = cleanHostname(address);
+  if (isIP(host) === 4) {
+    const n = ipv4ToNumber(host);
+    if (n == null) return true;
+    return [
+      ["0.0.0.0", 8],
+      ["10.0.0.0", 8],
+      ["100.64.0.0", 10],
+      ["127.0.0.0", 8],
+      ["169.254.0.0", 16],
+      ["172.16.0.0", 12],
+      ["192.0.0.0", 24],
+      ["192.0.2.0", 24],
+      ["192.168.0.0", 16],
+      ["198.18.0.0", 15],
+      ["198.51.100.0", 24],
+      ["203.0.113.0", 24],
+      ["224.0.0.0", 4],
+      ["240.0.0.0", 4],
+    ].some(([base, bits]) => inRange(n, base as string, bits as number));
+  }
+  if (isIP(host) === 6) {
+    const h = host.toLowerCase();
+    if (h === "::" || h === "::1") return true;
+    if (h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80:") || h.startsWith("ff")) return true;
+    const mapped = h.match(/^::ffff:(\\d+\\.\\d+\\.\\d+\\.\\d+)$/);
+    if (mapped && mapped[1]) return isPrivateOrReservedIp(mapped[1]);
+  }
+  return false;
+}
+
+async function lookupWithTimeout(hostname: string): Promise<Array<{ address: string }>> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timer = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error("DNS lookup timed out")), Math.max(100, DNS_LOOKUP_TIMEOUT_MS));
+  });
+  try {
+    return await Promise.race([lookup(hostname, { all: true, verbatim: true }).catch(() => []), timer]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function assertPublicHttpUrl(rawUrl: string): Promise<void> {
+  const url = new URL(rawUrl);
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("only http(s) URLs are allowed");
+  if (process.env.MCP_ALLOW_PRIVATE_HOSTS === "1") return;
+  const hostname = cleanHostname(url.hostname);
+  if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost") || isPrivateOrReservedIp(hostname)) {
+    throw new Error("refusing to fetch a private, loopback, reserved, or non-public URL");
+  }
+  const addresses = await lookupWithTimeout(hostname).catch(() => []);
+  if (!addresses.length) throw new Error("refusing to fetch a hostname that does not resolve");
+  if (addresses.some((entry) => isPrivateOrReservedIp(entry.address))) {
+    throw new Error("refusing to fetch a hostname that resolves to a private, loopback, or reserved address");
+  }
+}
+
+async function readLimitedText(res: Response, maxBytes: number): Promise<string> {
+  const declared = Number(res.headers.get("content-length") || "0");
+  if (Number.isFinite(declared) && declared > maxBytes) throw new Error("response too large; max " + maxBytes + " bytes");
+  if (!res.body) {
+    const text = await res.text();
+    if (new TextEncoder().encode(text).byteLength > maxBytes) throw new Error("response too large; max " + maxBytes + " bytes");
+    return text;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = "";
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    total += chunk.value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new Error("response too large; max " + maxBytes + " bytes");
+    }
+    text += decoder.decode(chunk.value, { stream: true });
+  }
+  text += decoder.decode();
+  return text;
+}
+
+// Credentials from the environment, attached ONLY to the server's own origin (never sent cross-origin).
+// All optional: MCP_AUTH_BEARER -> "Authorization: Bearer <v>"; MCP_API_KEY (+ MCP_API_KEY_HEADER, default
+// x-api-key); MCP_AUTH_COOKIE -> "Cookie: <v>"; MCP_AUTH_HEADER -> one or more "Name: Value" lines.
+function envAuthHeaders(targetUrl: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  let origin = "";
+  try { origin = new URL(targetUrl).origin; } catch { return out; }
+  if (SITE_ORIGIN && origin !== SITE_ORIGIN) return out;
+  const bearer = process.env.MCP_AUTH_BEARER;
+  if (bearer) out["authorization"] = "Bearer " + bearer;
+  const apiKey = process.env.MCP_API_KEY;
+  if (apiKey) out[String(process.env.MCP_API_KEY_HEADER || "x-api-key").toLowerCase()] = apiKey;
+  const cookie = process.env.MCP_AUTH_COOKIE;
+  if (cookie) out["cookie"] = cookie;
+  const raw = process.env.MCP_AUTH_HEADER;
+  if (raw) {
+    for (const line of String(raw).split(/\\r?\\n/)) {
+      const m = line.match(/^\\s*([A-Za-z0-9!#$%&'*+.^_|~-]+)\\s*[:=]\\s*([\\s\\S]*)$/);
+      if (m && m[1]) out[m[1].toLowerCase()] = String(m[2] == null ? "" : m[2]).trim();
+    }
+  }
+  return out;
+}
+
+// MCP_AUTH_QUERY="key=value&key2=value2" appended to same-origin URLs (for APIs that key on a query param).
+function applyAuthQuery(rawUrl: string): string {
+  const raw = process.env.MCP_AUTH_QUERY;
+  if (!raw) return rawUrl;
+  try {
+    const u = new URL(rawUrl);
+    if (SITE_ORIGIN && u.origin !== SITE_ORIGIN) return rawUrl;
+    for (const pair of String(raw).split("&")) {
+      const eq = pair.indexOf("=");
+      if (eq <= 0) continue;
+      u.searchParams.set(decodeURIComponent(pair.slice(0, eq)), decodeURIComponent(pair.slice(eq + 1)));
+    }
+    return u.toString();
+  } catch { return rawUrl; }
+}
+
+const WRITE_REFUSED_HINT =
+  "This tool performs a WRITE (it can modify data on the site) and is disabled by default. To allow it, set " +
+  "MCP_ALLOW_WRITES=1 in this server's environment. To preview the exact request WITHOUT sending it, call again with dryRun=true.";
+
+function sleep(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, Math.max(0, ms))); }
+
+// Retry-After (delta-seconds or HTTP-date) -> ms, capped at 30s; null when absent/unparseable.
+function retryAfterMs(res: Response): number | null {
+  const h = res.headers.get("retry-after");
+  if (!h) return null;
+  const secs = Number(h);
+  if (Number.isFinite(secs)) return Math.min(30_000, Math.max(0, secs * 1000));
+  const when = Date.parse(h);
+  if (Number.isFinite(when)) return Math.min(30_000, Math.max(0, when - Date.now()));
+  return null;
+}
+
+function backoffMs(attempt: number): number {
+  return Math.min(8_000, 250 * Math.pow(2, attempt)) + Math.floor(Math.random() * 200);
+}
+
+// Fetch with bounded retries. Idempotent methods (GET/HEAD) retry on network error / 429 / 5xx with backoff
+// (honoring Retry-After); writes never retry. A fresh per-attempt timeout signal is applied each try.
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  const method = String(init.method || "GET").toUpperCase();
+  const idempotent = method === "GET" || method === "HEAD";
+  let attempt = 0;
+  for (;;) {
+    try {
+      const res = await fetch(url, { ...init, redirect: "follow", signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+      if (idempotent && attempt < HTTP_MAX_RETRIES && (res.status === 429 || res.status >= 500)) {
+        const wait = retryAfterMs(res) ?? backoffMs(attempt);
+        try { await (res.body as any)?.cancel?.(); } catch { /* free the socket before retrying */ }
+        await sleep(wait);
+        attempt++;
+        continue;
+      }
+      return res;
+    } catch (err) {
+      if (idempotent && attempt < HTTP_MAX_RETRIES) { await sleep(backoffMs(attempt)); attempt++; continue; }
+      throw err;
+    }
+  }
+}
+
+const BINARY_CTYPE = /(application\\/(pdf|zip|gzip|octet-stream|x-protobuf|wasm|msword|vnd\\.)|image\\/|audio\\/|video\\/|font\\/)/i;
+
+// Project comma-separated dot-paths out of a parsed JSON value (arrays projected element-wise). Best-effort.
+function projectJson(value: unknown, select: string): unknown {
+  const paths = String(select).split(",").map((s) => s.trim()).filter(Boolean);
+  if (!paths.length) return value;
+  const pick = (v: any): any => {
+    if (Array.isArray(v)) return v.map(pick);
+    if (v == null || typeof v !== "object") return v;
+    const out: Record<string, unknown> = {};
+    for (const path of paths) {
+      const segs = path.split(".").map((s) => s.trim()).filter(Boolean);
+      let cur: any = v;
+      for (const s of segs) cur = cur == null ? undefined : cur[s];
+      if (cur !== undefined) out[segs[segs.length - 1] || path] = cur;
+    }
+    return out;
+  };
+  return pick(value);
+}
+
+// Content-type aware rendering: HTML -> readable text; JSON -> pretty (+ optional projection); otherwise
+// passed through. Truncated/invalid JSON falls back to the raw text instead of throwing.
+function shapeResponseBody(raw: string, ctype: string, select?: string): string {
+  if (/html/i.test(ctype)) return htmlToText(raw);
+  if (/json/i.test(ctype)) {
+    try {
+      let parsed: unknown = JSON.parse(raw);
+      if (select) parsed = projectJson(parsed, select);
+      return JSON.stringify(parsed, null, 2);
+    } catch { return raw; }
+  }
+  return raw;
+}
 
 async function callHttp(spec: HttpToolSpec, args: Record<string, unknown>) {
   let url = spec.urlTemplate;
@@ -283,17 +577,37 @@ async function callHttp(spec: HttpToolSpec, args: Record<string, unknown>) {
   }
   const qs = query.toString();
   if (qs) url += (url.includes("?") ? "&" : "?") + qs;
+  url = applyAuthQuery(url);
   const init: RequestInit = { method: spec.method, headers };
   if (hasBody) {
     headers["content-type"] = headers["content-type"] ?? "application/json";
     init.body = JSON.stringify(body);
   }
-  const res = await fetch(url, init);
-  const raw = await res.text();
-  const ctype = res.headers.get("content-type") ?? spec.headers["accept"] ?? "";
-  // HTML responses are dumped to the model as READABLE TEXT, not raw markup (a docs/content page is
-  // mostly tags otherwise). JSON and other types pass through unchanged.
-  const text = /html/i.test(ctype) ? htmlToText(raw) : raw;
+  // Write gating: preview on dryRun (sends nothing); otherwise refuse unless MCP_ALLOW_WRITES=1.
+  if (spec.write) {
+    if (args.dryRun === true) {
+      const preview = "DRY RUN - nothing was sent. This tool would send:\\n" + String(spec.method).toUpperCase() + " " + url + (hasBody ? "\\nbody: " + String(init.body) : "");
+      return { content: [{ type: "text" as const, text: preview }], isError: false };
+    }
+    if (!HTTP_ALLOW_WRITES) {
+      return { content: [{ type: "text" as const, text: WRITE_REFUSED_HINT }], isError: true };
+    }
+  }
+  // Credentials (env) are merged LAST so they win over baked/templated headers, and only for our own origin.
+  Object.assign(headers, envAuthHeaders(url));
+  await assertPublicHttpUrl(url);
+  const res = await fetchWithRetry(url, init);
+  if (res.url) await assertPublicHttpUrl(res.url);
+  const ctype = res.headers.get("content-type") ?? spec.headers["accept"] ?? (spec.json ? "application/json" : "");
+  // Don't dump binary bytes at the model; report what it is and where instead.
+  if (BINARY_CTYPE.test(ctype)) {
+    const len = res.headers.get("content-length") || "unknown";
+    try { await (res.body as any)?.cancel?.(); } catch { /* ignore */ }
+    return { content: [{ type: "text" as const, text: "[binary response: " + ctype + ", " + len + " bytes] " + url + "\\nNot rendered as text." }], isError: !res.ok };
+  }
+  const raw = await readLimitedText(res, HTTP_MAX_RESPONSE_BYTES);
+  const select = typeof args.select === "string" && args.select.trim() ? args.select.trim() : undefined;
+  const text = shapeResponseBody(raw, ctype, select);
   return { content: [{ type: "text" as const, text }], isError: !res.ok };
 }
 
@@ -366,6 +680,7 @@ interface Browsing {
   back(): Promise<string>;
   read(): Promise<string>;
   extract(mode: string): Promise<unknown>;
+  dismiss?(): Promise<string>;
   resume?(): Promise<unknown>;
   close?(): Promise<void>;
 }
@@ -394,6 +709,8 @@ function sameUrl(a: string, b: string): boolean {
 }
 
 ${emitGateRuntime()}
+
+${emitPopupRuntime()}
 
 // Probe the live page and decide whether the automated session is blocked (sign-in wall / CAPTCHA). A text
 // pass (title + visible text) short-circuits ONLY on a positive captcha-text hit; otherwise - i.e. on every
@@ -635,10 +952,23 @@ class PlaywrightBrowsing implements Browsing {
     const gate = await this.checkGate(target);
     if (gate.kind !== "ok") return this.raiseHandoff(gate, target, () => this.navigate(url));
     this.pending = undefined;
+    try { await this.runDismiss(); } catch { /* best-effort consent dismissal */ }
     return this.snapshot();
   }
 
   async snapshot(): Promise<string> { return snapshotText(await this.page()); }
+
+  // Run the curated consent-dismissal script in the page (no throw). Shared by browser_dismiss + navigate.
+  private async runDismiss(): Promise<unknown> {
+    const page = await this.page();
+    try { return await page.evaluate(DISMISS_SCRIPT); } catch { return null; }
+  }
+
+  async dismiss(): Promise<string> {
+    await this.runDismiss();
+    await settle(await this.page());
+    return this.snapshot();
+  }
 
   async click(ref: string): Promise<string> {
     const loc = await this.locate(ref);
@@ -708,6 +1038,8 @@ class PlaywrightBrowsing implements Browsing {
     }
   }
 }
+
+${emitOpenCliBrowsingRuntime(name, input.dynamicBackend ?? "playwright")}
 
 async function callBrowser(spec: BrowserToolSpec, args: Record<string, unknown>, browsing: Browsing) {
   try {
@@ -1067,7 +1399,7 @@ type CreateServerDeps = { browsing?: Browsing; browserExecutor?: StepExecutor };
 
 export function createServer(deps: CreateServerDeps = {}): McpServer {
   const server = new McpServer({ name: ${JSON.stringify(name)}, version: ${JSON.stringify(String(input.version))} });
-  const browsing: Browsing = deps.browsing ?? new PlaywrightBrowsing(deps.browserExecutor);
+  const browsing: Browsing = deps.browsing ?? createBrowsing(deps.browserExecutor);
   // Expose the session so the host can release Chromium on shutdown (and so tests can tear it down).
   (server as unknown as { browsing: Browsing }).browsing = browsing;
 
@@ -1123,10 +1455,20 @@ const MCP_SDK_RANGE = "^1.29.0";
 const ZOD_RANGE = "^3.25.0 || ^4.0.0";
 const TYPESCRIPT_RANGE = "^5.7.0";
 const PLAYWRIGHT_RANGE = "^1.54.2";
+// opencli is a real (declared) dependency for the advanced real-Chrome backend - pulled in only when this
+// server defaults to it, so HTTP/Playwright servers stay lean. The bridge (extension + daemon) is set up once
+// per machine (see docs/OPENCLI_BACKEND.md); the npm dep just provides the `opencli` CLI the server shells out to.
+const OPENCLI_RANGE = "^1.8.0";
 
 /** A standalone package.json so the artifact is installable + buildable on the user's machine. */
 export function packageJson(input: CodegenInput): string {
   const name = slugFromUrl(input.url);
+  const dependencies: Record<string, string> = {
+    "@modelcontextprotocol/sdk": MCP_SDK_RANGE,
+    zod: ZOD_RANGE,
+    playwright: PLAYWRIGHT_RANGE,
+  };
+  if (input.dynamicBackend === "opencli") dependencies["@jackwener/opencli"] = OPENCLI_RANGE;
   return JSON.stringify(
     {
       name: `${name}-mcp-server`,
@@ -1135,7 +1477,7 @@ export function packageJson(input: CodegenInput): string {
       type: "module",
       bin: { [name]: "server.js" },
       scripts: { build: "tsc", start: "node server.js" },
-      dependencies: { "@modelcontextprotocol/sdk": MCP_SDK_RANGE, zod: ZOD_RANGE, playwright: PLAYWRIGHT_RANGE },
+      dependencies,
       devDependencies: { typescript: TYPESCRIPT_RANGE, "@types/node": "^22.0.0" },
     },
     null,
@@ -1473,7 +1815,10 @@ Write-Host "==> Done. Registered into every detected MCP client above. Restart t
 
 export function generateServer(input: CodegenInput): GeneratedServerArtifact {
   const snippet = configSnippet(input);
-  const readme = `# ${commentSafe(input.title)} - MCP server\n\nAuto-generated from ${commentSafe(input.url)} (v${input.version}). Runs locally and may use public HTTP calls plus Playwright-driven browser steps.\n\n## Install (one step)\n\nThis builds the server and registers it into **every MCP client it detects on your machine**, then restart that client (in Claude Code, run \`/mcp\`).\n\n\`\`\`bash\n# macOS / Linux\nbash install.sh\n\`\`\`\n\`\`\`powershell\n# Windows\npowershell -ExecutionPolicy Bypass -File install.ps1\n\`\`\`\n\nThe installer auto-detects and registers into each client in its own config format, with an absolute \`node\` path, preserving your existing servers (and backing up each file it edits):\n\n- **Claude Code** - \`~/.claude.json\` (also de-dupes duplicate project-scoped entries)\n- **Claude Desktop** - the OS \`claude_desktop_config.json\`\n- **Cursor** - \`~/.cursor/mcp.json\`\n- **Windsurf** - \`~/.codeium/windsurf/mcp_config.json\`\n- **VS Code** - the user \`mcp.json\` (\`servers\` key)\n- **Codex** - via \`codex mcp add\` (its config is TOML)\n\nA client is registered only when it is detected (its config or app dir exists; Claude Code is always written). Re-run the installer after installing a new client. Pass \`--no-register\` to build only, or \`MCP_TARGET=desktop\` to target only the legacy Claude Desktop config.\n\n## Run manually\n\n\`\`\`bash\nnpm install\nnpm run build\nnpm start\n\`\`\`\n\nBrowser tools use Playwright, and \`install.sh\`/\`install.ps1\` download the Chromium binary for you when this server has \`browser_*\` tools. To do it by hand instead: \`npx playwright install chromium\` (add \`--with-deps\` on Linux if system libraries are missing). Set \`MCP_BROWSER_PATH\` or \`MCP_BROWSER_CHANNEL=chrome\` to drive your own Chrome rather than the bundled Chromium.\n\n## Signed-in & bot-protected pages (stealth + human handoff)\n\nThe browser session runs with light stealth (real Chrome flags, \`navigator.webdriver\` stripped). When a tool hits a sign-in wall or a CAPTCHA it does NOT fail - it returns \`PAUSED - human action needed\`, opens a visible browser window, and waits. Complete the sign-in/challenge in that window, then call \`browser_resume\` to continue.\n\n- \`MCP_BROWSER_PROFILE=<dir>\`: a dedicated Chrome profile dir so a one-time sign-in/clearance STICKS across restarts (recommended; never point at your live Chrome profile).\n- \`MCP_BROWSER_HEADLESS=0\`: stay headed the whole time (best for multi-step authenticated flows).\n- \`MCP_BROWSER_CHANNEL=chrome\`: drive your real installed Chrome instead of bundled Chromium (stronger stealth).\n- \`MCP_BROWSER_DRIVER=patchright\`: opt into a stealth-patched Playwright drop-in (install it yourself) for hard bot walls.\n- \`MCP_HANDOFF=off\`: disable the popup/handoff (detect-only).\n\nThe \`claude_code_config.json\` snippet is also included if you prefer to wire it up by hand (fix the absolute path).\n`;
+  const serverOrigin = (() => {
+    try { return new URL(input.url).origin; } catch { return input.url; }
+  })();
+  const readme = `# ${commentSafe(input.title)} - MCP server\n\nAuto-generated from ${commentSafe(input.url)} (v${input.version}). Runs locally and may use public HTTP calls plus Playwright-driven browser steps.\n\n## Install (one step)\n\nThis builds the server and registers it into **every MCP client it detects on your machine**, then restart that client (in Claude Code, run \`/mcp\`).\n\n\`\`\`bash\n# macOS / Linux\nbash install.sh\n\`\`\`\n\`\`\`powershell\n# Windows\npowershell -ExecutionPolicy Bypass -File install.ps1\n\`\`\`\n\nThe installer auto-detects and registers into each client in its own config format, with an absolute \`node\` path, preserving your existing servers (and backing up each file it edits):\n\n- **Claude Code** - \`~/.claude.json\` (also de-dupes duplicate project-scoped entries)\n- **Claude Desktop** - the OS \`claude_desktop_config.json\`\n- **Cursor** - \`~/.cursor/mcp.json\`\n- **Windsurf** - \`~/.codeium/windsurf/mcp_config.json\`\n- **VS Code** - the user \`mcp.json\` (\`servers\` key)\n- **Codex** - via \`codex mcp add\` (its config is TOML)\n\nA client is registered only when it is detected (its config or app dir exists; Claude Code is always written). Re-run the installer after installing a new client. Pass \`--no-register\` to build only, or \`MCP_TARGET=desktop\` to target only the legacy Claude Desktop config.\n\n## Run manually\n\n\`\`\`bash\nnpm install\nnpm run build\nnpm start\n\`\`\`\n\nBrowser tools use Playwright, and \`install.sh\`/\`install.ps1\` download the Chromium binary for you when this server has \`browser_*\` tools. To do it by hand instead: \`npx playwright install chromium\` (add \`--with-deps\` on Linux if system libraries are missing). Set \`MCP_BROWSER_PATH\` or \`MCP_BROWSER_CHANNEL=chrome\` to drive your own Chrome rather than the bundled Chromium.\n\n## Authenticated HTTP APIs (private endpoints, your API key)\n\nThe HTTP tools call **public** endpoints by default. To act as *you* against an authenticated API, set credentials in this server's \`env\`. They are attached ONLY to requests to this server's own origin (${commentSafe(serverOrigin)}) and never sent anywhere else (cross-origin or through a redirect):\n\n- \`MCP_AUTH_BEARER=<token>\` -> \`Authorization: Bearer <token>\`\n- \`MCP_API_KEY=<key>\` (+ optional \`MCP_API_KEY_HEADER\`, default \`x-api-key\`)\n- \`MCP_AUTH_COOKIE=<cookie>\` -> \`Cookie: <cookie>\` (paste a logged-in session cookie)\n- \`MCP_AUTH_HEADER="X-Custom: value"\` -> any header(s), one per line\n- \`MCP_AUTH_QUERY="api_key=..."\` -> appended as a query parameter\n\n## Write actions (create / update / delete)\n\nTools that can MODIFY data (PUT/PATCH/DELETE, or a POST that reads as a mutation) are **disabled by default** so an agent can't change things unexpectedly. Set \`MCP_ALLOW_WRITES=1\` to enable them, or call any such tool with \`dryRun: true\` to see the exact request without sending it. Read tools are unaffected.\n\n## Output & resilience\n\nJSON responses are pretty-printed; pass \`select\` (e.g. \`"id,name,owner.login"\`) to a read tool to project just those fields. HTML comes back as readable text; binary responses are summarized, not dumped. Idempotent (GET/HEAD) calls retry with backoff on \`429\`/\`5xx\` (honoring \`Retry-After\`). Tune with \`MCP_HTTP_TIMEOUT_MS\`, \`MCP_HTTP_MAX_RESPONSE_BYTES\`, \`MCP_HTTP_MAX_RETRIES\`.\n\n## Signed-in & bot-protected pages (stealth + human handoff)\n\nThe browser session runs with light stealth (real Chrome flags, \`navigator.webdriver\` stripped). When a tool hits a sign-in wall or a CAPTCHA it does NOT fail - it returns \`PAUSED - human action needed\`, opens a visible browser window, and waits. Complete the sign-in/challenge in that window, then call \`browser_resume\` to continue.\n\n- \`MCP_BROWSER_PROFILE=<dir>\`: a dedicated Chrome profile dir so a one-time sign-in/clearance STICKS across restarts (recommended; never point at your live Chrome profile).\n- \`MCP_BROWSER_HEADLESS=0\`: stay headed the whole time (best for multi-step authenticated flows).\n- \`MCP_BROWSER_CHANNEL=chrome\`: drive your real installed Chrome instead of bundled Chromium (stronger stealth).\n- \`MCP_BROWSER_DRIVER=patchright\`: opt into a stealth-patched Playwright drop-in (install it yourself) for hard bot walls.\n- \`MCP_HANDOFF=off\`: disable the popup/handoff (detect-only).\n\n## Real logged-in Chrome backend (opencli) - for dynamic / bot-walled sites\n\nHeadless Chromium gets blocked, or sees only an empty JS shell, on SPA / anti-bot sites (e.g. flight search). Set \`MCP_BROWSER_BACKEND=opencli\` to route the \`browser_*\` tools through [opencli](https://github.com/jackwener/opencli), which drives YOUR real, logged-in Chrome via its Browser Bridge - the page renders fully, anti-bot does not fire, and you stay signed in. One-time setup: \`npm i -g @jackwener/opencli\`, add the Browser Bridge extension from the Chrome Web Store, then \`opencli doctor\` to confirm the bridge. Servers generated from sites detected as dynamic default to this backend. See \`docs/OPENCLI_BACKEND.md\`.\n\nThe \`claude_code_config.json\` snippet is also included if you prefer to wire it up by hand (fix the absolute path).\n`;
   return {
     serverId: input.serverId,
     version: input.version,

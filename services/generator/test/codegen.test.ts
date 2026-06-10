@@ -434,13 +434,16 @@ test("generated server registers tools and executes an http call mapped from par
     "browser_back",
     "browser_read_page",
     "browser_extract",
+    "browser_dismiss",
     "browser_resume",
   ]) {
     assert.ok(names.includes(kit), `missing browsing toolkit tool ${kit}`);
   }
-  assert.equal(tools.length, 13);
+  assert.equal(tools.length, 14);
 
   const realFetch = globalThis.fetch;
+  const oldAllowPrivate = process.env.MCP_ALLOW_PRIVATE_HOSTS;
+  process.env.MCP_ALLOW_PRIVATE_HOSTS = "1";
   let captured: { url: string; method?: string; headers?: any; body?: any } | undefined;
   let nextBody = "OK-BODY";
   let nextCtype = "application/json";
@@ -507,6 +510,8 @@ test("generated server registers tools and executes an http call mapped from par
     await browserServer.close();
   } finally {
     globalThis.fetch = realFetch;
+    if (oldAllowPrivate == null) delete process.env.MCP_ALLOW_PRIVATE_HOSTS;
+    else process.env.MCP_ALLOW_PRIVATE_HOSTS = oldAllowPrivate;
     await client.close();
     await server.close();
     rmSync(genDir, { recursive: true, force: true });

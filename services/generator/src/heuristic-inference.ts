@@ -15,9 +15,14 @@ import { analyzeBundleHtml, type HtmlFormSummary, type PageAnalysis } from "./ht
 // Query keys that are tracking/session noise, not real inputs - extracted tools shouldn't surface them.
 const TRACKING = /^(utm_|pd_rd_|pf_rd_|_$|fbclid$|gclid$|ref_?$|mc_|igshid$|s_kwcid$)/i;
 const isTracking = (k: string) => TRACKING.test(k) || k === "_";
-const NOISY_HOST = /(google-analytics|doubleclick|newrelic|nr-data|segment|sentry|hotjar|amplitude|optimizely|facebook|bing|adsrvr|demdex|datadog)/i;
-const NOISY_PATH = /(?:^|\/)(collect|collector|analytics|tracking|telemetry|metrics|events?|pagead|conversion|viewthroughconversion|newrelic|nrjs|jserrors|experimentchokepoint|ccm|rmkt|tallyman|loginwebevent|funnel)(?:\/|$)|\/g\/collect\b|\/sid\.json\b/i;
-const STATIC_ASSET = /\.(?:js|mjs|css|map|png|jpe?g|gif|svg|ico|woff2?|ttf|webmanifest)$/i;
+const NOISY_HOST =
+  /(google-analytics|googlesyndication|googletagmanager|googleadservices|doubleclick|2mdn|newrelic|nr-data|segment|sentry|hotjar|amplitude|optimizely|facebook|connect\.facebook|bing|adsrvr|demdex|datadog|scorecardresearch|moatads|doubleverify|adsafeprotected|criteo|taboola|outbrain|quantserve|chartbeat|parsely|fwmrm|litix|brightline|onetrust|cookielaw|branch\.io|mixpanel|fullstory|mouseflow|clarity\.ms|snowplow|tealium|krxd|rubiconproject|pubmatic|openx|casalemedia|smartadserver|adnxs|3lift|bidswitch|media\.max\.com|discomax|imrworldwide|nielsen|comscore)/i;
+const NOISY_PATH = /(?:^|\/)(collect|collector|analytics|tracking|telemetry|metrics|events?|pagead|conversion|viewthroughconversion|newrelic|nrjs|jserrors|experimentchokepoint|ccm|rmkt|tallyman|loginwebevent|funnel|beacon|pixel|impression|gtm|gtag|stats|logging|ping|rum|vitals|consent|cmp|gdpr|playbackinfo|heartbeat)(?:\/|$)|\/g\/collect\b|\/sid\.json\b/i;
+// Static assets + media/streaming segments (HLS/DASH chunks): not API tools.
+const STATIC_ASSET =
+  /\.(?:js|mjs|css|map|png|jpe?g|gif|svg|ico|woff2?|ttf|otf|eot|webmanifest|webp|avif|bmp|mp4|m4s|m4a|ts|mp3|wav|webm|mov|avi|mkv|flv|aac|ogg|oga|ogv|flac|m3u8|mpd|vtt|srt|pdf|zip|gz)$/i;
+// Media/font/image/beacon content-types: assets, not callable JSON/text APIs.
+const NOISY_CTYPE = /(?:^|[^a-z])(video|audio|image|font)\/|beacon|analytics|telemetry|tracking|octet-stream|event-stream/i;
 const CHALLENGE_FORM = /captcha|nocaptcha|recaptcha|challenge|human.?verification|verify.?human/i;
 const LOW_VALUE_FORM_ACTION = /feedback|custom[_-]?scopes?|newsletter|subscribe|signup|sign[_-]?up|survey|report[_-]?(?:abuse|content)?/i;
 
@@ -70,8 +75,27 @@ function actionableNetworkCapture(cap: CaptureBundle["network"][number]): boolea
   } catch {
     /* malformed rawUrl: fall through to tool generation */
   }
-  return !/beacon|analytics|telemetry|tracking/i.test(cap.contentType || "");
+  // Drop media/font/image/beacon responses - they're assets, not callable JSON/text APIs.
+  return !NOISY_CTYPE.test(cap.contentType || "");
 }
+
+/** eTLD+1 approximation by last two labels: cnn.com from www.cnn.com / bolt.api.cnn.com. */
+function registrableDomain(hostname: string): string {
+  const labels = String(hostname || "").toLowerCase().split(".").filter(Boolean);
+  return labels.length <= 2 ? labels.join(".") : labels.slice(-2).join(".");
+}
+
+function isSameSite(rawUrl: string, pageDomain: string): boolean {
+  try {
+    return registrableDomain(new URL(rawUrl).hostname) === pageDomain;
+  } catch {
+    return false;
+  }
+}
+
+// Same-site endpoints are kept first; cross-site fills the rest, capped so a media/ad-heavy page can't bury the real tools.
+const MAX_NETWORK_TOOLS = 30;
+const MAX_CROSS_SITE_TOOLS = 6;
 
 function fieldText(field: Pick<PageField, "name" | "label" | "placeholder" | "type">): string {
   return [field.name, field.label, field.placeholder, field.type].filter(Boolean).join(" ").toLowerCase();
@@ -118,7 +142,18 @@ function inferTravelFieldMap(form: PageForm): Record<string, PageField> | null {
 
 // Network captures -> tools (path params required, query params optional)
 function toolsFromNetwork(bundle: CaptureBundle): unknown[] {
-  return bundle.network.filter(actionableNetworkCapture).flatMap((cap) => {
+  let pageDomain = "";
+  try {
+    pageDomain = registrableDomain(new URL(bundle.url).hostname);
+  } catch {
+    /* no page domain - treat everything as cross-site */
+  }
+  // Prefer the site's own API over third-party hosts; bound cross-site noise; cap overall.
+  const actionable = bundle.network.filter(actionableNetworkCapture);
+  const sameSite = pageDomain ? actionable.filter((c) => isSameSite(c.rawUrl, pageDomain)) : [];
+  const crossSite = pageDomain ? actionable.filter((c) => !isSameSite(c.rawUrl, pageDomain)) : actionable;
+  const ordered = [...sameSite, ...crossSite.slice(0, MAX_CROSS_SITE_TOOLS)].slice(0, MAX_NETWORK_TOOLS);
+  return ordered.flatMap((cap) => {
     const properties: Record<string, unknown> = {};
     const paramMapping: Record<string, { in: string; key: string }> = {};
     const required: string[] = [];
@@ -408,6 +443,27 @@ function structuredBrowserTools(bundle: CaptureBundle, analysis = analyzeBundleH
           { action: "extract", value: "json:listing" },
         ],
         0.65,
+      ),
+    );
+  }
+
+  // Generic listing extractor: a page that INDEXES a repeated item collection (it has detail-link templates,
+  // or reads as a product/results listing) should expose a structured listing tool, not just page metadata.
+  // codegen's json:listing extractor finds the repeated cards at runtime (works for catalogs, feeds, search
+  // results, post lists). Same-URL/same-mode duplicates are deduped downstream against list_search_results etc.
+  const isListingPage = !isTravel && (analysis.detailLinkPatterns.length >= 1 || analysis.likelyPageKinds.includes("product_listing"));
+  if (isListingPage) {
+    tools.push(
+      browserTool(
+        "list_page_items",
+        "Open this page in a browser and return its repeated items (catalog cards, search results, posts, listings) as structured JSON records.",
+        { type: "object", properties: {} },
+        [
+          { action: "navigate", value: bundle.url },
+          { action: "waitFor", target: { role: "page", selector: "body" } },
+          { action: "extract", value: "json:listing" },
+        ],
+        0.6,
       ),
     );
   }

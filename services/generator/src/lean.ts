@@ -12,11 +12,21 @@ export type { GenerateDeps, GenerateOutcome, Scraper, GeneratePersistence } from
 export { generateServer, generateServerSource, packageJson, configSnippet } from "./codegen.js";
 export type { CodegenInput } from "./codegen.js";
 
+export { chooseBrowserBackend, deriveDynamicSignals } from "./opencli-backend.js";
+export type { BrowserBackend, DynamicSiteSignals } from "./opencli-backend.js";
+
 export { inferTools, validateCandidates, parseCandidates, contentToolFor } from "./inference.js";
 export type { InferenceClient, InferenceOutcome } from "./inference.js";
 
 export { analyzeBundleHtml } from "./html-analysis.js";
+export { discoverApiSpecTools, openApiToTools, parseOpenApi, graphqlPassthroughTool } from "./api-spec.js";
+export { discoverSubPageTools, httpFetchText } from "./sitemap-discovery.js";
+export type { FetchText } from "./sitemap-discovery.js";
+export { verifyAndAnnotate, verifyAndFilter, httpProbe } from "./tool-verifier.js";
+export type { ProbeFn, VerifyReport, ToolVerification } from "./tool-verifier.js";
 export * from "./llm-prompts.js";
+export { assertPublicHttpUrl } from "./url-safety.js";
+export { readResponseTextWithLimit } from "./http-limits.js";
 
 export { OpenAIInferenceClient } from "./openai-client.js";
 export { ClaudeInferenceClient } from "./claude-client.js";

@@ -9,6 +9,7 @@ import { deepen } from "./deepen.js";
 import type { PostgresStore } from "./adapters/postgres.js";
 import type { HttpScraper } from "./adapters/scraper-http.js";
 import type { GeneratedServerArtifact, LegalMode, ToolDefinition } from "@mcp/types";
+import { generatorWorkerConcurrency } from "./job-defaults.js";
 
 export interface WorkerDeps {
   store: PostgresStore;
@@ -19,10 +20,7 @@ export interface WorkerDeps {
   discoverSubPages?: (pageUrl: string) => Promise<ToolDefinition[]>;
   /** Optional live tool verification, threaded into the generate path. Off when unset (tests). */
   verifyTools?: (tools: ToolDefinition[], pageUrl: string) => Promise<ToolDefinition[]>;
-  /**
-   * Optional: enqueue a single follow-up `deepen` job after a successful generate (the async tool-maximizing
-   * pass). Off when unset (tests). A deepen job NEVER enqueues anything - that's the runaway guard.
-   */
+  /** Optional: enqueue one follow-up `deepen` job after a successful generate. A deepen job never enqueues anything. */
   enqueueDeepen?: (job: { serverId: string; url: string; legalMode: LegalMode }) => Promise<void>;
 }
 
@@ -33,9 +31,8 @@ export interface JobResult {
 }
 
 /**
- * Process one job (exported for direct testing without a Redis loop). Dispatches by kind; idempotent via
- * processed_jobs (a retry of an already-processed job is skipped). Fail-closed: the payload is parsed
- * through the contract before use, so a malformed message can't crash the worker mid-flight.
+ * Process one job (exported for direct testing). Dispatches by kind; idempotent via processed_jobs;
+ * fail-closed (the payload is contract-parsed before use, so a malformed message can't crash the worker).
  */
 export async function processJob(jobId: string, payload: unknown, deps: WorkerDeps): Promise<JobResult> {
   const parsed = Job.safeParse(payload);
@@ -116,6 +113,6 @@ export function startWorker(connection: { host: string; port: number }, deps: Wo
   return new Worker(
     QUEUE_NAME,
     async (job: BullJob) => processJob(String(job.id), job.data, deps),
-    { connection, concurrency: 4 },
+    { connection, concurrency: generatorWorkerConcurrency() },
   );
 }

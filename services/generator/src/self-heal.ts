@@ -4,12 +4,9 @@ import type { Scraper } from "./generate.js";
 import type { VersionPersistence } from "./version-write.js";
 
 /**
- * Self-healer (`services/generator.md`, the differentiator). Given a SelfHealJob, re-snapshot the source
- * and ask Claude to rewrite ONLY the failing tool, then bump the version.
- * Acceptance (enforced by tests): a heal changes EXACTLY the failing tool and increments the version -
- * nothing else moves. The Claude call is behind `HealClient` so this is testable with zero network.
- *
- * v1: re-snapshots the whole source URL (a lighter per-tool path is an open question in `03`).
+ * Self-healer: given a SelfHealJob, re-snapshot the source and ask the model to rewrite only the failing
+ * tool, then bump the version. A heal changes exactly the failing tool (enforced by tests); the model call
+ * is behind HealClient (testable with zero network).
  */
 export interface HealClient {
   /** Returns raw JSON for the single rewritten tool (same name as the failing tool). */

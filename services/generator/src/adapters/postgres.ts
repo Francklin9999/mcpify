@@ -9,12 +9,9 @@ import type { CurrentServer } from "../self-heal.js";
 import type { ArtifactStore } from "./artifact-store.js";
 
 /**
- * Real Postgres persistence over @mcp/db. The untested-with-fakes heart of the worker:
- *  - every multi-table write is ONE transaction (server_versions + tools + servers-pointer + idempotency
- *    marker land atomically - a partial failure can't leave current_version pointing at half-written tools);
- *  - the job's id is inserted into processed_jobs in that same tx, so an at-least-once retry is a no-op
- *    (self_heal's version+1 mints exactly one version per job);
- *  - loadCurrentServer reconstitutes ToolDefinition[] through the contract zod (fail-closed on a bad row).
+ * Postgres persistence over @mcp/db. Every multi-table write (versions + tools + current-version pointer +
+ * the processed_jobs idempotency marker) is one transaction, so a retry is a no-op and a partial failure
+ * can't leave current_version pointing at half-written tools. loadCurrentServer is contract-validated.
  */
 export class PostgresStore {
   constructor(

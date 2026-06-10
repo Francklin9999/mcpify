@@ -1,17 +1,15 @@
 import { aggregateConfidence, type DiscoverJob } from "@mcp/types";
 import { generateServer } from "./codegen.js";
+import { chooseBrowserBackend, deriveDynamicSignals } from "./opencli-backend.js";
 import { discoverMore, mergeCandidates } from "./incremental.js";
 import type { InferenceClient } from "./inference.js";
 import type { CurrentServer } from "./self-heal.js";
 import type { VersionPersistence } from "./version-write.js";
 
 /**
- * `discover` handler - the CONTINUOUS-generation path. Unlike `regenerate` (which re-infers ALL tools
- * wholesale from a fresh scrape), this takes a NEW capture of an existing server's page and runs INCREMENTAL
- * discovery: it merges only genuinely-new tools (`incremental.ts`) and bumps the version. Two efficiencies
- * are the whole point:
- *   - the model is sent only the delta (never re-sees material it already tooled), and
- *   - if nothing new was found, NO new version is written (no churn, no wasted artifact).
+ * `discover` handler (continuous generation): take a new capture of an existing server's page, run
+ * incremental discovery, merge only genuinely-new tools, and bump the version. The model sees only the
+ * delta; nothing new => no new version (no churn).
  */
 export interface DiscoverDeps {
   inference: InferenceClient;
@@ -56,6 +54,7 @@ export async function discover(job: DiscoverJob, current: CurrentServer, deps: D
     title: current.title,
     tools,
     browsing: job.bundle.meta.renderedWithJs || tools.some((t) => t.execution.kind === "browser"),
+    dynamicBackend: chooseBrowserBackend(deriveDynamicSignals(job.bundle)),
   });
   const artifactUrl = await deps.persistence.saveArtifact(artifact);
   await deps.persistence.writeVersion({

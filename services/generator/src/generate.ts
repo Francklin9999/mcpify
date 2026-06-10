@@ -3,11 +3,11 @@ import { aggregateConfidence } from "@mcp/types";
 import { inferTools, validateCandidates, type InferenceClient } from "./inference.js";
 import { coverageOf, toolSig } from "./incremental.js";
 import { generateServer } from "./codegen.js";
+import { chooseBrowserBackend, deriveDynamicSignals } from "./opencli-backend.js";
 
 /**
- * `generate` use-case (`03` Flow A): scraper -> inference -> codegen -> persist.
- * scraper + persistence are PORTS so this orchestrator builds and tests with zero live services.
- * Real BullMQ consumer, scraper HTTP call, Postgres + R2 wiring are the next unit (Phase 2).
+ * `generate` use-case: scraper -> inference -> codegen -> persist. Scraper + persistence are ports, so this
+ * orchestrator builds and tests with zero live services.
  */
 export interface Scraper {
   capture(url: string, legalMode: LegalMode): Promise<CaptureBundle>;
@@ -26,16 +26,9 @@ export interface GenerateDeps {
   scraper: Scraper;
   inference: InferenceClient;
   persistence: GeneratePersistence;
-  /**
-   * Optional sub-page discovery (sitemap/robots). When provided, its tools are merged into the inferred set
-   * (deduped by name + endpoint signature). Best-effort: a failure or absence never blocks generation.
-   */
+  /** Optional sub-page discovery (sitemap/robots/API spec); merged into the inferred set, deduped. Best-effort. */
   discoverSubPages?: (pageUrl: string) => Promise<ToolDefinition[]>;
-  /**
-   * Optional LIVE verification. When provided, the inferred tools are executed against the real site and
-   * returned confidence-annotated (verified tools boosted, dead/blocked damped - never pruned). Best-effort:
-   * a failure or absence leaves the tools untouched. Makes the generator prove its own output.
-   */
+  /** Optional live verification; returns confidence-annotated tools. Best-effort. */
   verifyTools?: (tools: ToolDefinition[], pageUrl: string) => Promise<ToolDefinition[]>;
 }
 
@@ -53,28 +46,23 @@ export async function generate(req: GenerateRequest, deps: GenerateDeps): Promis
   const bundle = req.bundle ?? (await deps.scraper.capture(req.url, req.legalMode));
   const { result, droppedCount } = await inferTools(bundle, deps.inference);
 
-  // Best-effort sub-page enrichment: fold in tools discovered from the site's own sitemap/robots, deduped
-  // by name + endpoint signature so they never duplicate DOM-mined detail tools. Never blocks generation.
   const enriched = await withSubPageTools(result.tools, req.url, deps.discoverSubPages);
-  // Optional closed-loop: verify tools against the live site and fold the result into confidence.
   const tools = await withLiveVerification(enriched, req.url, deps.verifyTools);
   const confidence = tools === result.tools ? result.confidence : aggregateConfidence(tools.map((t) => t.confidence));
 
   const { serverId, version } = await deps.persistence.nextServer(req.url);
   const title = bundle.meta.title ?? req.url;
-  // Emit the snapshot-driven browsing toolkit (browser_navigate/click/type/...) when the page is
-  // interactive - JS-rendered, has on-page actions/forms, or inference already produced a browser tool.
-  // This is what lets an LLM drive the page turn-by-turn (paginate, add to cart, multi-step flows).
+  // Ship the browsing toolkit when the page is interactive (JS-rendered, has actions/forms, or a browser tool).
   const browsing =
     bundle.meta.renderedWithJs ||
     (bundle.page?.actions?.length ?? 0) > 0 ||
     (bundle.page?.forms?.length ?? 0) > 0 ||
     tools.some((t) => t.execution.kind === "browser");
-  const artifact = generateServer({ serverId, version, url: req.url, title, tools, browsing });
+  const dynamicBackend = chooseBrowserBackend(deriveDynamicSignals(bundle));
+  const artifact = generateServer({ serverId, version, url: req.url, title, tools, browsing, dynamicBackend });
 
-  // A server with zero usable tools is NOT active - surface it as broken (per generator.md), not a
-  // healthy zero-tool server. Confidence is already 0 in that case (aggregateConfidence([]) === 0).
-  const status: RegistryEntry["status"] = tools.length === 0 ? "broken" : "active";
+  // Zero usable tools => broken, UNLESS it ships the browsing toolkit (driveable turn-by-turn, e.g. Skyscanner).
+  const status: RegistryEntry["status"] = tools.length === 0 && !browsing ? "broken" : "active";
 
   const artifactUrl = await deps.persistence.saveArtifact(artifact);
   const entry: RegistryEntry = {
@@ -101,11 +89,7 @@ export async function generate(req: GenerateRequest, deps: GenerateDeps): Promis
   };
 }
 
-/**
- * Merge sitemap/robots-discovered sub-page tools into the inferred set. Deduped by tool name AND endpoint
- * signature (so a sitemap `get_product_page` never duplicates a DOM-mined one). Returns the SAME array when
- * nothing is added (so callers can skip a confidence recompute). Best-effort: any failure yields the inputs.
- */
+/** Merge sub-page-discovered tools into the inferred set, deduped by name + endpoint sig. Best-effort. */
 async function withSubPageTools(
   tools: ToolDefinition[],
   pageUrl: string,

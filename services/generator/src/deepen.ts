@@ -6,12 +6,9 @@ import type { CurrentServer } from "./self-heal.js";
 import type { VersionPersistence } from "./version-write.js";
 
 /**
- * `deepen` handler - maximizes the tools a single link yields. After a server is generated, this captures a
- * bounded sample of the site's sub-pages (concrete example URLs from sitemap discovery) and runs INCREMENTAL
- * discovery over them, ACCUMULATING into one toolset so each pass dedupes against the previous one, then
- * writes exactly ONE new version. Sequential by design: N parallel jobs would each read the same base and
- * their merges wouldn't compose (and would collide on the version PK). Bounded, best-effort, and it NEVER
- * enqueues another job (runaway-safe). No-ops (no version) when nothing new surfaces.
+ * `deepen` handler: after a server is generated, capture a bounded sample of its sub-pages and run
+ * incremental discovery, accumulating into one toolset and writing at most one new version. Sequential,
+ * bounded, best-effort, and never enqueues another job (runaway-safe). No-ops when nothing new surfaces.
  */
 export interface DeepenDeps {
   inference: InferenceClient;

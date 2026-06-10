@@ -1,12 +1,7 @@
 /**
- * Gate detection for the generated server's persistent browser session.
- *
- * A "gate" is a point where an automated browser tool can't proceed without a human: an anti-bot CAPTCHA
- * challenge, or a sign-in wall. This module is the SINGLE SOURCE OF TRUTH for that decision: the pure
- * `classifyGate` + its marker tables are unit-tested here, and `emitGateRuntime()` serializes them
- * byte-for-byte into the generated `server.ts` (constants via JSON, functions via Function.toString), so the
- * shipped runtime and the tested logic can never drift. Nothing here imports anything (it has to survive
- * being lifted into a standalone, dependency-free server).
+ * Gate detection (CAPTCHA / sign-in wall) for the generated server's browser session. The pure classifyGate
+ * + its marker tables are unit-tested here, and emitGateRuntime() serializes them verbatim into the generated
+ * server.ts, so the shipped runtime can't drift from the tested logic. No imports (lifted into a standalone server).
  */
 
 export type GateKind = "ok" | "auth" | "captcha";
@@ -30,9 +25,7 @@ export interface GateResult {
   reason: string;
 }
 
-// Anti-bot challenge text markers. Ported VERBATIM from the scraper's tuned set (services/scraper/scraper/
-// capture.py `_BOT_MARKERS`) so the runtime escalation and the capture-time escalation agree on what a
-// bot-wall looks like. Conservative on purpose - a false "captcha" pauses the agent for no reason.
+// Anti-bot challenge text markers (mirrors the scraper's _BOT_MARKERS). Conservative: a false captcha pauses the agent.
 export const BOT_MARKERS: string[] = [
   "captcha",
   "enter the characters you see",
@@ -51,8 +44,7 @@ export const BOT_MARKERS: string[] = [
   "access to this page has been denied",
 ];
 
-// DOM selectors for the embedded challenge widgets themselves - the highest-precision captcha signal (no
-// false positives from page copy that merely mentions "captcha"). The caller probes these with Playwright.
+// Embedded challenge-widget selectors: the highest-precision captcha signal. Probed with Playwright.
 export const CHALLENGE_FRAME_SELECTORS: string[] = [
   'iframe[src*="recaptcha"]',
   'iframe[src*="hcaptcha"]',
@@ -68,8 +60,7 @@ export const CHALLENGE_FRAME_SELECTORS: string[] = [
   ".g-recaptcha",
 ];
 
-// A landed URL that looks like a dedicated sign-in / auth endpoint. Bounded to recognizable auth path/route
-// tokens so a generic "/account" or a "login" substring inside a slug doesn't trip it.
+// A landed URL that looks like a dedicated sign-in/auth endpoint (bounded to auth path tokens).
 export const LOGIN_URL_RE =
   /(?:^|[/.?#&=])(?:log[-_]?in|sign[-_]?in|signin|sign[-_]?up|signup|authenticate|authorize|oauth2?|sso|account[s]?\/(?:login|signin|sign-in))(?:[/.?#&=]|$)/i;
 
@@ -86,10 +77,8 @@ export const LOGIN_TEXT_MARKERS: string[] = [
   "login required",
 ];
 
-// Same navigation target ignoring hash + trailing slash. Self-contained so it can be lifted into the server
-// alongside classifyGate (see emitGateRuntime). Falls back to string equality for non-absolute inputs.
-// NOTE: no NESTED arrow functions here - the stringified body is emitted into a strict (noImplicitAny)
-// server, where an inner arrow's params would have no contextual type. Keep it loop/inline only.
+// Same navigation target ignoring hash + trailing slash. Lifted into the server, so keep it self-contained
+// with no nested arrows (their params would be untyped under the generated server's noImplicitAny).
 export const sameTarget = (a: string, b: string): boolean => {
   try {
     const l = new URL(String(a));
@@ -102,12 +91,9 @@ export const sameTarget = (a: string, b: string): boolean => {
   }
 };
 
-// THE decision. Pure: given what the page looks like, is the automated session blocked, and why? Designed to
-// be lifted verbatim into the standalone server, so it references only the exported tables above + globals.
-//   - captcha wins over auth (a challenge page can also carry a password field; it's still a challenge).
-//   - auth fires ONLY when the action failed to reach its target: either we were redirected to a sign-in
-//     page, or we're sitting on a sign-in URL that is actively asking for a password. A password field on
-//     its own is NOT a gate (lots of normal pages have a login widget) - the URL/redirect signal is required.
+// The decision: is the session blocked, and why? captcha wins over auth. auth fires only when the action
+// failed to reach its target (redirected to sign-in, or sitting on a sign-in URL asking for a password) - a
+// password field alone is not a gate.
 export const classifyGate = (s: GateSignals): GateResult => {
   const landed = String(s.landedUrl || "");
   const hay = (String(s.text || "") + " " + String(s.title || "")).toLowerCase();
@@ -128,16 +114,9 @@ export const classifyGate = (s: GateSignals): GateResult => {
   return { kind: "ok", reason: "" };
 };
 
-/**
- * Serialize the gate runtime as source text for the generated server. Emits the marker tables (as JSON
- * literals) and the two pure functions (via Function.toString) under their exported names, so the standalone
- * server runs the exact logic unit-tested here. The generator builds with plain `tsc` (no minifier), so the
- * stringified function bodies are stable, readable, and reference only the constants emitted above them.
- */
+/** Serialize the gate runtime (marker tables as JSON + the pure functions via toString) for the generated server. */
 export function emitGateRuntime(): string {
-  // The const type annotations give the stringified arrows' top-level params a contextual `any` type, so the
-  // emitted code is clean under the generated server's strict (noImplicitAny) tsconfig. The function bodies
-  // (sole source of truth) carry no nested arrows, so they need no further annotation.
+  // The `: any` annotations give the stringified arrows' params a contextual type under the server's noImplicitAny.
   return [
     "// --- gate detection (auto-emitted from services/generator/src/browser-gate.ts; single source of truth) ---",
     `const BOT_MARKERS = ${JSON.stringify(BOT_MARKERS)};`,

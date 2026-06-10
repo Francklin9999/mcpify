@@ -1,42 +1,29 @@
 import type { ToolDefinition } from "@mcp/types";
+import { readResponseTextWithLimit } from "./http-limits.js";
+import { assertPublicHttpUrl } from "./url-safety.js";
 
 /**
- * Sub-page discovery from a site's OWN declared URL inventory: `/robots.txt` (for `Sitemap:` pointers and
- * `Disallow:` rules) and `/sitemap.xml` (the URL set, possibly a sitemap index). This is a more reliable
- * route to a site's structure than scraping `<a>` tags off one captured page and hoping a detail template
- * repeats >=3 times: a sitemap lists thousands of `/project/{slug}`-style URLs directly, so a single
- * captured DETAIL page (which has no sibling detail links) still yields a parameterized sub-page tool.
- *
- * The expensive parts (parse robots, parse sitemap, cluster URLs into path templates) are PURE and tested
- * offline. Network access is isolated behind an injected `FetchText`, so the orchestrator builds and tests
- * with zero live services - and `Disallow:` rules are honored, so we never template a path the site forbids.
+ * Sub-page discovery from a site's own URL inventory (robots.txt Sitemap:/Disallow: + sitemap.xml). More
+ * reliable than scraping <a> tags off one page: a sitemap lists thousands of /project/{slug} URLs directly,
+ * so even a single detail page yields a parameterized sub-page tool. Pure core; network is injected via
+ * FetchText; Disallow: is honored.
  */
 
-/** Inject the network so the orchestrator stays pure-testable. Returns the body, or null on any failure. */
+/** Injected network. Returns the body, or null on any failure. */
 export type FetchText = (url: string) => Promise<string | null>;
 
-/**
- * Production `FetchText`: a bounded, fail-soft GET (http(s) only, short timeout, response-size cap). Returns
- * null on any non-2xx, timeout, oversize body, or network error - so discovery degrades to fewer tools, never
- * an exception. Use to build a `discoverSubPages` for `GenerateDeps`:
- *   `discoverSubPages: (url) => discoverSubPageTools(url, httpFetchText())`.
- */
+/** Production FetchText: a bounded, fail-soft GET (http(s) only, short timeout, size cap). Null on any failure. */
 export function httpFetchText(opts: { timeoutMs?: number; maxBytes?: number } = {}): FetchText {
   const timeoutMs = opts.timeoutMs ?? 8_000;
   const maxBytes = opts.maxBytes ?? 5_000_000;
   return async (url: string): Promise<string | null> => {
-    if (!/^https?:\/\//i.test(url)) return null;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetch(url, { signal: controller.signal, headers: { accept: "text/plain, application/xml, text/xml" } });
+      await assertPublicHttpUrl(url);
+      const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), headers: { accept: "text/plain, application/xml, text/xml" } });
       if (!res.ok) return null;
-      const text = await res.text();
-      return text.length > maxBytes ? text.slice(0, maxBytes) : text;
+      return await readResponseTextWithLimit(res, maxBytes);
     } catch {
       return null;
-    } finally {
-      clearTimeout(timer);
     }
   };
 }
@@ -75,11 +62,7 @@ function decodeEntities(value: string): string {
   return out;
 }
 
-/**
- * Parse robots.txt: collect every `Sitemap:` directive (they are global, not per-group) and the `Disallow:`
- * prefixes that apply to `User-agent: *`. Lenient and never throws - an unparseable robots.txt yields empty
- * sets (we then fall back to the conventional `/sitemap.xml`).
- */
+/** Parse robots.txt: every Sitemap: directive + the Disallow: prefixes for User-agent: *. Never throws. */
 export function parseRobotsTxt(text: string): RobotsInfo {
   const sitemaps: string[] = [];
   const disallow: string[] = [];
@@ -147,11 +130,9 @@ function sanitizeName(value: string): string {
 }
 
 /**
- * Cluster a list of URLs into detail-page templates. For each URL we consider every non-leading segment as a
- * possible `{param}` position; a position is a real collection when MANY distinct values appear there across
- * the corpus (a sitemap of `/project/requests`, `/project/flask`, ... makes `/project/{param}` vary widely
- * while every other position stays fixed). Templates whose param varies across at least `minMembers` URLs
- * are kept, deduped to the strongest one per (entity, depth) family. Pure; bounded by the input size.
+ * Cluster URLs into detail-page templates: a segment position is a `{param}` when many distinct values appear
+ * there across the corpus (`/project/{param}`). Kept when the param varies across >= minMembers URLs, deduped
+ * to the strongest per (entity, depth) family. Pure.
  */
 export function clusterUrlTemplates(
   urls: string[],
@@ -248,11 +229,7 @@ export interface SubPageDiscoveryOptions {
   maxTemplates?: number;
 }
 
-/**
- * Discover sub-page tools for a site from robots.txt + sitemap.xml. Bounded and fail-soft: any fetch/parse
- * failure simply yields fewer (or zero) tools, never an error. Honors `Disallow:` so forbidden paths are
- * never templated into tools.
- */
+/** Discover sub-page tools from robots.txt + sitemap.xml. Bounded, fail-soft, honors Disallow:. */
 export async function discoverSubPageTools(
   pageUrl: string,
   fetchText: FetchText,

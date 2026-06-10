@@ -45,6 +45,44 @@ async function toolsFor(html: string, network: any[] = []) {
   return result.tools;
 }
 
+function netCap(method: string, rawUrl: string, contentType = "application/json") {
+  const u = new URL(rawUrl);
+  return { method, rawUrl, urlPattern: u.pathname, requestHeaders: { accept: "application/json" }, statusCode: 200, contentType };
+}
+
+test("network noise: media segments, third-party trackers, and cross-site overflow are filtered out", async () => {
+  const html = "<html><body><h1>Watch</h1></body></html>";
+  const network = [
+    netCap("GET", "https://site.example.com/api/v1/items?page=1"),
+    netCap("GET", "https://api.site.example.com/v2/detail/42"), // same registrable domain (site.example.com)
+    netCap("GET", "https://media.cdn.net/amer/abc/v3/1.mp4", "video/mp4"),
+    netCap("GET", "https://media.cdn.net/amer/abc/v3/2.mp4", "video/mp4"),
+    netCap("GET", "https://media.cdn.net/amer/abc/a0/1.m4s", "audio/mp4"),
+    netCap("GET", "https://media.cdn.net/master.m3u8", "application/vnd.apple.mpegurl"),
+    netCap("GET", "https://pagead2.googlesyndication.com/getconfig/sodar"),
+    netCap("POST", "https://events.brightline.tv/track"),
+    netCap("GET", "https://cdn.onetrust.com/consent/en.json"),
+    netCap("GET", "https://www.google-analytics.com/g/collect?v=2"),
+  ];
+  const tools = await toolsFor(html, network);
+  const httpHosts = tools.filter((t) => t.execution.kind === "http").map((t) => { try { return new URL((t.execution as any).request.rawUrl).hostname; } catch { return ""; } });
+  assert.ok(httpHosts.some((h) => /site\.example\.com/.test(h)), "the site's own API endpoints are kept");
+  assert.ok(!httpHosts.some((h) => /media\.cdn\.net/.test(h)), "media segment endpoints must be dropped");
+  assert.ok(!httpHosts.some((h) => /googlesyndication|brightline|onetrust|google-analytics/.test(h)), "third-party trackers/ads must be dropped");
+  assert.ok(!tools.some((t) => /mp4|m4s|m3u8/.test(t.name)), "no media-segment tools by name");
+});
+
+test("network noise: a media/ad-heavy page can't bury the tool list (bounded count)", async () => {
+  const network = [
+    ...Array.from({ length: 60 }, (_, i) => netCap("GET", `https://site.example.com/seg/v/${i}.ts`, "video/mp2t")),
+    ...Array.from({ length: 10 }, (_, i) => netCap("GET", `https://site.example.com/api/resource/${i}?q=x`)),
+  ];
+  const tools = await toolsFor("<html><body>x</body></html>", network);
+  const httpTools = tools.filter((t) => t.execution.kind === "http");
+  assert.ok(httpTools.length <= 32, `expected a bounded tool list, got ${httpTools.length}`);
+  assert.ok(!httpTools.some((t) => /\.ts\b/.test((t.execution as any).request.urlPattern)), "no .ts media-segment tools");
+});
+
 test("form mining: a search form becomes a `search` tool with a required query param", async () => {
   const html = `<html><body><form action="/search" method="get">
     <input type="text" name="q" placeholder="Search">
@@ -189,6 +227,26 @@ test("HTML analysis mining: repeated product links become a detail-page tool wit
     assert.equal(detail.execution.request.urlPattern, "/products/{id}");
     assert.equal(detail.execution.paramMapping.id!.in, "path");
   }
+});
+
+test("a listing/index page gains a generic list_page_items extractor (json:listing)", async () => {
+  const html = `<html><body>
+    <a href="/products/red-shoe">Red Shoe</a>
+    <a href="/products/blue-shoe">Blue Shoe</a>
+    <a href="/products/green-shoe">Green Shoe</a>
+  </body></html>`;
+  const tools = await toolsFor(html);
+  const listing = tools.find((t) => t.name === "list_page_items");
+  assert.ok(listing, "a page indexing repeated items should expose list_page_items");
+  assert.equal(listing!.execution.kind, "browser");
+  if (listing!.execution.kind === "browser") {
+    assert.ok(listing!.execution.steps.some((s) => s.action === "extract" && s.value === "json:listing"), "uses json:listing extraction");
+  }
+});
+
+test("a plain content page (no repeated items) does NOT get list_page_items", async () => {
+  const tools = await toolsFor("<html><body><h1>An article</h1><p>Just prose, no item index.</p></body></html>");
+  assert.ok(!tools.some((t) => t.name === "list_page_items"), "no listing tool on a non-listing page");
 });
 
 test("static catalog slug-id links become a repeated detail-page tool", async () => {

@@ -1,15 +1,14 @@
 import { aggregateConfidence, type RegenerateJob } from "@mcp/types";
 import { inferTools, type InferenceClient } from "./inference.js";
 import { generateServer } from "./codegen.js";
+import { chooseBrowserBackend, deriveDynamicSignals } from "./opencli-backend.js";
 import type { Scraper } from "./generate.js";
 import type { CurrentServer } from "./self-heal.js";
 import type { VersionPersistence } from "./version-write.js";
 
 /**
- * `regenerate` handler (`01 S4`, `03` Flow B large-drift). Unlike `generate()` - which allocates a NEW
- * serverId for a URL - this re-parses an EXISTING server and bumps ITS version. The `RegenerateJob`
- * carries only `serverId`, so the caller resolves it to `CurrentServer` (url/title/version) first.
- * Re-infers ALL tools wholesale (drift may have changed several); 0 tools => the new version is `broken`.
+ * `regenerate` handler (large-drift): re-parse an existing server and bump its version (vs generate(), which
+ * allocates a new serverId). Re-infers all tools wholesale; 0 tools => the new version is broken.
  */
 export interface RegenerateDeps {
   scraper: Scraper;
@@ -31,18 +30,23 @@ export async function regenerate(job: RegenerateJob, current: CurrentServer, dep
   const { result, droppedCount } = await inferTools(bundle, deps.inference);
 
   const newVersion = current.version + 1;
-  const status: "active" | "broken" = result.tools.length === 0 ? "broken" : "active";
+  const browsing =
+    bundle.meta.renderedWithJs ||
+    (bundle.page?.actions?.length ?? 0) > 0 ||
+    (bundle.page?.forms?.length ?? 0) > 0 ||
+    result.tools.some((t) => t.execution.kind === "browser");
+  // Parity with generate(): a server that ships the browser_* toolkit is driveable even with zero INFERRED
+  // tools (the dynamic/opencli case), so it is active - only a truly empty, non-browsing server is broken.
+  const status: "active" | "broken" = result.tools.length === 0 && !browsing ? "broken" : "active";
+  const dynamicBackend = chooseBrowserBackend(deriveDynamicSignals(bundle));
   const artifact = generateServer({
     serverId: job.serverId,
     version: newVersion,
     url: current.url,
     title: current.title,
     tools: result.tools,
-    browsing:
-      bundle.meta.renderedWithJs ||
-      (bundle.page?.actions?.length ?? 0) > 0 ||
-      (bundle.page?.forms?.length ?? 0) > 0 ||
-      result.tools.some((t) => t.execution.kind === "browser"),
+    browsing,
+    dynamicBackend,
   });
   const artifactUrl = await deps.persistence.saveArtifact(artifact);
   await deps.persistence.writeVersion({
