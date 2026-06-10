@@ -1,4 +1,4 @@
-# mcp-forge
+# anymcp
 
 A **self-contained** MCP server that turns any website into a runnable MCP server — entirely in-process. No
 backend, no Postgres, no Redis, no Docker. One `npx`, like Playwright MCP.
@@ -20,9 +20,9 @@ default config needs **no API key and no external service**:
 ```jsonc
 {
   "mcpServers": {
-    "mcp-forge": {
+    "anymcp": {
       "command": "npx",
-      "args": ["-y", "mcp-forge"]
+      "args": ["-y", "anymcp"]
       // No env needed. By default inference is done by the model you're already using (host-as-brain):
       // forge_scrape returns the page, your model designs the tools, forge_emit_server writes the server.
     }
@@ -80,8 +80,8 @@ provider is trivial and a key uses that provider's conventional env var.
 Local model, no key, nothing leaves your machine:
 
 ```jsonc
-{ "mcpServers": { "mcp-forge": {
-  "command": "npx", "args": ["-y", "mcp-forge"],
+{ "mcpServers": { "anymcp": {
+  "command": "npx", "args": ["-y", "anymcp"],
   "env": { "FORGE_INFERENCE": "ollama", "OLLAMA_MODEL": "llama3.1" }
 } } }
 ```
@@ -89,8 +89,8 @@ Local model, no key, nothing leaves your machine:
 A hosted provider (any big one — swap the name + key):
 
 ```jsonc
-{ "mcpServers": { "mcp-forge": {
-  "command": "npx", "args": ["-y", "mcp-forge"],
+{ "mcpServers": { "anymcp": {
+  "command": "npx", "args": ["-y", "anymcp"],
   "env": { "FORGE_INFERENCE": "groq/llama-3.3-70b-versatile", "GROQ_API_KEY": "gsk_..." }
 } } }
 ```
@@ -98,8 +98,8 @@ A hosted provider (any big one — swap the name + key):
 Your own inference logic (a script, a router, anything that speaks back tool JSON):
 
 ```jsonc
-{ "mcpServers": { "mcp-forge": {
-  "command": "npx", "args": ["-y", "mcp-forge"],
+{ "mcpServers": { "anymcp": {
+  "command": "npx", "args": ["-y", "anymcp"],
   "env": { "FORGE_INFERENCE_URL": "https://my-host/infer" }
 } } }
 ```
