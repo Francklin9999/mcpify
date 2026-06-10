@@ -18,14 +18,14 @@
     "test": "npm run build && node --test dist/test/*.test.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.54.0",
-    "@google/generative-ai": "^0.24.0",
+    "@anthropic-ai/sdk": "^0.104.0",
+    "@google/generative-ai": "^0.24.1",
     "@mcp/db": "0.0.0",
     "@mcp/types": "0.0.0",
-    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "bullmq": "^5.77.6",
     "drizzle-orm": "^0.45.2",
-    "openai": "^6.39.1",
+    "openai": "^6.42.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
