@@ -10,7 +10,7 @@ server you run locally — so an LLM can actually *act* on that site, using your
 > Generate, don't integrate.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![npm](https://img.shields.io/npm/v/mcp-forge?label=mcp-forge)](https://www.npmjs.com/package/mcp-forge)
+[![npm](https://img.shields.io/npm/v/anymcp?label=anymcp)](https://www.npmjs.com/package/anymcp)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-43853d.svg)](https://nodejs.org)
 [![CI](https://github.com/Francklin9999/mcpify/actions/workflows/ci.yml/badge.svg)](https://github.com/Francklin9999/mcpify/actions/workflows/ci.yml)
 
@@ -24,13 +24,13 @@ MCP Forge is **one shared core, three products** — pick the one that fits:
 
 | | Product | Best for | Run it |
 |---|---------|----------|--------|
-| 🧩 | **`mcp-forge` — standalone MCP server** | Devs who want it inside Claude Code / Codex / Cursor with **zero backend, no API key** | `npx -y mcp-forge` ([guide](./services/forge-mcp-local/README.md)) |
+| 🧩 | **`anymcp` — standalone MCP server** | Devs who want it inside Claude Code / Codex / Cursor with **zero backend, no API key** | `npx -y anymcp` ([guide](./services/forge-mcp-local/README.md)) |
 | 🌐 | **Web app + backend microservices** | A hosted product: queue, catalog, self-healing servers, monitoring | `./run.sh` ([below](#-web-app--backend)) |
 | 🧭 | **Chrome extension (MV3)** | Driving the page you're on, as your signed-in session | Load unpacked ([below](#-chrome-extension)) |
 
 ---
 
-## 🧩 Standalone MCP server (`mcp-forge`)
+## 🧩 Standalone MCP server (`anymcp`)
 
 A **self-contained** MCP server — no backend, no Postgres, no Redis, no Docker. One `npx`, like Playwright MCP.
 By default the **host model you're already running** does the inference (no API key); optionally point it at
@@ -40,9 +40,9 @@ any provider, a local model (Ollama/LM Studio/vLLM), or your own endpoint.
 // claude_desktop_config.json / .mcp.json / cursor settings
 {
   "mcpServers": {
-    "mcp-forge": {
+    "anymcp": {
       "command": "npx",
-      "args": ["-y", "mcp-forge"]
+      "args": ["-y", "anymcp"]
       // No env needed by default. See the package README for provider/local/custom options.
     }
   }
@@ -131,7 +131,7 @@ Its side-panel chat does two things against the tab you're on:
 ## How generation works
 
 1. **Capture** — a 3-tier scraper loads the page in a real browser and records its live network calls
-   (XHR/fetch), DOM, and forms into a `CaptureBundle`. (The standalone `mcp-forge` uses a zero-dependency
+   (XHR/fetch), DOM, and forms into a `CaptureBundle`. (The standalone `anymcp` uses a zero-dependency
    static-fetch capture by default, or a Playwright scraper via `SCRAPER_URL`.)
 2. **Infer** — a pluggable brain reads the bundle and proposes **action-capable** tools, validated against a
    strict contract. With no key, a **keyless heuristic** is the floor. Every server also gets a
@@ -163,7 +163,7 @@ Never: store credentials server-side, scrape behind a login server-side, or bypa
 | `packages/db` | Drizzle / Postgres | Registry schema + migrations |
 | `services/scraper` | Python / Scrapling | 3-tier fetch → `CaptureBundle` (real-Chromium XHR capture) |
 | `services/generator` | Node | LLM factory + codegen + self-heal + BullMQ worker (`/lean` = pure, infra-free core) |
-| `services/forge-mcp-local` | Node | **`mcp-forge`** — the standalone, self-contained npx MCP server |
+| `services/forge-mcp-local` | Node | **`anymcp`** — the standalone, self-contained npx MCP server |
 | `services/forge-mcp` | Node | Thin MCP client to a hosted Forge backend (`mcp-forge-remote`) |
 | `services/monitor` | Go | Health + drift detection → enqueue jobs |
 | `apps/web` | Next.js | Landing + library / generate / monitor + API |
@@ -182,7 +182,7 @@ Everything is optional except (optionally) a provider key. See `.env.example` fo
 
 ```bash
 npm test                                                       # all Node unit suites
-npm test --workspace=mcp-forge                                 # standalone MCP: providers + stdio + e2e (no key, no network)
+npm test --workspace=anymcp                                 # standalone MCP: providers + stdio + e2e (no key, no network)
 cd services/scraper && .venv/bin/python -m pytest              # scraper (tier-2 needs Chromium, else skips)
 cd services/monitor && go test ./internal/...                  # monitor logic
 bash services/generator/test/integration/run.sh               # worker (needs Redis + Postgres)
