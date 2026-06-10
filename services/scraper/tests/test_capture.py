@@ -30,9 +30,19 @@ def _ok(tier_label):
 
 def test_escalation_uses_first_successful_tier():
     t1, t2 = FakeTier(1, _ok("t1")), FakeTier(2, _ok("t2"))
-    bundle = EscalationController([t1, t2]).capture("https://x.com", "safe")
+    # discovery=False: the classic fast-path - stop at the first sufficient tier.
+    bundle = EscalationController([t1, t2]).capture("https://x.com", "safe", discovery=False)
     assert bundle.tier == 1
     assert t1.called and not t2.called  # never escalated past success
+
+
+def test_discovery_mode_escalates_past_a_non_browser_tier_to_capture_traffic():
+    # A tier-1 (no network, not browser-rendered) result is NOT sufficient in discovery mode: escalate to the
+    # browser tier so XHR/fetch traffic gets captured into tools. This is the default product behavior.
+    t1, t2 = FakeTier(1, _ok("t1")), FakeTier(2, _ok("t2"))
+    bundle = EscalationController([t1, t2]).capture("https://x.com", "safe", discovery=True)
+    assert bundle.tier == 2
+    assert t1.called and t2.called
 
 
 def test_escalation_falls_through_to_next_tier():

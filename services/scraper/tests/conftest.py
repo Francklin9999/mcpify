@@ -9,6 +9,9 @@ import pytest
 # controller and must not depend on DNS. Default the opt-out on for the suite (test_ssrf.py clears it to test
 # the guard itself). Production leaves it unset = guard active.
 os.environ.setdefault("SCRAPER_ALLOW_PRIVATE_HOSTS", "1")
+# The Codex sandbox does not wake ASGI test requests from worker-thread completions reliably; production leaves
+# this unset so captures run in an executor up to SCRAPER_MAX_CONCURRENCY.
+os.environ.setdefault("SCRAPER_INLINE_CAPTURE", "1")
 
 # Make the `scraper` package importable when running pytest from the package dir.
 _PKG_ROOT = Path(__file__).resolve().parents[1]

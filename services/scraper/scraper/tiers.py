@@ -13,7 +13,10 @@ objects with `.request.method/.url`, `.status`, `.headers`).
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
+import re
 from typing import Any, Optional
 
 from .capture import FetchResult, RawNetworkCall
@@ -119,6 +122,95 @@ def _make_network_capturer() -> tuple[Any, list[RawNetworkCall]]:
     return page_setup, calls
 
 
+# How many times the interaction pass scrolls to the bottom to trigger lazy-load / infinite-scroll XHR.
+_INTERACT_SCROLLS = 2
+
+
+def _interaction_enabled() -> bool:
+    return os.getenv("SCRAPER_INTERACT", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _settle(page: Any) -> None:
+    """Wait briefly for triggered XHR to fire/settle; never raises."""
+    try:
+        page.wait_for_load_state("networkidle", timeout=2_500)
+    except Exception:
+        try:
+            page.wait_for_timeout(500)
+        except Exception:
+            pass
+
+
+def _make_interaction_action() -> Any:
+    """A Scrapling ``page_action`` (runs after navigation) that performs bounded, fail-soft interactions
+    (scroll, search-submit, load-more) to surface XHR that only fires on user action. The page.on("response")
+    listener stays active, so traffic from these actions is captured. Disable with SCRAPER_INTERACT=0.
+    """
+
+    def page_action(page: Any) -> Any:
+        if not _interaction_enabled():
+            return page
+
+        # A search submit or <a> "Next" can fully navigate away, which would change the analyzed DOM and break
+        # relative-URL resolution. We still want the click (it surfaces XHR), so we restore the start URL after.
+        start_url = None
+        try:
+            start_url = page.url
+        except Exception:
+            start_url = None
+
+        # 1) Scroll to the bottom a few times - triggers lazy-loaded / infinite-scroll endpoints (same page).
+        for _ in range(_INTERACT_SCROLLS):
+            try:
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            except Exception:
+                break
+            _settle(page)
+
+        # 2) Submit the primary search box - surfaces the search/query endpoint (often an XHR on SPAs).
+        try:
+            box = page.query_selector(
+                "input[type=search], input[name*='q' i], input[name*='search' i], "
+                "input[name*='query' i], input[placeholder*='search' i], [role=searchbox]"
+            )
+            if box is not None:
+                box.fill("test")
+                box.press("Enter")
+                _settle(page)
+        except Exception:
+            pass
+
+        # 3) Click a 'load more' / 'next' control - surfaces pagination endpoints. Curated, consent-free
+        #    selectors only (never an arbitrary button, so we don't trip sign-up / destructive actions).
+        try:
+            more = page.query_selector(
+                "button:has-text('Load more'), button:has-text('Show more'), button:has-text('See more'), "
+                "a[rel=next], a:has-text('Next'), [aria-label*='next' i]"
+            )
+            if more is not None:
+                more.click(timeout=2_000)
+                _settle(page)
+        except Exception:
+            pass
+
+        # Restore the requested document if an interaction navigated away, so the analyzed DOM (and its
+        # relative-link base) matches the URL the bundle records. Compare ignoring the #fragment.
+        try:
+            if start_url and _strip_fragment(page.url) != _strip_fragment(start_url):
+                page.goto(start_url, wait_until="domcontentloaded")
+                _settle(page)
+        except Exception:
+            pass
+
+        return page
+
+    return page_action
+
+
+def _strip_fragment(url: str) -> str:
+    return str(url or "").split("#", 1)[0]
+
+
 class Tier1Fetcher:
     """Static HTTP. No JS, no XHR capture (network == [])."""
 
@@ -151,7 +243,9 @@ class Tier2Fetcher:
         from scrapling.fetchers import DynamicFetcher
 
         page_setup, calls = _make_network_capturer()
-        resp = DynamicFetcher.fetch(url, network_idle=True, page_setup=page_setup, headless=True, timeout=10_000, retries=1)
+        resp = DynamicFetcher.fetch(
+            url, network_idle=True, page_setup=page_setup, page_action=_make_interaction_action(), headless=True, timeout=10_000, retries=1
+        )
         if resp is None:
             return None
         if not url_allowed(_response_url(resp, url)):
@@ -175,7 +269,9 @@ class Tier3Fetcher:
         from scrapling.fetchers import StealthyFetcher
 
         page_setup, calls = _make_network_capturer()
-        resp = StealthyFetcher.fetch(url, network_idle=True, page_setup=page_setup, headless=True, timeout=10_000, retries=1)
+        resp = StealthyFetcher.fetch(
+            url, network_idle=True, page_setup=page_setup, page_action=_make_interaction_action(), headless=True, timeout=10_000, retries=1
+        )
         if resp is None:
             return None
         if not url_allowed(_response_url(resp, url)):
@@ -187,6 +283,167 @@ class Tier3Fetcher:
             network=list(calls),
             selectors_of_interest=_selectors_of_interest(resp),
             title=_title(resp),
+        )
+
+
+# Tier 4: nodriver + CDP. Real Chrome via CDP for max stealth + a full XHR/fetch network log (method, headers,
+# body). Env: SCRAPER_NODRIVER=0 to disable, SCRAPER_NODRIVER_CHROME=<path>, SCRAPER_NODRIVER_HEADFUL=1.
+_NODRIVER_WAIT_S = 3.0
+_NODRIVER_CHROME_CANDIDATES = ("/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser")
+
+
+def _nodriver_chrome() -> Optional[str]:
+    explicit = os.getenv("SCRAPER_NODRIVER_CHROME", "").strip()
+    if explicit:
+        return explicit
+    for path in _NODRIVER_CHROME_CANDIDATES:
+        if os.path.exists(path):
+            return path
+    return None  # let nodriver auto-detect
+
+
+def _nodriver_available() -> bool:
+    if os.getenv("SCRAPER_NODRIVER", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return False
+    try:
+        import nodriver  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
+def _maybe_json(raw: Any) -> Any:
+    if not raw:
+        return None
+    try:
+        return json.loads(raw if isinstance(raw, str) else str(raw))
+    except Exception:
+        return None
+
+
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+
+
+def _title_from_html(html: str) -> Optional[str]:
+    m = _TITLE_RE.search(html or "")
+    return m.group(1).strip()[:300] if m else None
+
+
+async def _nodriver_capture(url: str, calls: list) -> tuple[str, str]:
+    import nodriver as uc
+
+    RT = uc.cdp.network.ResourceType
+    headful = os.getenv("SCRAPER_NODRIVER_HEADFUL", "").strip().lower() in {"1", "true", "yes"}
+    args = ["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"]
+    browser = await uc.start(headless=not headful, browser_executable_path=_nodriver_chrome(), sandbox=False, browser_args=args)
+    reqs: dict = {}
+
+    async def on_req(evt):
+        try:
+            r = evt.request
+            if url_allowed(str(r.url)):
+                reqs[evt.request_id] = (str(r.method).upper(), str(r.url), dict(getattr(r, "headers", {}) or {}), getattr(r, "post_data", None))
+        except Exception:
+            pass
+
+    async def on_resp(evt):
+        try:
+            if evt.type_ not in (RT.XHR, RT.FETCH):
+                return
+            meth, u, hdrs, post = reqs.get(evt.request_id, ("GET", str(evt.response.url), {}, None))
+            if not url_allowed(u):
+                return
+            calls.append(
+                RawNetworkCall(
+                    method=meth,
+                    raw_url=u,
+                    request_headers=hdrs,
+                    status_code=int(evt.response.status),
+                    content_type=str(getattr(evt.response, "mime_type", "") or ""),
+                    request_body=_maybe_json(post),
+                    response_body=None,
+                )
+            )
+        except Exception:
+            pass
+
+    try:
+        tab = await browser.get("about:blank")
+        tab.add_handler(uc.cdp.network.RequestWillBeSent, on_req)
+        tab.add_handler(uc.cdp.network.ResponseReceived, on_resp)
+        await tab.send(uc.cdp.network.enable())
+        await tab.get(url)
+        await asyncio.sleep(_NODRIVER_WAIT_S)
+        # Bounded interaction (same intent as the Scrapling tiers' page_action) to surface action-only XHR.
+        if _interaction_enabled():
+            for _ in range(_INTERACT_SCROLLS):
+                try:
+                    await tab.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                except Exception:
+                    break
+                await asyncio.sleep(1.0)
+            try:
+                await tab.evaluate(
+                    "(function(){var i=document.querySelector(\"input[type=search],input[name*='q'],input[name*='search']\");"
+                    "if(i){i.value='test';if(i.form&&i.form.requestSubmit){i.form.requestSubmit();}"
+                    "else{i.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));}}})()"
+                )
+                await asyncio.sleep(1.2)
+            except Exception:
+                pass
+            # Restore the requested document if a search submit navigated away (keeps DOM + relative-link base
+            # aligned with the URL the bundle records). The traffic fired during interaction is already captured.
+            try:
+                landed = str(await tab.evaluate("location.href"))
+                if _strip_fragment(landed) != _strip_fragment(url):
+                    await tab.get(url)
+                    await asyncio.sleep(1.0)
+            except Exception:
+                pass
+        html = await tab.get_content()
+        final_url = url
+        try:
+            final_url = str(await tab.evaluate("location.href")) or url
+        except Exception:
+            pass
+        return str(html or ""), final_url
+    finally:
+        try:
+            browser.stop()
+        except Exception:
+            pass
+
+
+class Tier4Fetcher:
+    """nodriver + CDP, real Chrome, max stealth + full CDP network capture (XHR/fetch with method/headers/body)."""
+
+    tier = 4
+
+    def fetch(self, url: str) -> Optional[FetchResult]:
+        if not _nodriver_available() or not url_allowed(url):
+            return None
+        calls: list = []
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            html, final_url = loop.run_until_complete(_nodriver_capture(url, calls))
+        except Exception:
+            return None
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                pass
+            asyncio.set_event_loop(None)
+        if not html or not url_allowed(final_url):
+            return None
+        return FetchResult(
+            html=html,
+            status=200,
+            rendered_with_js=True,
+            network=calls,
+            selectors_of_interest=[],
+            title=_title_from_html(html),
         )
 
 

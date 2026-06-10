@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import html as html_lib
 import json
+import os
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -174,6 +175,11 @@ _SEARCH_FIELD_NAMES = {
 _FIELD_SKIP_TYPES = {"hidden", "submit", "button", "image", "reset", "file"}
 _MAX_APP_STATE_CHARS = 1_000_000
 _APP_STATE_IDS = {"__NEXT_DATA__", "__NUXT_DATA__", "__APOLLO_STATE__"}
+_MAX_HTML_CHARS = 200_000
+_MAX_NETWORK_CALLS = 200
+_MAX_SELECTOR_REFS = 200
+_MAX_URL_CHARS = 4_000
+_MAX_CONTENT_TYPE_CHARS = 512
 
 
 def _clean_text(value: str, max_len: int = 240) -> str:
@@ -459,7 +465,14 @@ def dom_hash(html: str) -> str:
 
 
 def assemble_bundle(url: str, legal_mode: LegalMode, tier: int, result: FetchResult) -> CaptureBundle:
-    page = result.page or snapshot_page(result.html, url)
+    html = result.html[:_MAX_HTML_CHARS]
+    page = result.page or snapshot_page(html, url)
+    network = [
+        call
+        for call in dedupe_network_calls(result.network)
+        if len(call.raw_url) <= _MAX_URL_CHARS
+    ][:_MAX_NETWORK_CALLS]
+    selectors = (result.selectors_of_interest or [])[:_MAX_SELECTOR_REFS] or None
     return CaptureBundle(
         bundleId=str(uuid.uuid4()),
         source="scraper",
@@ -468,11 +481,11 @@ def assemble_bundle(url: str, legal_mode: LegalMode, tier: int, result: FetchRes
         legalMode=legal_mode,
         tier=tier,  # type: ignore[arg-type]
         dom=DomSnapshot(
-            html=result.html,
-            domHash=dom_hash(result.html),
-            selectorsOfInterest=result.selectors_of_interest or None,
+            html=html,
+            domHash=dom_hash(html),
+            selectorsOfInterest=selectors,
         ),
-        network=[_to_network_capture(c) for c in dedupe_network_calls(result.network)],
+        network=[_to_network_capture(c) for c in network if len(c.content_type or "") <= _MAX_CONTENT_TYPE_CHARS],
         page=page,
         meta=CaptureMeta(
             title=result.title,
@@ -540,14 +553,21 @@ def looks_like_bot_wall(html: str, title: Optional[str] = None) -> bool:
     return any(m in hay for m in _BOT_MARKERS)
 
 
-def is_sufficient(result: FetchResult) -> bool:
-    """Whether a tier's result ends escalation. Tier 1 is the SSR fast path: it's sufficient only for
-    genuinely static pages. A browser tier (rendered_with_js) or any captured network is always sufficient.
-    A bot-wall (even with content/JS) is NEVER sufficient from a weaker tier - escalate to stealth."""
+def _discovery_default() -> bool:
+    """Discovery mode (default on): force escalation to a browser tier so XHR/fetch traffic is captured into
+    tools, even on SSR pages. SCRAPER_DISCOVERY_MODE=0 keeps the cheap static fast-path."""
+    return os.getenv("SCRAPER_DISCOVERY_MODE", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def is_sufficient(result: FetchResult, discovery: bool = False) -> bool:
+    """Whether a tier's result ends escalation. A browser/network result is sufficient; a bot-wall never is
+    (escalate to stealth). In discovery mode a non-browser result is never sufficient (we want the traffic)."""
     if looks_like_bot_wall(result.html, result.title):
         return False  # try the next, stealthier tier; the controller keeps best-effort if all fail
     if result.network or result.rendered_with_js:
         return True
+    if discovery:
+        return False  # force a browser tier so XHR/fetch traffic is captured into tools
     return not looks_client_rendered(result.html)
 
 
@@ -558,7 +578,9 @@ class EscalationController:
     def __init__(self, tiers: list[Fetcher]):
         self._tiers = tiers
 
-    def capture(self, url: str, legal_mode: LegalMode) -> CaptureBundle:
+    def capture(self, url: str, legal_mode: LegalMode, discovery: Optional[bool] = None) -> CaptureBundle:
+        if discovery is None:
+            discovery = _discovery_default()
         best: Optional[tuple[int, FetchResult]] = None
         for fetcher in self._tiers:
             try:
@@ -567,9 +589,10 @@ class EscalationController:
                 result = None
             if result is None:
                 continue
-            if best is None:
-                best = (fetcher.tier, result)  # keep first usable result as fallback
-            if is_sufficient(result):
+            # Keep the richest result as fallback (in discovery mode, a browser/network result beats a tier-1 shell).
+            if best is None or (discovery and (result.network or result.rendered_with_js) and not (best[1].network or best[1].rendered_with_js)):
+                best = (fetcher.tier, result)
+            if is_sufficient(result, discovery):
                 return assemble_bundle(url, legal_mode, fetcher.tier, result)
         # No tier was "sufficient": return the best we got (e.g. a tier-1 shell when browsers are
         # unavailable) rather than nothing - the generator assesses low confidence. None at all -> empty.

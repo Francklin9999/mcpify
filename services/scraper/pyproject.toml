@@ -5,8 +5,15 @@ description = "Scrapling 3-tier fetcher -> CaptureBundle. See docs/services/scra
 requires-python = ">=3.11"
 dependencies = [
     # [fetchers] pulls curl_cffi (used even by the static tier-1 HTTP client), playwright (tier 2),
-    # and the camoufox machinery (tier 3). After install run: `python -m playwright install chromium`.
+    # and the camoufox machinery (tier 3). After install run BOTH browser fetches:
+    #   python -m playwright install chromium    (tier 2)
+    #   python -m camoufox fetch                 (tier 3 stealth)
     "scrapling[fetchers]==0.4.8",
+    "camoufox[geoip]>=0.4",
+    # tier 4 (max stealth + full CDP network capture, same engine as stealth-browser-mcp). Drives real Chrome
+    # via CDP to defeat anti-bot (Cloudflare/PerimeterX/Queue-It) and capture every XHR/fetch -> tools.
+    # Needs a Chrome/Chromium binary on the host (auto-detected; override with SCRAPER_NODRIVER_CHROME).
+    "nodriver>=0.47",
     "pydantic>=2.0",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",

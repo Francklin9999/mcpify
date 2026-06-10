@@ -141,7 +141,7 @@ class CaptureBundle(BaseModel):
     url: str
     capturedAt: str
     legalMode: LegalMode
-    tier: Optional[Literal[1, 2, 3]] = None
+    tier: Optional[Literal[1, 2, 3, 4]] = None
     dom: DomSnapshot
     network: list[NetworkCapture]
     page: Optional[PageSnapshot] = None

@@ -10,8 +10,11 @@ from typing import Callable, Optional
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
+from .ssrf import url_allowed
+
 # A polite default UA; the real fetcher passes its own.
 USER_AGENT = "mcp-scraper"
+MAX_ROBOTS_BYTES = 512_000
 
 RobotsFetcher = Callable[[str], Optional[str]]
 
@@ -21,8 +24,12 @@ def _default_fetch(robots_url: str) -> Optional[str]:
     import urllib.request
 
     try:
+        if not url_allowed(robots_url):
+            return None
         with urllib.request.urlopen(robots_url, timeout=5) as resp:  # noqa: S310 - http(s) only by construction
-            return resp.read().decode("utf-8", errors="replace")
+            if not url_allowed(resp.geturl()):
+                return None
+            return resp.read(MAX_ROBOTS_BYTES + 1)[:MAX_ROBOTS_BYTES].decode("utf-8", errors="replace")
     except Exception:
         return None
 

@@ -67,9 +67,10 @@ def test_escalation_reaches_tier2_for_a_200_spa_shell():
 
 
 def test_escalation_stops_at_tier1_for_a_static_page():
-    """Counterpart: a genuinely static (no-script) page is sufficient at tier 1 - don't waste a browser."""
+    """Counterpart: with discovery OFF, a genuinely static (no-script) page is sufficient at tier 1 - don't
+    waste a browser. (Discovery mode, the default, intentionally escalates to a browser tier to capture XHR.)"""
     ctrl = EscalationController([Tier1Fetcher(), Tier2Fetcher()])
     with LocalServer() as srv:
-        bundle = ctrl.capture(f"{srv.base}/static", "safe")
+        bundle = ctrl.capture(f"{srv.base}/static", "safe", discovery=False)
     assert bundle.tier == 1
     assert bundle.network == []
