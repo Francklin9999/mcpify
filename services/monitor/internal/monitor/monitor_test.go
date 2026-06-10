@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"mcp/monitor/internal/contracts"
+	"mcp/monitor/internal/detect"
 )
 
 // Fakes
@@ -126,7 +127,7 @@ func TestLargeDriftProducesRegenerateAndSetsRegenerating(t *testing.T) {
 	}
 }
 
-func TestHealthyServerProducesNoJobsAndRaisesConfidence(t *testing.T) {
+func TestSmallDriftEnqueuesDeepenAndRaisesConfidence(t *testing.T) {
 	store := newFakeStore()
 	store.servers = []contracts.ServerRow{srv()}
 	store.lastHash = "sha256:OLD"
@@ -137,7 +138,43 @@ func TestHealthyServerProducesNoJobsAndRaisesConfidence(t *testing.T) {
 		body     string
 		timedOut bool
 	}{
-		"https://src.example.com":  {200, makeBody(105), false}, // tiny change -> small drift, no regen
+		"https://src.example.com":   {200, makeBody(105), false}, // tiny change -> small drift, no regen
+		"https://api.example.com/a": {200, "", false},
+	}}
+	enq := &fakeEnqueuer{}
+	m := New(store, poller, enq)
+	if err := m.CheckServer(context.Background(), srv()); err != nil {
+		t.Fatal(err)
+	}
+	// Small drift = the source changed modestly -> continuous re-discovery: exactly ONE deepen job, no regen.
+	if len(enq.jobs) != 1 {
+		t.Fatalf("small drift should enqueue exactly one deepen job, got %d", len(enq.jobs))
+	}
+	job, ok := enq.jobs[0].(contracts.DeepenJob)
+	if !ok || job.Kind != "deepen" || job.ServerID != "s1" || job.LegalMode != "safe" {
+		t.Fatalf("expected a deepen job for s1 (safe), got %+v", enq.jobs[0])
+	}
+	if store.statusByID["s1"] == "regenerating" {
+		t.Errorf("small drift must NOT mark the server regenerating")
+	}
+	if c := store.confByID["s1"]; c <= 0.8 || c > 1.0 {
+		t.Errorf("confidence should rise within bounds, got %v", c)
+	}
+}
+
+func TestNoDriftAndHealthyToolsEnqueuesNothing(t *testing.T) {
+	store := newFakeStore()
+	store.servers = []contracts.ServerRow{srv()}
+	body := makeBody(120)
+	store.lastHash = detect.DomHash(body) // identical hash => DriftNone
+	store.lastLen = len(body)
+	store.tools = []contracts.HTTPTool{{Name: "get_a", Method: "GET", RawURL: "https://api.example.com/a"}}
+	poller := &fakePoller{resp: map[string]struct {
+		status   int
+		body     string
+		timedOut bool
+	}{
+		"https://src.example.com":   {200, body, false}, // unchanged -> no drift, no discovery
 		"https://api.example.com/a": {200, "", false},
 	}}
 	enq := &fakeEnqueuer{}
@@ -146,10 +183,33 @@ func TestHealthyServerProducesNoJobsAndRaisesConfidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(enq.jobs) != 0 {
-		t.Fatalf("healthy server should enqueue nothing, got %d", len(enq.jobs))
+		t.Fatalf("an unchanged, healthy server should enqueue nothing, got %d", len(enq.jobs))
 	}
 	if c := store.confByID["s1"]; c <= 0.8 || c > 1.0 {
 		t.Errorf("confidence should rise within bounds, got %v", c)
+	}
+}
+
+func TestRediscoverDisabledSuppressesDeepenOnSmallDrift(t *testing.T) {
+	store := newFakeStore()
+	store.servers = []contracts.ServerRow{srv()}
+	store.lastHash = "sha256:OLD"
+	store.lastLen = 100
+	poller := &fakePoller{resp: map[string]struct {
+		status   int
+		body     string
+		timedOut bool
+	}{
+		"https://src.example.com": {200, makeBody(105), false},
+	}}
+	enq := &fakeEnqueuer{}
+	m := New(store, poller, enq)
+	m.Rediscover = false // MONITOR_REDISCOVER=0
+	if err := m.CheckServer(context.Background(), srv()); err != nil {
+		t.Fatal(err)
+	}
+	if len(enq.jobs) != 0 {
+		t.Fatalf("with re-discovery disabled, small drift should enqueue nothing, got %d", len(enq.jobs))
 	}
 }
 

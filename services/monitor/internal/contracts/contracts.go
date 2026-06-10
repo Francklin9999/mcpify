@@ -32,6 +32,24 @@ func NewRegenerateJob(serverID, reason string) RegenerateJob {
 	return RegenerateJob{Kind: "regenerate", ServerID: serverID, Reason: reason}
 }
 
+// DeepenJob - a bounded, runaway-safe pass that re-captures the source (+ its sub-pages, sitemap, and any
+// published API contract) and folds in genuinely-NEW tools, writing a new version only if something new
+// surfaced. Produced by the generator after a successful generate, and by the monitor on modest source drift
+// (continuous re-discovery). Mirrors the frozen @mcp/types DeepenJob; legalMode defaults to "safe".
+type DeepenJob struct {
+	Kind      string `json:"kind"` // always "deepen"
+	ServerID  string `json:"serverId"`
+	URL       string `json:"url"`
+	LegalMode string `json:"legalMode"`
+}
+
+func NewDeepenJob(serverID, url, legalMode string) DeepenJob {
+	if legalMode == "" {
+		legalMode = "safe"
+	}
+	return DeepenJob{Kind: "deepen", ServerID: serverID, URL: url, LegalMode: legalMode}
+}
+
 // ServerRow is the subset of the servers row the monitor reads.
 type ServerRow struct {
 	ServerID       string

@@ -5,6 +5,7 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"mcp/monitor/internal/confidence"
@@ -33,11 +34,15 @@ type Monitor struct {
 	Enqueuer       enqueue.Enqueuer
 	Step           float64 // confidence nudge per health result
 	DriftThreshold float64 // fractional content-length change above which drift is "large"
-	Now            func() time.Time
+	// Rediscover: on MODEST source drift, enqueue a bounded `deepen` pass (continuous re-discovery of new
+	// tools). The deepen worker no-ops when nothing new surfaces, so this is cheap + churn-free. Opt out with
+	// MONITOR_REDISCOVER=0.
+	Rediscover bool
+	Now        func() time.Time
 }
 
 func New(s Store, p Poller, e enqueue.Enqueuer) *Monitor {
-	return &Monitor{Store: s, Poller: p, Enqueuer: e, Step: 0.05, DriftThreshold: 0.3, Now: time.Now}
+	return &Monitor{Store: s, Poller: p, Enqueuer: e, Step: 0.05, DriftThreshold: 0.3, Rediscover: os.Getenv("MONITOR_REDISCOVER") != "0", Now: time.Now}
 }
 
 // CheckAll polls every active server once.
@@ -80,6 +85,14 @@ func (m *Monitor) CheckServer(ctx context.Context, srv contracts.ServerRow) erro
 				return err
 			}
 			return m.Enqueuer.Enqueue(ctx, contracts.NewRegenerateJob(srv.ServerID, "large_drift"))
+		case detect.DriftSmall:
+			// Modest drift -> the source changed but wasn't rewritten: likely NEW content/links/endpoints, not
+			// broken tools. Enqueue a bounded `deepen` (continuous re-discovery) to fold in any genuinely-new
+			// tools, then fall through to the tool-health check. Best-effort: a failed enqueue must not abort
+			// the health pass, and the deepen worker no-ops when nothing new surfaces (no version churn).
+			if m.Rediscover {
+				_ = m.Enqueuer.Enqueue(ctx, contracts.NewDeepenJob(srv.ServerID, srv.URL, "safe"))
+			}
 		}
 	}
 

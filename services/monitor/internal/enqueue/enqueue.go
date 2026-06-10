@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 )
 
 type Enqueuer interface {
@@ -22,7 +23,19 @@ type HTTPEnqueuer struct {
 }
 
 func NewHTTP(url string) *HTTPEnqueuer {
-	return &HTTPEnqueuer{URL: url, Client: &http.Client{}}
+	return &HTTPEnqueuer{URL: url, Client: &http.Client{Timeout: enqueueTimeout()}}
+}
+
+func enqueueTimeout() time.Duration {
+	raw := os.Getenv("ENQUEUE_HTTP_TIMEOUT")
+	if raw == "" {
+		return 10 * time.Second
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 10 * time.Second
+	}
+	return d
 }
 
 func (e *HTTPEnqueuer) Enqueue(ctx context.Context, job any) error {
