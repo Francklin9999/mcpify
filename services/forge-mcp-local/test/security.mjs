@@ -76,6 +76,10 @@ try {
   const res2 = await rpcOnce({ url: "file:///etc/passwd" });
   if (res2.isError && /scheme/i.test(res2.text)) ok("forge_scrape rejects non-http(s) scheme (file://)");
   else bad("forge_scrape rejects file:// scheme", `got isError=${res2.isError} text=${res2.text.slice(0, 120)}`);
+
+  const res3 = await rpcOnce({ url: "http://127.0.0.1:12345/" });
+  if (res3.isError && /private|loopback|non-public|reserved/i.test(res3.text)) ok("forge_scrape rejects loopback/private targets by default");
+  else bad("forge_scrape rejects loopback target", `got isError=${res3.isError} text=${res3.text.slice(0, 160)}`);
 } catch (e) {
   bad("boundary checks", e.message);
 }

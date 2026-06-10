@@ -1,6 +1,6 @@
 {
   "name": "mcp-forge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Self-contained MCP server that turns any website into a runnable MCP server, in-process. Host-as-brain by default (no API key); optional OpenAI/Anthropic/Gemini/Groq/Ollama/... or a custom inference URL.",
   "type": "module",
   "license": "MIT",
@@ -40,10 +40,10 @@
   },
   "scripts": {
     "build": "npm run build --workspace=@mcp/generator && tsc -p tsconfig.json",
-    "bundle": "npm run build && esbuild src/main.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/main.bundle.mjs --external:@modelcontextprotocol/sdk --external:zod --external:openai --external:@anthropic-ai/sdk --external:@google/generative-ai",
+    "bundle": "npm run build && esbuild src/main.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/main.bundle.mjs --external:@modelcontextprotocol/sdk --external:zod --external:openai --external:@anthropic-ai/sdk --external:@google/generative-ai --external:playwright",
     "start": "node dist/src/main.js",
     "prepublishOnly": "npm run bundle",
-    "test": "npm run build && node test/providers.mjs && node test/persistence.mjs && node test/smoke.mjs && node test/emit.mjs && node test/local-e2e.mjs && node test/security.mjs"
+    "test": "npm run build && node test/providers.mjs && node test/scraper-select.mjs && node test/persistence.mjs && node test/smoke.mjs && node test/emit.mjs && node test/local-e2e.mjs && node test/security.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.54.0",
@@ -51,6 +51,9 @@
     "@modelcontextprotocol/sdk": "^1.0.0",
     "openai": "^6.39.1",
     "zod": "^3.25.0"
+  },
+  "optionalDependencies": {
+    "playwright": "^1.54.2"
   },
   "devDependencies": {
     "@mcp/generator": "0.0.0",

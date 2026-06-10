@@ -24,7 +24,9 @@ const tool = {
 
 try {
   const oldHome = process.env.MCP_FORGE_HOME;
+  const oldAllowPrivate = process.env.FORGE_ALLOW_PRIVATE_HOSTS;
   process.env.MCP_FORGE_HOME = HOME;
+  process.env.FORGE_ALLOW_PRIVATE_HOSTS = "1";
   const server = createServer();
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "emit", version: "0" });
@@ -37,6 +39,8 @@ try {
   await server.close();
   if (oldHome === undefined) delete process.env.MCP_FORGE_HOME;
   else process.env.MCP_FORGE_HOME = oldHome;
+  if (oldAllowPrivate === undefined) delete process.env.FORGE_ALLOW_PRIVATE_HOSTS;
+  else process.env.FORGE_ALLOW_PRIVATE_HOSTS = oldAllowPrivate;
 
   const dir = join(HOME, "servers", "example-com-v1");
   const wroteServer = existsSync(join(dir, "src", "server.ts")) || existsSync(join(dir, "server.ts"));

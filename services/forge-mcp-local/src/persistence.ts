@@ -59,11 +59,7 @@ interface RegistryRow {
   createdAt: string;
 }
 
-/**
- * Read registry rows. Distinguishes "absent" (→ []) from "present but unparseable": a corrupt registry.json is
- * RENAMED to registry.json.corrupt-<ts> and a warning is printed, so the next write can't silently destroy the
- * user's prior history by overwriting an unreadable file with a single fresh row.
- */
+/** Read registry rows. A corrupt registry.json is renamed aside (not overwritten) so prior history survives. */
 function readRegistry(): RegistryRow[] {
   const file = registryFile();
   if (!existsSync(file)) return [];
@@ -88,11 +84,7 @@ function readRegistry(): RegistryRow[] {
   }
 }
 
-/**
- * Atomically reserve a unique server directory `<slug>-v<n>` using a non-recursive mkdir as a lock: if the dir
- * already exists (another generation of the same URL), bump the version and retry. This guarantees concurrent
- * generations get distinct dirs instead of silently overwriting each other's files.
- */
+/** Reserve a unique server dir `<slug>-v<n>` via non-recursive mkdir as a lock (bump + retry on collision). */
 function reserveServerDir(url: string): { dir: string; version: number } {
   const base = serversDir();
   mkdirSync(base, { recursive: true });
@@ -132,9 +124,8 @@ function appendRegistryRow(row: RegistryRow): Promise<void> {
 }
 
 /**
- * Filesystem persistence - the standalone replacement for the web product's Postgres + R2 adapters. Same
- * `GeneratePersistence` port the generator core already depends on, so generate() runs UNCHANGED; we just
- * write the artifact's files to ~/.mcp-forge/servers/<slug>-v<n>/ and append a row to registry.json.
+ * Filesystem persistence - the standalone replacement for the web product's Postgres + R2 adapters, behind the
+ * same GeneratePersistence port. Writes the artifact to ~/.mcp-forge/servers/<slug>-v<n>/ + a registry.json row.
  */
 export class FsPersistence implements GeneratePersistence {
   /** serverId -> the reserved dir + version for one generation, shared across nextServer/saveArtifact. */

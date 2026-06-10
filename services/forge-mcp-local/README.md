@@ -114,13 +114,20 @@ tools, `{ "tools": [...] }`, or a JSON string of the same.
 | Var | Default | Meaning |
 |-----|---------|---------|
 | `MCP_FORGE_HOME` | `~/.mcp-forge` | Where generated servers + `registry.json` are written. |
-| `SCRAPER_URL` | *(unset)* | If set, use the full Playwright scraper service (handles JS-rendered SPAs + network capture). Unset → built-in static-fetch capture (great for server-rendered sites; thin for JS-only SPAs). |
+| `FORGE_BROWSER` | *(on)* | In-process stealth browser capture (renders JS + captures XHR/fetch traffic) for dynamic / bot-walled sites. Set `0` to force the cheap static-only fetch. Needs Chromium: `npx playwright install chromium`. |
+| `SCRAPER_DISCOVERY_MODE` | `1` | Escalate to the browser even on server-rendered pages so their API traffic is captured into tools. `0` keeps the static result when it's sufficient. |
+| `SCRAPER_INTERACT` | `1` | During a browser capture, scroll / submit a search / click "load more" to surface action-only XHR. |
+| `MCP_BROWSER_CHANNEL` | *(unset)* | Drive your real installed Chrome (`chrome`) instead of bundled Chromium — stronger stealth. |
+| `MCP_BROWSER_DRIVER` | *(unset)* | Use a stealth-patched Playwright drop-in (`patchright` / `rebrowser-playwright`, install it yourself) for hard bot walls. |
+| `SCRAPER_URL` | *(unset)* | If set, use the remote Python scraper service instead of the in-process browser (its 4-tier stealth incl. Camoufox + nodriver). |
 | `FORGE_MODEL` | per-provider | Override the model for the selected provider. |
 | `FORGE_MAX_TOKENS` | `8192` | Max output tokens for OpenAI-compatible inference. Lower it for small-context local models. |
 | `FORGE_INFERENCE_HEADERS` | *(unset)* | JSON object of extra headers for the `http` inference endpoint (e.g. auth). |
 | `FORGE_FETCH_TIMEOUT_MS` | `20000` | Timeout for the built-in static page fetch. |
 | `FORGE_FETCH_MAX_BYTES` | `5000000` | Max page size the built-in scraper will read (memory guard). |
+| `FORGE_BROWSER_TIMEOUT_MS` | `30000` | Navigation timeout for the in-process browser capture. |
 | `FORGE_INFERENCE_TIMEOUT_MS` | `60000` | Timeout for a custom (`http`) inference endpoint. |
+| `FORGE_INFERENCE_RESPONSE_MAX_BYTES` | `1000000` | Max response body read from a custom (`http`) inference endpoint. |
 
 ## Develop
 
@@ -129,9 +136,24 @@ npm run build   # build @mcp/generator + this package
 npm test        # 4 suites: provider resolution, stdio boot, emit-server e2e, full local pipeline (no key, no network)
 ```
 
+## Dynamic / bot-walled sites
+
+By default the server captures with an **in-process stealth browser** (Playwright): it renders client-side JS
+and captures the page's XHR/fetch traffic, so it builds tools for SPAs and anti-bot-protected sites with **no
+backend**. It needs a Chromium binary once:
+
+```bash
+npx playwright install chromium
+```
+
+Stealth mirrors the generated servers (AutomationControlled off, `navigator.webdriver` stripped). For hard
+walls, set `MCP_BROWSER_CHANNEL=chrome` to drive your real Chrome, or `MCP_BROWSER_DRIVER=patchright`. Set
+`FORGE_BROWSER=0` to skip the browser entirely (static-only). If Chromium isn't installed, the server
+automatically falls back to the static fetch.
+
 ## Limitations (honest)
 
-- The built-in scraper is a single HTTP GET — it does **not** run client-side JavaScript. For JS-only SPAs,
-  point `SCRAPER_URL` at the full Playwright scraper. (An in-process Node-Playwright capture is the planned
-  upgrade so this is zero-config too.)
+- The in-process browser handles most dynamic sites, but the hardest anti-bot walls also score IP reputation:
+  from a datacenter IP some sites still block regardless of stealth. Use `MCP_BROWSER_CHANNEL=chrome` /
+  `MCP_BROWSER_DRIVER=patchright`, or point `SCRAPER_URL` at the full Python scraper (4-tier, Camoufox + nodriver).
 - `forge_generate` quality depends on the model you pick; the keyless heuristic is a floor, not a ceiling.

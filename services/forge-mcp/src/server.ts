@@ -6,9 +6,8 @@ import { homedir, platform } from "node:os";
 import { ForgeClient, ForgeUnreachable, type JobState } from "./client.js";
 
 /**
- * MCP Forge as an MCP server - "an MCP that creates MCPs". A thin layer on top of the existing Forge web API:
- * an agent (Claude, Codex, ...) calls forge_mcp_server(url) and gets back a brand-new MCP server (its tools +
- * a download URL) generated from that site. Read tools browse/inspect the catalog of already-forged servers.
+ * MCP Forge as an MCP server - a thin layer over the Forge web API: an agent calls forge_mcp_server(url) and
+ * gets back a new MCP server (tools + download URL). Read tools browse the catalog of already-forged servers.
  */
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
@@ -38,11 +37,7 @@ function slug(value: string): string {
   return String(value || "mcp-server").replace(/[^a-z0-9.-]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "mcp-server";
 }
 
-/**
- * Resolve an artifact file path under `targetDir`, or null if it escapes. The file list comes from whatever
- * MCP_FORGE_API_BASE points at, so a hostile/buggy Forge could send `../../.bashrc`; we reject absolute paths
- * and anything that resolves outside the target dir. This is the one security-critical line of the feature.
- */
+/** Resolve an artifact file path under targetDir, or null if it escapes (reject absolute / `../` traversal). */
 function containedPath(targetDir: string, relPath: string): string | null {
   if (!relPath || isAbsolute(relPath) || relPath.includes("\0")) return null;
   const resolved = resolve(targetDir, relPath);

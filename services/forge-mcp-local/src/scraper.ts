@@ -1,6 +1,7 @@
 import { randomUUID, createHash } from "node:crypto";
-import { CaptureBundle, type LegalMode } from "@mcp/types";
-import { type Scraper, HttpScraper } from "@mcp/generator/lean";
+import { CaptureBundle, LIMITS, type LegalMode } from "@mcp/types";
+import { assertPublicHttpUrl, readResponseTextWithLimit, type Scraper, HttpScraper } from "@mcp/generator/lean";
+import { NodePlaywrightScraper, playwrightAvailable } from "./playwright-scraper.js";
 
 const UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 mcp-forge";
@@ -15,13 +16,12 @@ function extractTitle(html: string): string | undefined {
 }
 
 /**
- * In-process, dependency-free capture for STATIC / server-rendered pages: one HTTP GET, no browser. Produces a
- * valid CaptureBundle (the keystone contract) the rest of the generator core consumes unchanged. It cannot run
- * client-side JS, so JS-only SPAs yield a thin DOM - for those, set SCRAPER_URL to the full Playwright scraper
- * (a Node Playwright capture is the planned upgrade; see the standalone-MCP product memo).
+ * In-process, dependency-free capture for static / server-rendered pages: one HTTP GET, no browser, producing
+ * a valid CaptureBundle. JS-only SPAs yield a thin DOM - set SCRAPER_URL to the full Playwright scraper for those.
  */
 export class NodeStaticScraper implements Scraper {
   async capture(url: string, legalMode: LegalMode): Promise<CaptureBundle> {
+    await assertPublicHttpUrl(url, { allowEnv: "FORGE_ALLOW_PRIVATE_HOSTS" });
     let res: Response;
     try {
       res = await fetch(url, {
@@ -40,13 +40,9 @@ export class NodeStaticScraper implements Scraper {
           `Use a reachable public URL, or set SCRAPER_URL to a Playwright scraper for JS-rendered / bot-protected sites.`,
       );
     }
+    if (res.url) await assertPublicHttpUrl(res.url, { allowEnv: "FORGE_ALLOW_PRIVATE_HOSTS" });
     // Reject oversized bodies up front (memory bound); also cap what we keep so downstream hashing/regex stay bounded.
-    const declared = Number(res.headers.get("content-length") || 0);
-    if (declared && declared > FETCH_MAX_BYTES) {
-      throw new Error(`fetch ${url} body is ${declared} bytes (> ${FETCH_MAX_BYTES}); raise FORGE_FETCH_MAX_BYTES to allow it.`);
-    }
-    let html = await res.text();
-    if (html.length > FETCH_MAX_BYTES) html = html.slice(0, FETCH_MAX_BYTES);
+    const html = (await readResponseTextWithLimit(res, FETCH_MAX_BYTES)).slice(0, LIMITS.maxHtml);
     // Validate our own construction against the keystone contract (parity with HttpScraper, which validates
     // the Python service's wire response) so any future drift fails loudly here rather than deep in inference.
     return CaptureBundle.parse({
@@ -62,12 +58,58 @@ export class NodeStaticScraper implements Scraper {
   }
 }
 
+// Anti-bot challenge markers; a static 200 carrying one is a wall, not real content -> escalate to the browser.
+const BOT_MARKERS = /are you a human|verify you are human|unusual traffic|captcha|just a moment|checking your browser|enable javascript and cookies|access (?:to this page has been )?denied|attention required/i;
+const NEEDS_JS = /\b(?:enable javascript|you need to enable javascript|requires javascript)\b/i;
+
+function visibleTextLength(html: string): number {
+  return html.replace(/<(script|style|noscript)\b[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length;
+}
+
 /**
- * Use the full Playwright scraper service when SCRAPER_URL is set (handles JS-rendered sites + network capture);
- * otherwise fall back to the zero-dependency in-process static capture so the server works standalone.
+ * Static-first capture that escalates to the in-process stealth browser to render JS and capture XHR/fetch
+ * traffic. Discovery mode (default on) escalates whenever a browser is available, so even SSR pages yield their
+ * API traffic as tools; a static page that is bot-walled or a thin JS shell always escalates. Set FORGE_BROWSER=0
+ * to force the cheap static-only path. Falls back to the static capture if the browser is unavailable or fails.
  */
-export function chooseScraper(): { scraper: Scraper; kind: "http-service" | "static" } {
+class EscalatingScraper implements Scraper {
+  private readonly staticScraper = new NodeStaticScraper();
+  private readonly browser = new NodePlaywrightScraper();
+
+  async capture(url: string, legalMode: LegalMode): Promise<CaptureBundle> {
+    let staticBundle: CaptureBundle | undefined;
+    let staticErr: unknown;
+    try {
+      staticBundle = await this.staticScraper.capture(url, legalMode);
+    } catch (err) {
+      staticErr = err; // a 4xx/timeout/bot-wall - the browser may still get through, so keep going
+    }
+
+    const discovery = process.env["SCRAPER_DISCOVERY_MODE"] !== "0";
+    const html = staticBundle?.dom.html ?? "";
+    const dynamic = !staticBundle || BOT_MARKERS.test(html.slice(0, 60_000)) || NEEDS_JS.test(html) || visibleTextLength(html) < 600 || /<script/i.test(html);
+    const shouldBrowser = discovery || dynamic;
+
+    if (shouldBrowser && (await playwrightAvailable())) {
+      try {
+        return await this.browser.capture(url, legalMode);
+      } catch {
+        /* browser failed; fall back to whatever static produced */
+      }
+    }
+    if (staticBundle) return staticBundle;
+    throw staticErr ?? new Error(`capture ${url} failed`);
+  }
+}
+
+/**
+ * Pick the capture strategy. SCRAPER_URL (remote Python scraper) wins when set. Otherwise the in-process
+ * escalating scraper: static + stealth browser (renders JS, captures traffic) so the standalone handles
+ * dynamic / bot-walled sites with no backend. FORGE_BROWSER=0 forces static-only.
+ */
+export function chooseScraper(): { scraper: Scraper; kind: "http-service" | "browser" | "static" } {
   const svc = process.env["SCRAPER_URL"]?.trim();
   if (svc) return { scraper: new HttpScraper(svc), kind: "http-service" };
-  return { scraper: new NodeStaticScraper(), kind: "static" };
+  if (process.env["FORGE_BROWSER"] === "0") return { scraper: new NodeStaticScraper(), kind: "static" };
+  return { scraper: new EscalatingScraper(), kind: "browser" };
 }

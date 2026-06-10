@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ToolDefinition, GenerateRequest, aggregateConfidence, type LegalMode, type RegistryEntry } from "@mcp/types";
-import { generate, generateServer } from "@mcp/generator/lean";
+import { assertPublicHttpUrl, generate, generateServer, chooseBrowserBackend, discoverApiSpecTools, httpFetchText, verifyAndFilter, httpProbe } from "@mcp/generator/lean";
 import { chooseScraper } from "./scraper.js";
 import { selectInference } from "./select-inference.js";
 import { buildInferencePayload } from "./inference-clients.js";
@@ -29,7 +29,7 @@ function toolSummary(tools: { name?: string; description?: string }[]): string {
  * http(s)-only scheme and rejects line terminators / control chars (which a crafted page could try to smuggle
  * in to break out of the generated server's header comment). Returns the trimmed URL or an error message.
  */
-function validateUrl(raw: unknown): { ok: true; url: string } | { ok: false; msg: string } {
+async function validateUrl(raw: unknown): Promise<{ ok: true; url: string } | { ok: false; msg: string }> {
   const url = String(raw ?? "").trim();
   if (!url) return { ok: false, msg: "url is required (e.g. https://rubygems.org)." };
   for (const ch of url) {
@@ -47,7 +47,30 @@ function validateUrl(raw: unknown): { ok: true; url: string } | { ok: false; msg
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     return { ok: false, msg: `unsupported URL scheme '${parsed.protocol}' - only http and https are allowed.` };
   }
+  try {
+    await assertPublicHttpUrl(url, { allowEnv: "FORGE_ALLOW_PRIVATE_HOSTS" });
+  } catch (err) {
+    return {
+      ok: false,
+      msg:
+        `${err instanceof Error ? err.message : String(err)}. ` +
+        "Set FORGE_ALLOW_PRIVATE_HOSTS=1 only when intentionally generating from an internal host you control.",
+    };
+  }
   return { ok: true, url };
+}
+
+async function validateToolTargets(tools: ToolDefinition[]): Promise<string[]> {
+  const errors: string[] = [];
+  for (const tool of tools) {
+    if (tool.execution.kind !== "http") continue;
+    try {
+      await assertPublicHttpUrl(tool.execution.request.rawUrl, { allowEnv: "FORGE_ALLOW_PRIVATE_HOSTS" });
+    } catch (err) {
+      errors.push(`  ${tool.name}: ${err instanceof Error ? err.message : String(err)} (${tool.execution.request.rawUrl})`);
+    }
+  }
+  return errors;
 }
 
 export function createServer(): McpServer {
@@ -71,7 +94,7 @@ export function createServer(): McpServer {
       },
     },
     async (args) => {
-      const v = validateUrl(args.url);
+      const v = await validateUrl(args.url);
       if (!v.ok) return errorText(v.msg);
       const url = v.url;
       const legalMode = (typeof args.legalMode === "string" ? args.legalMode : "safe") as LegalMode;
@@ -79,12 +102,30 @@ export function createServer(): McpServer {
         const { scraper, kind } = chooseScraper();
         const bundle = await scraper.capture(url, legalMode);
         const analysis = buildInferencePayload(bundle);
+        // Best-effort API-contract probe: if the site PUBLISHES an OpenAPI/Swagger/GraphQL contract, hand the
+        // calling model ready-made, correctly-typed ToolDefinitions it can pass straight to forge_emit_server -
+        // far higher quality than designing them from the DOM. Bounded + never blocks the scrape.
+        let apiTools: unknown[] = [];
+        try {
+          apiTools = await discoverApiSpecTools(url, httpFetchText({ timeoutMs: 4_000 }), { maxProbes: 8 });
+        } catch {
+          /* best-effort: a probe failure must not fail the scrape */
+        }
+        const apiSection = apiTools.length
+          ? [
+              ``,
+              `DISCOVERED API-CONTRACT TOOLS (${apiTools.length}) - this site publishes a machine-readable contract.`,
+              `You can pass these STRAIGHT to forge_emit_server({ url, tools: [...] }), optionally adding more:`,
+              JSON.stringify(apiTools),
+            ]
+          : [];
         return text(
           [
             `Scraped ${url} (scraper: ${kind}).`,
             ``,
             `PAGE ANALYSIS (use this to design tools):`,
             JSON.stringify(analysis),
+            ...apiSection,
             ``,
             `NEXT: design MCP tools from the above, then call forge_emit_server({ url, tools: [...] }).`,
             `Each tool must match this shape (see ToolDefinition):`,
@@ -113,7 +154,7 @@ export function createServer(): McpServer {
       },
     },
     async (args) => {
-      const v = validateUrl(args.url);
+      const v = await validateUrl(args.url);
       if (!v.ok) return errorText(v.msg);
       const url = v.url;
       const rawTools = Array.isArray(args.tools) ? args.tools : [];
@@ -129,13 +170,49 @@ export function createServer(): McpServer {
       if (!valid.length) {
         return errorText(`No valid tools. Fix these and retry:\n${errors.join("\n") || "  (all tools failed validation)"}`);
       }
+      const targetErrors = await validateToolTargets(valid);
+      if (targetErrors.length) {
+        return errorText(
+          "Refusing to emit a server with private, loopback, reserved, or non-public HTTP tool targets:\n" +
+            targetErrors.join("\n") +
+            "\nSet FORGE_ALLOW_PRIVATE_HOSTS=1 only when intentionally generating from internal hosts you control.",
+        );
+      }
 
       try {
         const title = (typeof args.title === "string" && args.title.trim()) || url;
+
+        // LIVE VERIFICATION (default on; FORGE_VERIFY=0 to skip): execute each idempotent GET tool against the
+        // real site and drop ones returning 404/network-error/empty body, so a wrong URL template is never
+        // shipped as working. Writes, browser, placeholder, and bot-blocked tools are kept. FORGE_VERIFY=0 skips.
+        let toolsToEmit = valid;
+        let verifyNote = "";
+        if (process.env.FORGE_VERIFY !== "0") {
+          try {
+            const { tools: kept, dropped, report } = await verifyAndFilter(valid, httpProbe());
+            if (kept.length > 0) toolsToEmit = kept; // fail open: never let verification empty the server
+            verifyNote =
+              `Live check: ${report.verified} verified, ${report.dead} dead, ${report.blocked} blocked, ${report.notVerifiable} not-verifiable.` +
+              (dropped.length && kept.length > 0
+                ? `\nDropped ${dropped.length} dead tool(s): ` + dropped.map((d) => `${d.name} (${d.reason ?? d.status})`).join(", ")
+                : dropped.length && kept.length === 0
+                  ? `\n(All tools failed the live check; kept for inspection - set FORGE_VERIFY=0 to skip.)`
+                  : "");
+          } catch {
+            /* verification is best-effort; never block emitting */
+          }
+        }
+
         const persistence = new FsPersistence();
         const { serverId, version } = await persistence.nextServer(url);
-        const browsing = valid.some((t) => t.execution.kind === "browser");
-        const artifact = generateServer({ serverId, version, url, title, tools: valid, browsing });
+        const browsing = toolsToEmit.some((t) => t.execution.kind === "browser");
+        // "Use opencli when the old logic can't": in this agent-driven emit path the calling model designed the
+        // tools (no capture bundle to scan), so a browser-only server with NO HTTP tools to fall back on is the
+        // explicit "this needs a real browser" intent (e.g. Skyscanner) -> treat like a SPA shell and bake the
+        // opencli backend. It degrades to Playwright when the bridge is down; MCP_BROWSER_BACKEND overrides.
+        const httpCount = toolsToEmit.filter((t) => t.execution.kind === "http").length;
+        const dynamicBackend = chooseBrowserBackend({ spaShell: browsing && httpCount === 0, networkApiCount: httpCount });
+        const artifact = generateServer({ serverId, version, url, title, tools: toolsToEmit, browsing, dynamicBackend });
         const dir = await persistence.saveArtifact(artifact);
         const written = artifact.files.length;
         const entry: RegistryEntry = {
@@ -143,26 +220,27 @@ export function createServer(): McpServer {
           url,
           title,
           tier: "auto_gen",
-          confidence: aggregateConfidence(valid.map((t) => t.confidence)),
+          confidence: aggregateConfidence(toolsToEmit.map((t) => t.confidence)),
           installCount: 0,
           lastParsedAt: new Date().toISOString(),
           status: "active",
           currentVersion: version,
         };
-        await persistence.writeRegistry(entry, valid, dir);
+        await persistence.writeRegistry(entry, toolsToEmit, dir);
         const hasSh = artifact.files.some((f) => f.path === "install.sh");
         return text(
           [
-            `Built MCP server "${title}" with ${valid.length} tool(s)${errors.length ? ` (${errors.length} invalid skipped)` : ""}.`,
+            `Built MCP server "${title}" with ${toolsToEmit.length} tool(s)${errors.length ? ` (${errors.length} invalid skipped)` : ""}.`,
+            verifyNote,
             `Wrote ${written} file(s) to:`,
             `  ${dir}`,
             ``,
-            toolSummary(valid),
+            toolSummary(toolsToEmit),
             ``,
             `Install it into your MCP clients:`,
             `  ${installHint(dir, hasSh)}`,
             errors.length ? `\nSkipped invalid tools:\n${errors.join("\n")}` : ``,
-          ].join("\n"),
+          ].filter(Boolean).join("\n"),
         );
       } catch (err) {
         return errorText(`forge_emit_server failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -186,7 +264,7 @@ export function createServer(): McpServer {
       },
     },
     async (args) => {
-      const v = validateUrl(args.url);
+      const v = await validateUrl(args.url);
       if (!v.ok) return errorText(v.msg);
       const legalMode = (typeof args.legalMode === "string" ? args.legalMode : "safe") as LegalMode;
       // Validate (don't cast) the request against the contract - this is the only gate on legalMode's
@@ -202,7 +280,31 @@ export function createServer(): McpServer {
       try {
         const { scraper } = chooseScraper();
         const persistence = new FsPersistence();
-        const outcome = await generate(reqParsed.data, { scraper, inference: inference.client, persistence });
+        // Sub-page + API-contract discovery (sitemap/OpenAPI/GraphQL) AND live verification, threaded into the
+        // one-shot path so it matches the agent path: more tools, and dead ones execution-checked out before
+        // the server is presented as working. FORGE_VERIFY=0 / FORGE_DISCOVERY=0 opt out.
+        const discoverSubPages =
+          process.env.FORGE_DISCOVERY === "0"
+            ? undefined
+            : async (pageUrl: string) => {
+                try {
+                  return await discoverApiSpecTools(pageUrl, httpFetchText({ timeoutMs: 4_000 }), { maxProbes: 8 });
+                } catch {
+                  return [];
+                }
+              };
+        const verifyTools =
+          process.env.FORGE_VERIFY === "0"
+            ? undefined
+            : async (tools: ToolDefinition[], _pageUrl: string): Promise<ToolDefinition[]> => {
+                try {
+                  const { tools: kept } = await verifyAndFilter(tools, httpProbe());
+                  return kept.length > 0 ? kept : tools; // fail open: never empty the server on a verify glitch
+                } catch {
+                  return tools;
+                }
+              };
+        const outcome = await generate(reqParsed.data, { scraper, inference: inference.client, persistence, discoverSubPages, verifyTools });
         const dir = persistence.dirFor(outcome.serverId) ?? "(unknown)";
         const tools = Array.isArray(outcome.artifact.tools) ? outcome.artifact.tools : [];
         const hasSh = outcome.artifact.files.some((f) => f.path === "install.sh");

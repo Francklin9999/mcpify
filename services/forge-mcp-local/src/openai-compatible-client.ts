@@ -4,16 +4,13 @@ import { type InferenceClient, TOOL_SYSTEM_PROMPT } from "@mcp/generator/lean";
 import { buildInferencePayload } from "./inference-clients.js";
 
 /**
- * ONE client for EVERY OpenAI-compatible endpoint (OpenAI, Groq, Together, OpenRouter, DeepSeek, Mistral,
- * Fireworks, xAI, Ollama, LM Studio, vLLM, ... - see providers.ts). The only difference between providers is
- * (baseURL, apiKey, model); the request shape is identical, which is exactly why this single adapter replaces
- * a pile of per-provider clients. Mirrors the generator's proven OpenAI invocation (same system prompt + page
- * payload) but uses the broadly-portable `max_tokens` and degrades gracefully when a provider rejects
- * `response_format` - so it works across the widest set of endpoints.
+ * One client for every OpenAI-compatible endpoint (see providers.ts): the only difference is (baseURL, apiKey,
+ * model). Uses the portable `max_tokens` and degrades gracefully when a provider rejects `response_format`.
  */
 // Output token cap. 16000 is fine for hosted models but can exceed a LOCAL model's whole context window
 // (Ollama/LM Studio are often 8k), so default conservatively and let power users raise it via FORGE_MAX_TOKENS.
 const MAX_TOKENS = Number(process.env["FORGE_MAX_TOKENS"]) || 8192;
+const INFERENCE_TIMEOUT_MS = Number(process.env["FORGE_INFERENCE_TIMEOUT_MS"]) || 60_000;
 
 export class OpenAICompatibleInferenceClient implements InferenceClient {
   private readonly client: OpenAI;
@@ -36,16 +33,16 @@ export class OpenAICompatibleInferenceClient implements InferenceClient {
     // The first time that happens we retry without it AND remember it, so we don't re-pay the reject round
     // trip on every later call (TOOL_SYSTEM_PROMPT already instructs the model to emit JSON).
     if (this.jsonModeUnsupported) {
-      const res = await this.client.chat.completions.create(base);
+      const res = await this.client.chat.completions.create(base, { timeout: INFERENCE_TIMEOUT_MS });
       return res.choices[0]?.message?.content ?? "[]";
     }
     try {
-      const res = await this.client.chat.completions.create({ ...base, response_format: { type: "json_object" } });
+      const res = await this.client.chat.completions.create({ ...base, response_format: { type: "json_object" } }, { timeout: INFERENCE_TIMEOUT_MS });
       return res.choices[0]?.message?.content ?? "[]";
     } catch (err) {
       if (!isJsonModeRejection(err)) throw err;
       this.jsonModeUnsupported = true;
-      const res = await this.client.chat.completions.create(base);
+      const res = await this.client.chat.completions.create(base, { timeout: INFERENCE_TIMEOUT_MS });
       return res.choices[0]?.message?.content ?? "[]";
     }
   }

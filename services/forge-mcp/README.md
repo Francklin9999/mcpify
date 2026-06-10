@@ -26,6 +26,7 @@ probably isn't running.
 
 - `MCP_FORGE_API_BASE` — the Forge web API base. Default `http://localhost:3001`. Point it at your deployed
   Forge to forge servers against the hosted instance.
+- `MCP_FORGE_TIMEOUT_MS` — per-request timeout for calls to that Forge API. Default `20000`.
 
 The target Forge must be fully up (web API + generator worker + Redis + Postgres + scraper) for
 `forge_mcp_server` to complete; the read tools (`search_mcp_catalog`, `get_mcp_server`) only need the web API.

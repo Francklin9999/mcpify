@@ -1,9 +1,6 @@
 /**
- * Thin HTTP client over the existing MCP Forge web API (the "layer on top"): the meta-MCP server calls these
- * rather than re-implementing the generate pipeline (which needs Postgres + Redis + scraper + worker). All
- * methods are fail-soft and distinguish the two realistic localhost failures the agent must hear about:
- *   - the Forge API is unreachable (wrong MCP_FORGE_API_BASE / Forge not running)  -> ForgeUnreachable
- *   - a job never leaves "queued" because no generator worker is consuming the queue -> surfaced by the caller
+ * Thin HTTP client over the MCP Forge web API. Fail-soft; surfaces an unreachable API as ForgeUnreachable so
+ * the agent can distinguish "Forge not running" from a job stuck in "queued" (no worker consuming).
  */
 
 export type FetchLike = (url: string, init?: any) => Promise<{
@@ -54,7 +51,7 @@ export class ForgeClient {
     const url = this.base + path;
     let res;
     try {
-      res = await this.fetchImpl(url, init);
+      res = await this.fetchImpl(url, { ...(init ?? {}), signal: AbortSignal.timeout(this.timeoutMs) });
     } catch (err) {
       // Network-level failure (DNS, refused connection, timeout) = the Forge isn't reachable.
       throw new ForgeUnreachable(this.base, err);
@@ -112,11 +109,7 @@ export class ForgeClient {
     return `${this.base}/api/servers/${encodeURIComponent(serverId)}/download/${version}`;
   }
 
-  /**
-   * Fetch the runnable artifact (the same JSON the download URL serves) so it can be materialized locally.
-   * Validates it actually carries files - the download route can redirect to a remote store (e.g. R2) instead
-   * of returning inline files, in which case we fail clearly rather than writing an empty directory.
-   */
+  /** Fetch the runnable artifact (the download URL's JSON) to materialize locally; fails clearly if it carries no files. */
   async fetchArtifact(serverId: string, version: number): Promise<{ serverId: string; version: number; files: { path: string; content: string }[]; entrypoint?: string }> {
     const { ok, status, body } = await this.call(`/api/servers/${encodeURIComponent(serverId)}/download/${version}`);
     if (!ok) throw new Error(`download failed (HTTP ${status}): ${describeError(body)}`);

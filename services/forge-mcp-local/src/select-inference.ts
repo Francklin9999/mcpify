@@ -9,23 +9,15 @@ import { HttpInferenceClient } from "./inference-clients.js";
 import { resolveProvider } from "./providers.js";
 
 /**
- * Which brain does the server-side `forge_generate` tool use? ONE knob: FORGE_INFERENCE.
- *
- * Accepts a provider name OR the LiteLLM-style `provider/model` form (e.g. `groq/llama-3.3-70b-versatile`):
- *
- *   host (default)   - NO server-side brain. Use forge_scrape + forge_emit_server and let the CALLING model
- *                      (Claude Code / Codex / ...) infer the tools - zero key, exactly like other MCP servers.
- *                      forge_generate still works via the keyless heuristic fallback.
- *   heuristic        - keyless rule-based inference (no LLM, no key, no network).
- *   openai|groq|together|openrouter|deepseek|mistral|fireworks|xai
- *                    - hosted OpenAI-compatible providers (need that provider's conventional API key env).
- *   ollama|lmstudio|vllm
- *                    - LOCAL OpenAI-compatible servers (no key; just run the server).
- *   openai-compatible - ANY other OpenAI-compatible endpoint via FORGE_OPENAI_BASE_URL (+ FORGE_API_KEY).
- *   claude|gemini    - native Anthropic / Google clients (ANTHROPIC_API_KEY / GEMINI_API_KEY).
- *   http             - your own endpoint (FORGE_INFERENCE_URL) - bring your own logic.
- *
- * Anything requested but missing its key falls back to the keyless heuristic (never crashes).
+ * Server-side brain for forge_generate, selected by FORGE_INFERENCE (a provider name or `provider/model`):
+ *   host (default)    - no server brain; the calling model infers the tools (heuristic fallback for forge_generate)
+ *   heuristic         - keyless rule-based inference
+ *   openai|groq|together|openrouter|deepseek|mistral|fireworks|xai - hosted OpenAI-compatible providers
+ *   ollama|lmstudio|vllm - local OpenAI-compatible servers (no key)
+ *   openai-compatible - any other endpoint via FORGE_OPENAI_BASE_URL
+ *   claude|gemini     - native Anthropic / Google clients
+ *   http              - your own endpoint (FORGE_INFERENCE_URL)
+ * Anything missing its key falls back to the keyless heuristic.
  */
 export interface SelectedInference {
   mode: string;

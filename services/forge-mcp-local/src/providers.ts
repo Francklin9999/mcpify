@@ -1,19 +1,9 @@
 /**
- * Provider registry - the canonical multi-provider abstraction (LiteLLM / OpenRouter / Bifrost pattern).
- *
- * The key realization (verified against the 2026 gateway ecosystem): almost every LLM endpoint - OpenAI,
- * Groq, Together, OpenRouter, DeepSeek, Mistral, Fireworks, xAI, AND every local server (Ollama, LM Studio,
- * vLLM) - speaks the SAME OpenAI `/v1/chat/completions` schema. So we DON'T ship a bespoke client per
- * provider. We ship ONE OpenAI-compatible client (openai-compatible-client.ts) and a registry of base URLs.
- * Adding a provider is a data entry here, not new code. Anything not listed still works via the
- * `openai-compatible` escape hatch (FORGE_OPENAI_BASE_URL) - so the abstraction never blocks a new provider.
- *
- * Native (non-OpenAI-schema) providers - Anthropic, Gemini - are handled separately in select-inference.ts
- * by reusing the generator's existing native clients (both also expose OpenAI-compat endpoints, but the
- * native clients are already built and tested, so we keep them).
- *
- * Keys use each provider's CONVENTIONAL env var (OPENAI_API_KEY, GROQ_API_KEY, ...) so a user's existing
- * environment Just Works - we don't invent FORGE_-prefixed key names.
+ * Provider registry. Most LLM endpoints (OpenAI, Groq, Together, OpenRouter, DeepSeek, ..., and local Ollama/
+ * LM Studio/vLLM) speak the same OpenAI /v1/chat/completions schema, so we ship one OpenAI-compatible client
+ * + this table of base URLs. Adding a provider is a data entry; anything unlisted works via the
+ * openai-compatible escape hatch (FORGE_OPENAI_BASE_URL). Native providers (Anthropic, Gemini) live in
+ * select-inference.ts. Keys use each provider's conventional env var.
  */
 
 export interface ProviderSpec {
@@ -58,11 +48,8 @@ export interface ResolvedProvider {
 }
 
 /**
- * Resolve an OpenAI-compatible provider name (+ optional pinned model) into a ready-to-use config.
- * `model` precedence: pinned arg (the `provider/model` form) > FORGE_MODEL > the provider's conventional
- * `modelEnv` (e.g. OLLAMA_MODEL) > the provider's default.
- * `baseURL` precedence: the provider's `baseUrlEnv` (e.g. OLLAMA_URL) > the provider's default.
- * Returns null when a hosted provider is selected but its key env is missing (so the caller can fall back).
+ * Resolve a provider name (+ optional pinned model) into a config. model: pinned > FORGE_MODEL > modelEnv >
+ * default. baseURL: baseUrlEnv > default. Returns null when a hosted provider's key env is missing.
  */
 export function resolveProvider(name: string, pinnedModel?: string): ResolvedProvider | null {
   // Escape hatch: any OpenAI-compatible endpoint not in the table.
