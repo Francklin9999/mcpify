@@ -56,10 +56,7 @@ export const PageSnapshot = z.object({
 });
 export type PageSnapshot = z.infer<typeof PageSnapshot>;
 
-/**
- * One observed XHR/fetch call. The highest-signal generation input. `requestHeaders` MUST already be
- * scrubbed (`04`); body/response are inferred SCHEMAS, never raw values.
- */
+/** One observed XHR/fetch call - the highest-signal generation input. requestHeaders must already be scrubbed. */
 export const NetworkCapture = z
   .object({
     method: z.string().max(16),
@@ -71,8 +68,7 @@ export const NetworkCapture = z
     statusCode: z.number().int(),
     contentType: z.string(),
   })
-  // FAIL-CLOSED legal backstop (`04`): the contract REJECTS any un-scrubbed secret-list header. Producers
-  // must call `scrubHeaders` before constructing this - if they forget, parse() throws instead of leaking.
+  // Fail-closed: the contract rejects any un-scrubbed secret-list header (producers must scrubHeaders first).
   .superRefine((cap, ctx) => {
     if (Object.keys(cap.requestHeaders).length > LIMITS.maxHeaders) {
       ctx.addIssue({
@@ -93,17 +89,14 @@ export const NetworkCapture = z
   });
 export type NetworkCapture = z.infer<typeof NetworkCapture>;
 
-/**
- * CaptureBundle - THE keystone shape (`01 S1`). Produced by BOTH the scraper (`source:'scraper'`) and the
- * extension net-intercept (`source:'extension'`); the generator must not distinguish between them.
- */
+/** CaptureBundle - the keystone shape, produced by both the scraper and the extension net-intercept. */
 export const CaptureBundle = z.object({
   bundleId: z.string().uuid(),
   source: z.enum(["scraper", "extension"]),
   url: z.string().url(),
   capturedAt: IsoDateTime,
   legalMode: LegalMode,
-  tier: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+  tier: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(),
   dom: z.object({
     html: z.string().max(LIMITS.maxHtml),
     domHash: z.string().max(128),

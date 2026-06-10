@@ -4,8 +4,7 @@ import { LegalMode } from "./legal.js";
 import { CaptureBundle } from "./capture.js";
 import { ToolDefinition } from "./tools.js";
 
-/** Redis/BullMQ queue name. Go (monitor) produces; Node (generator) consumes (`01 S4`).
- *  No `:` - BullMQ reserves it for Redis key namespacing (`bull:mcp-jobs:*`) and rejects it in the name. */
+/** BullMQ queue name (no `:` - BullMQ reserves it for Redis key namespacing). */
 export const QUEUE_NAME = "mcp-jobs";
 
 export const ToolFailure = z.object({
@@ -45,30 +44,21 @@ export const SelfHealJob = z.object({
 export type SelfHealJob = z.infer<typeof SelfHealJob>;
 
 /**
- * `discover` is produced by the WEB/EXTENSION (like `generate`, never the monitor): a new capture of an
- * EXISTING server's page after a reactive page revealed new structure. The worker runs INCREMENTAL discovery
- * - merges only genuinely-new tools and bumps the version, or no-ops when nothing is new (`incremental.ts`).
- * Additive extension of the frozen `01 S4` union; the Go monitor still only produces `regenerate`/`self_heal`.
+ * `discover` is produced by web/extension: a new capture of an existing server's page. The worker runs
+ * incremental discovery, merging only genuinely-new tools and bumping the version (or no-ops when nothing is new).
  */
 export const DiscoverJob = z.object({
   kind: z.literal("discover"),
   serverId: z.string().uuid(),
   bundle: CaptureBundle,
-  /**
-   * Pre-computed new tools from a SYNCHRONOUS /api/discover pass. When present the worker MERGES them
-   * model-free (no second inference for the same material - the route already paid for it) and writes the
-   * version. Absent (e.g. a plain /contribute) => the worker runs incremental discovery itself.
-   */
+  /** Pre-computed tools from a synchronous /api/discover pass; when present the worker merges them model-free. */
   candidates: z.array(ToolDefinition).optional(),
 });
 export type DiscoverJob = z.infer<typeof DiscoverJob>;
 
 /**
- * `deepen` is produced by the GENERATOR itself, once, right after a successful `generate`: it captures a few
- * of the site's sub-pages (from its sitemap) and runs INCREMENTAL discovery over them to maximize the tools
- * a single link yields. It writes exactly ONE merged version (the handler accumulates sequentially, never
- * fanned out). Runaway-safe: a `deepen` job NEVER enqueues another job. Additive extension of the frozen
- * `01 S4` union; the Go monitor still only produces `regenerate`/`self_heal`.
+ * `deepen` is produced by the generator after a successful generate (and by the monitor on small drift): it
+ * captures a few sub-pages and runs incremental discovery, writing one merged version. Never enqueues another job.
  */
 export const DeepenJob = z.object({
   kind: z.literal("deepen"),

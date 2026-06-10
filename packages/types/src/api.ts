@@ -5,10 +5,7 @@ import { CaptureBundle } from "./capture.js";
 import { GeneratedServerArtifact } from "./artifact.js";
 import { ToolDefinition } from "./tools.js";
 
-/**
- * POST /api/generate (`01 S7`). `full_scrape` is UNREACHABLE without explicit acknowledgement (`04`).
- * The web app gates this behind a confirm dialog; the schema enforces the invariant server-side too.
- */
+/** POST /api/generate. full_scrape is unreachable without explicit acknowledgement (enforced server-side here). */
 export const GenerateRequest = z
   .object({
     url: z.string().url(),
@@ -56,12 +53,7 @@ export const AssistMessage = z.object({
 });
 export type AssistMessage = z.infer<typeof AssistMessage>;
 
-/**
- * A browsing tool the side-panel agent can ask the model to call (OpenAI function-calling shape). These are
- * the LIVE-TAB primitives (browser_navigate/click/type/snapshot/...), NOT a generated-server ExecutionStrategy
- * - the side panel executes them against the user's current tab. `availableTools` (above) stays the read-only
- * list of a generated server's tools; `tools` (below) is the actionable set for the agent loop.
- */
+/** A live-tab browsing tool the side-panel agent can call (OpenAI function-calling shape). */
 export const AssistToolSpec = z.object({
   name: z.string().max(64).regex(/^[a-z][a-z0-9_]*$/),
   description: z.string().min(1).max(1_000),
@@ -77,10 +69,7 @@ export const AssistToolCall = z.object({
 });
 export type AssistToolCall = z.infer<typeof AssistToolCall>;
 
-/**
- * One step of the agent loop: the model's next move. `toolCalls` empty/absent => the turn is done and `text`
- * is the final answer. Returned by POST /api/assist when the request carries `tools` (JSON, not streamed).
- */
+/** One step of the agent loop. Empty toolCalls => the turn is done and `text` is the final answer. */
 export const AssistStepResponse = z.object({
   text: z.string().optional(),
   toolCalls: z.array(AssistToolCall).optional(),
@@ -97,21 +86,12 @@ export const AssistRequest = z.object({
     })
     .optional(),
   availableTools: z.array(ToolDefinition).max(LIMITS.maxTools).optional(),
-  /**
-   * Actionable live-tab tools for the side-panel agent loop. When present, /api/assist runs ONE function-
-   * calling step and returns an AssistStepResponse (JSON) instead of a streamed text turn. Additive: absent
-   * => the legacy streamed-chat behavior is unchanged.
-   */
+  /** Live-tab tools for the agent loop. When present, /api/assist runs one function-calling step (JSON, not streamed). */
   tools: z.array(AssistToolSpec).max(64).optional(),
 });
 export type AssistRequest = z.infer<typeof AssistRequest>;
 
-/**
- * POST /api/discover - SYNCHRONOUS incremental discovery for the side panel. Given the tools already known
- * for the page and a fresh capture, return the genuinely-new tools (for live in-session use) + the merged
- * set. If `serverId` is present, the registry server is ALSO grown (a discover job is enqueued). The model is
- * sent only the delta (token-efficient); when nothing is new, `added` is empty and no model call happens.
- */
+/** POST /api/discover - synchronous incremental discovery: returns genuinely-new tools + the merged set. */
 export const DiscoverRequest = z.object({
   currentTools: z.array(ToolDefinition).max(LIMITS.maxTools),
   bundle: CaptureBundle,
