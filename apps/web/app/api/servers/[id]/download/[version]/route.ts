@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { GeneratedServerArtifact } from "@mcp/types";
-import { artifactFromFileUrl } from "@/lib/artifacts";
+import { ArtifactLimitError, artifactFromFileUrl } from "@/lib/artifacts";
 import { findCatalogArtifact } from "@/lib/catalog-store";
 import { getServerVersion } from "@/lib/registry";
 import { buildZip } from "@/lib/zip";
@@ -61,7 +61,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     return NextResponse.json({ error: "version not found" }, { status: 404 });
   }
 
-  const localArtifact = await artifactFromFileUrl(version.artifactUrl, version.serverId, version.version);
+  let localArtifact;
+  try {
+    localArtifact = await artifactFromFileUrl(version.artifactUrl, version.serverId, version.version);
+  } catch (err) {
+    if (err instanceof ArtifactLimitError) return NextResponse.json({ error: err.message }, { status: 413 });
+    throw err;
+  }
   if (localArtifact) return wantsZip ? zipResponse(localArtifact, version.serverId) : NextResponse.json(localArtifact);
 
   return NextResponse.redirect(version.artifactUrl);

@@ -10,11 +10,8 @@ function fileName(value: string): string {
 }
 
 /**
- * GET /api/atlas/download?domain=example.com
- * GET /api/atlas/download?serverId=uuid
- *
- * Returns the generated MCP server artifact stored in the Postgres catalog. The artifact includes runnable files,
- * the entrypoint, Claude Code config snippet, and structured tools for direct client integration.
+ * GET /api/atlas/download?domain=example.com | ?serverId=uuid
+ * Returns the generated MCP server artifact from the Postgres catalog (files, entrypoint, config snippet, tools).
  */
 export async function GET(req: Request): Promise<Response> {
   const { searchParams } = new URL(req.url);

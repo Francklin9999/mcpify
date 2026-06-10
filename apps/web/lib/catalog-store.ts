@@ -4,9 +4,8 @@ import { db } from "@/lib/db";
 import { bodyToColumns, type AtlasDoc } from "@/lib/atlas-catalog";
 
 /**
- * Postgres-backed catalog store - the browsable directory of pre-generated MCP servers (formerly MongoDB
- * Atlas). Rows are shaped into the legacy `AtlasDoc` form so the pure adapters in atlas-catalog.ts stay
- * unchanged. The heavy `artifact` blob is selected ONLY on the download path; listings/detail never load it.
+ * Postgres-backed catalog store - the browsable directory of pre-generated MCP servers. Rows are shaped into
+ * the AtlasDoc form for atlas-catalog.ts. The heavy `artifact` blob is loaded only on the download path.
  */
 
 /** True when a Postgres connection string is configured (mirrors the old "Mongo configured" gate). */

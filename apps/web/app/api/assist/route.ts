@@ -10,6 +10,28 @@ export const runtime = "nodejs";
 
 const encoder = new TextEncoder();
 
+function envInt(key: string, fallback: number, min = 1): number {
+  const value = process.env[key]?.trim();
+  if (!value) return fallback;
+  const raw = Number(value);
+  if (!Number.isFinite(raw)) return fallback;
+  return Math.max(min, Math.floor(raw));
+}
+
+const ASSIST_REQUEST_TIMEOUT_MS = envInt("ASSIST_REQUEST_TIMEOUT_MS", envInt("LLM_REQUEST_TIMEOUT_MS", 120_000, 1_000), 1_000);
+
+async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timer = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(`${label} timed out after ${ASSIST_REQUEST_TIMEOUT_MS}ms`)), ASSIST_REQUEST_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([promise, timer]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 // Provider selection
 
 type Provider = "openai" | "claude" | "gemini";
@@ -129,7 +151,7 @@ async function streamOpenAI(req: AssistRequest, apiKey: string): Promise<Respons
               { role: "system", content: assistantSystemPrompt(req) },
               ...req.messages.map((m) => ({ role: m.role, content: m.content })),
             ],
-          });
+          }, { timeout: ASSIST_REQUEST_TIMEOUT_MS });
           for await (const chunk of stream) {
             const delta = chunk.choices[0]?.delta?.content;
             if (delta) controller.enqueue(encoder.encode(delta));
@@ -171,7 +193,7 @@ async function agentStepOpenAI(req: AssistRequest, apiKey: string): Promise<Resp
         { role: "system", content: agentSystemPrompt(req) },
         ...req.messages.map((m) => ({ role: m.role, content: m.content })),
       ],
-    });
+    }, { timeout: ASSIST_REQUEST_TIMEOUT_MS });
     const message = completion.choices[0]?.message ?? {};
     const step: AssistStepResponse = {
       text: typeof message.content === "string" && message.content.trim() ? message.content : undefined,
@@ -197,7 +219,7 @@ async function streamClaude(req: AssistRequest, apiKey: string): Promise<Respons
             stream: true,
             system: assistantSystemPrompt(req),
             messages: req.messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
-          });
+          }, { timeout: ASSIST_REQUEST_TIMEOUT_MS });
           for await (const event of stream) {
             if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
               controller.enqueue(encoder.encode(event.delta.text));
@@ -224,7 +246,7 @@ async function agentStepClaude(req: AssistRequest, apiKey: string): Promise<Resp
         input_schema: (t.parameters ?? { type: "object", properties: {} }) as Anthropic.Messages.Tool["input_schema"],
       })),
       messages: req.messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
-    });
+    }, { timeout: ASSIST_REQUEST_TIMEOUT_MS });
     const text = response.content
       .filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
       .map((b) => b.text).join("") || undefined;
@@ -249,10 +271,13 @@ async function streamGemini(req: AssistRequest, apiKey: string): Promise<Respons
     new ReadableStream({
       async start(controller) {
         try {
-          const result = await model.generateContentStream({
-            contents: req.messages
-              .map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
-          });
+          const result = await withTimeout(
+            model.generateContentStream({
+              contents: req.messages
+                .map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
+            }),
+            "Gemini assistant stream",
+          );
           for await (const chunk of result.stream) {
             const text = chunk.text();
             if (text) controller.enqueue(encoder.encode(text));
@@ -282,10 +307,13 @@ async function agentStepGemini(req: AssistRequest, apiKey: string): Promise<Resp
     ],
   });
   try {
-    const result = await model.generateContent({
-      contents: req.messages
-        .map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
-    });
+    const result = await withTimeout(
+      model.generateContent({
+        contents: req.messages
+          .map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
+      }),
+      "Gemini agent step",
+    );
     const response = result.response;
     const text = response.text().trim() || undefined;
     const calls = response.functionCalls() ?? [];

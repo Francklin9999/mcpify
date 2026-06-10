@@ -1,18 +1,13 @@
 import { NextResponse } from "next/server";
 
-// API edge middleware: CORS (for the extension) + auth and rate limiting for public deployments.
-// Local/dev stays open by default. Production fails closed unless FORGE_API_KEY is set, or
-// FORGE_PUBLIC_API_OPEN=1 is explicitly configured for a deliberately public instance.
-//
-//   FORGE_API_KEY        every /api request must send it as `x-api-key: <key>` or
-//                        `Authorization: Bearer <key>` (OPTIONS preflight is exempt).
-//   FORGE_RATE_LIMIT_RPM best-effort per-IP fixed-window limit (requests/minute). Production default = 60.
-//   FORGE_TRUST_PROXY=1  trust X-Real-IP / X-Forwarded-For from a reverse proxy you control.
-//   FORGE_PUBLIC_API_OPEN=1 allows a production deployment without FORGE_API_KEY.
-//
-// Note: this runs on the Edge runtime, so the rate-limit state is in-memory and PER INSTANCE — with multiple
-// `web` replicas it's an approximate per-replica guard, not a global quota. For a hard global limit, front the
-// API with a real gateway / Redis-backed limiter. It still meaningfully throttles a single abusive source.
+// API edge middleware: CORS (for the extension) + auth + rate limiting. Dev is open; production fails closed
+// unless FORGE_API_KEY is set or FORGE_PUBLIC_API_OPEN=1.
+//   FORGE_API_KEY        sent as `x-api-key: <key>` or `Authorization: Bearer <key>` (OPTIONS exempt)
+//   FORGE_RATE_LIMIT_RPM per-IP fixed-window limit (req/min); production default 60
+//   FORGE_TRUST_PROXY=1  trust X-Real-IP / X-Forwarded-For from a reverse proxy you control
+//   FORGE_PUBLIC_API_OPEN=1 allow a production deployment without FORGE_API_KEY
+// Rate-limit state is in-memory per Edge instance (approximate with multiple replicas; front with a real
+// gateway for a hard global limit).
 export const config = { matcher: "/api/:path*" };
 
 function withCors(res: NextResponse): NextResponse {
@@ -47,6 +42,7 @@ function presentedKey(req: Request): string {
 
 // Best-effort in-memory fixed-window limiter (see note above). Keyed by client IP.
 const WINDOW_MS = 60_000;
+const MAX_RATE_LIMIT_KEYS = 10_000;
 const hits = new Map<string, { count: number; resetAt: number }>();
 
 function clientIp(req: Request): string {
@@ -64,7 +60,14 @@ function rateLimited(req: Request, rpm: number): boolean {
   const cur = hits.get(ip);
   if (!cur || now >= cur.resetAt) {
     hits.set(ip, { count: 1, resetAt: now + WINDOW_MS });
-    if (hits.size > 10_000) for (const [k, v] of hits) if (now >= v.resetAt) hits.delete(k); // bounded cleanup
+    if (hits.size > MAX_RATE_LIMIT_KEYS) {
+      for (const [k, v] of hits) if (now >= v.resetAt) hits.delete(k);
+      while (hits.size > MAX_RATE_LIMIT_KEYS) {
+        const oldest = hits.keys().next().value;
+        if (oldest === undefined) break;
+        hits.delete(oldest);
+      }
+    }
     return false;
   }
   cur.count += 1;

@@ -16,6 +16,28 @@ const isSecret = (name) => {
 const byTab = new Map();
 const pendingHeaders = new Map();
 const pendingBodies = new Map();
+const pendingStarted = new Map();
+const PENDING_TTL_MS = 60_000;
+const MAX_PENDING_REQUESTS = 5000;
+
+function rememberPending(requestId) {
+  pendingStarted.set(requestId, Date.now());
+  prunePending();
+}
+
+function cleanupPending(requestId) {
+  pendingHeaders.delete(requestId);
+  pendingBodies.delete(requestId);
+  pendingStarted.delete(requestId);
+}
+
+function prunePending() {
+  const now = Date.now();
+  for (const [requestId, started] of pendingStarted) {
+    if (now - started > PENDING_TTL_MS || pendingStarted.size > MAX_PENDING_REQUESTS) cleanupPending(requestId);
+    else break;
+  }
+}
 
 function inferSchema(value, depth = 0) {
   if (typeof value === "boolean") return { type: "boolean" };
@@ -65,6 +87,7 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.webRequest.onSendHeaders.addListener(
   (d) => {
     if (d.type !== "xmlhttprequest") return;
+    rememberPending(d.requestId);
     const headers = {};
     for (const h of d.requestHeaders || []) {
       if (isSecret(h.name)) continue; // never even buffer a secret
@@ -79,6 +102,7 @@ chrome.webRequest.onSendHeaders.addListener(
 chrome.webRequest.onBeforeRequest.addListener(
   (d) => {
     if (d.type !== "xmlhttprequest") return;
+    rememberPending(d.requestId);
     const schema = schemaFromRequestBody(d.requestBody);
     if (schema) pendingBodies.set(d.requestId, schema);
   },
@@ -99,12 +123,19 @@ chrome.webRequest.onCompleted.addListener(
       status: d.statusCode,
       contentType,
     });
-    pendingHeaders.delete(d.requestId);
-    pendingBodies.delete(d.requestId);
+    cleanupPending(d.requestId);
     byTab.set(d.tabId, calls.slice(-200));
   },
   { urls: ["<all_urls>"] },
   ["responseHeaders"],
+);
+
+chrome.webRequest.onErrorOccurred.addListener(
+  (d) => {
+    if (d.type !== "xmlhttprequest") return;
+    cleanupPending(d.requestId);
+  },
+  { urls: ["<all_urls>"] },
 );
 
 chrome.tabs.onRemoved.addListener((tabId) => byTab.delete(tabId));

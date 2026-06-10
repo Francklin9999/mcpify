@@ -1,15 +1,7 @@
-// lib/tab-tools.js - executes the side-panel agent's browser_* tools against the user's CURRENT tab via
-// chrome.scripting / chrome.tabs. This is the ONLY tab-touching code; it runs as the user's real, signed-in
-// session (which is exactly why mutating actions are confirmed in the loop - see lib/agent.js).
-//
-// UNVERIFIED OFFLINE: this needs the extension loaded in Chrome (chrome.* APIs + a real tab). The control
-// flow that decides WHEN to call these is covered by test/agent.test.ts; the executors themselves are
-// exercised only in a loaded extension.
-//
-// The in-page functions (snapshot/click/extract) deliberately mirror the headless toolkit in
-// services/generator/src/codegen.ts - the SAME data-__mcp_ref tag-then-resolve scheme - so the two surfaces
-// behave identically. setAttribute from executeScript's isolated world lands on the shared DOM, so a later
-// executeScript resolves the ref. Refs are re-assigned on every snapshot (self-healing after navigation).
+// lib/tab-tools.js - executes the side-panel agent's browser_* tools against the user's current tab via
+// chrome.scripting / chrome.tabs, as the user's signed-in session (why mutating actions are confirmed). The
+// in-page functions mirror the headless toolkit in codegen.ts (same data-__mcp_ref tag-then-resolve scheme),
+// with refs re-assigned on every snapshot. Needs the extension loaded in Chrome (not unit-tested offline).
 
 async function activeTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

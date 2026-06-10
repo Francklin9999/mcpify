@@ -1,11 +1,9 @@
 import type { RegistryEntry, ServerVersion } from "@mcp/types";
 
 /**
- * Pure adapters between catalog records and the registry/detail shapes the web app already renders. Kept
- * free of I/O so they are unit-testable without a live database. The actual catalog reads/writes live in
- * catalog-store.ts (Postgres) and are always best-effort: when DATABASE_URL is unset, none of this runs.
- * `AtlasDoc` is the historical record shape (the catalog was originally in MongoDB Atlas); the adapters are
- * shape-only, so the same code serves the Postgres-backed catalog unchanged.
+ * Pure adapters between catalog records and the registry/detail shapes the web app renders. I/O-free and
+ * unit-testable; reads/writes live in catalog-store.ts. AtlasDoc is the historical record shape (the catalog
+ * was originally MongoDB Atlas); the adapters are shape-only, so they serve the Postgres catalog unchanged.
  */
 
 export type AtlasDoc = Record<string, any>;

@@ -1,16 +1,10 @@
-// lib/agent.js - the side-panel browsing AGENT loop, kept PURE (no chrome/DOM/network here) so it is unit-
-// testable offline. The side panel injects three effects: `step` (POST /api/assist with tools → next move),
-// `execute` (run a tool against the LIVE tab), and `confirm` (ask the user). This file owns only the control
-// flow: when to confirm, how tool results thread back into the conversation, and when to stop.
-//
-// Tool results are fed back as plain `TOOL_RESULT <name>:` user messages (not OpenAI tool-role threading) -
-// simpler and robust across the stateless /api/assist boundary. The model emits structured tool calls; we
-// hand back results as text it can read.
+// lib/agent.js - the side-panel browsing agent loop, kept pure (no chrome/DOM/network) so it is unit-testable.
+// The side panel injects three effects: step (POST /api/assist), execute (run a tool against the live tab),
+// and confirm (ask the user). Tool results thread back as plain `TOOL_RESULT <name>:` user messages.
 
 /**
- * The actionable live-tab tools the model may call. Mirrors the headless browsing toolkit
- * (services/generator/src/codegen.ts) so the two surfaces behave the same: snapshot assigns a [ref] to each
- * interactive element; click/type/select act by ref; every action returns a fresh snapshot.
+ * The live-tab tools the model may call. Mirrors the headless browsing toolkit (codegen.ts): snapshot assigns
+ * a [ref] to each interactive element; click/type/select act by ref; every action returns a fresh snapshot.
  */
 export const BROWSER_TOOL_SPECS = [
   {
@@ -87,6 +81,8 @@ export const BROWSER_TOOL_SPECS = [
 
 /** Tools that change page/account state - always confirmed with the user before running. */
 export const MUTATING_TOOLS = new Set(["browser_click", "browser_type", "browser_select_option"]);
+const SIDE_EFFECT_TOOL_RE =
+  /\b(add(?:_|-)?to(?:_|-)?cart|cart(?:_|-)?add|checkout|buy|purchase|order|book|reserve|subscribe|unsubscribe|follow|unfollow|like|unlike|vote|delete|remove|create|update|save|submit|apply|register|signup|sign[_-]?up|login|log[_-]?in|logout|log[_-]?out|password|payment|billing)\b/i;
 
 const MAX_RESULT_CHARS = 8000;
 
@@ -306,7 +302,7 @@ export function discoveredToolSpecs(toolDefs) {
       name: t.name,
       description:
         t.execution?.kind === "http"
-          ? `${t.description || t.name} In this side panel, same-tab GET tools visibly navigate the current tab; mutating HTTP tools act on the user's live session after confirmation.`
+          ? `${t.description || t.name} In this side panel, same-tab GET tools visibly navigate the current tab; mutating or side-effect-looking HTTP tools act on the user's live session after confirmation.`
           : `${t.description || t.name} In this side panel, browser-step tools run on the user's current visible tab, not a headless browser.`,
       parameters: t.inputSchema && t.inputSchema.type ? t.inputSchema : { type: "object", properties: {} },
     }));
@@ -320,6 +316,13 @@ export function isMutatingHttpTool(toolDef) {
     toolDef.execution.kind === "http" &&
     MUTATING_METHODS.has(String(toolDef.execution.request?.method || "GET").toUpperCase())
   );
+}
+
+export function isSideEffectLookingHttpTool(toolDef) {
+  if (!toolDef || toolDef.execution?.kind !== "http") return false;
+  const req = toolDef.execution.request || {};
+  const text = [toolDef.name, toolDef.description, req.urlPattern, req.rawUrl].filter(Boolean).join(" ");
+  return SIDE_EFFECT_TOOL_RE.test(text);
 }
 
 function browserStepMutates(step) {
@@ -338,7 +341,7 @@ function browserStepNavigatesOffOrigin(step, currentUrl, args) {
 /** Discovered tools can wrap browser steps; confirm mutating/off-origin ones before executing them live. */
 export function needsConfirmDiscoveredTool(toolDef, currentUrl, args = {}) {
   if (!toolDef || !toolDef.execution) return false;
-  if (toolDef.execution.kind === "http") return isMutatingHttpTool(toolDef);
+  if (toolDef.execution.kind === "http") return isMutatingHttpTool(toolDef) || isSideEffectLookingHttpTool(toolDef);
   if (toolDef.execution.kind !== "browser") return false;
   return toolDef.execution.steps.some((step) => browserStepMutates(step) || browserStepNavigatesOffOrigin(step, currentUrl, args));
 }

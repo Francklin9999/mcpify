@@ -1,10 +1,8 @@
 import { CaptureBundle, scrubHeaders, type CaptureBundle as CaptureBundleT, type NetworkCapture, type PageSnapshot } from "@mcp/types";
 
 /**
- * Net-intercept -> CaptureBundle (docs/apps/extension.md Module 3). Produces a bundle SHAPE-IDENTICAL to
- * the scraper's `source:'scraper'` output (01 S1) - the generator must not be able to tell them apart.
- * The build validates against the SAME @mcp/types contract the generator uses (fail-closed), and applies
- * the SAME shared `scrubHeaders` (04) so no credential/secret ever leaves the client.
+ * Net-intercept -> CaptureBundle, shape-identical to the scraper's output. Validated against the @mcp/types
+ * contract (fail-closed) and scrubbed via the shared scrubHeaders so no secret leaves the client.
  */
 export interface RecordedCall {
   method: string;

@@ -41,6 +41,8 @@ const CHAT_STORAGE_KEY = "sidePanelChatsV1";
 const CHAT_ACTIVE_KEY = "sidePanelActiveChatIdV1";
 const AUTO_APPROVE_KEY = "sidePanelAutoApproveV1";
 const MAX_STORED_CHATS = 20;
+const TOOL_HTTP_TIMEOUT_MS = 20_000;
+const TOOL_HTTP_MAX_BYTES = 64_000;
 
 const ICONS = {
   moon:
@@ -71,6 +73,42 @@ function truncate(value, max) {
 
 function isHttpUrl(url) {
   return /^https?:\/\//i.test(url || "");
+}
+
+async function fetchTextWithLimit(url, init, { timeoutMs = TOOL_HTTP_TIMEOUT_MS, maxBytes = TOOL_HTTP_MAX_BYTES } = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    const declared = Number(res.headers.get("content-length") || "0");
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      return { res, text: `Response too large to display; max ${maxBytes} bytes.` };
+    }
+    if (!res.body) {
+      const text = await res.text();
+      const bytes = new TextEncoder().encode(text).byteLength;
+      return { res, text: bytes > maxBytes ? `${text.slice(0, 4000)}\n...[truncated: response too large]` : text };
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let total = 0;
+    let text = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {});
+        text += "\n...[truncated: response too large]";
+        break;
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    return { res, text };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function activeTab() {
@@ -972,8 +1010,7 @@ async function executeDiscovered(def, args, tabExecute) {
       return tabExecute({ name: "browser_navigate", arguments: { url } });
     }
     try {
-      const res = await fetch(url, init);
-      const text = await res.text();
+      const { res, text } = await fetchTextWithLimit(url, init);
       const body = text.length > 4000 ? `${text.slice(0, 4000)}\n...[truncated]` : text;
       return `Done (${res.status}) ${def.name}. ${body}`;
     } catch (err) {

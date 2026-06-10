@@ -1,7 +1,6 @@
 /**
- * Server catalog integration - routes through the web app's /api/atlas, which is now backed by the web
- * app's Postgres `catalog` table (no MongoDB). Database credentials stay server-side and never touch the
- * browser. If the web app has no DATABASE_URL, the routes return 503 and every call here silently no-ops.
+ * Server catalog integration via the web app's /api/atlas (Postgres-backed). DB credentials stay server-side;
+ * if the web app has no DATABASE_URL the routes 503 and every call here silently no-ops.
  */
 import { apiBase } from "./api.js";
 

@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "OpenCLI Stealth",
+  "version": "1.0.0",
+  "description": "Reduces automation fingerprints on your own Chrome so opencli-driven browsing is not falsely flagged as a bot.",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["stealth.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    }
+  ]
+}

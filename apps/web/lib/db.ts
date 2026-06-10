@@ -1,6 +1,7 @@
 import { createDb, type Database } from "@mcp/db";
 import { Queue } from "bullmq";
 import { QUEUE_NAME } from "@mcp/types";
+import { defaultQueueOptions } from "@mcp/generator/dist/src/job-defaults.js";
 
 // Lazy singletons so `next build` (which evaluates route modules) doesn't require a live DB/Redis.
 let _db: Database | undefined;
@@ -14,7 +15,8 @@ export function db(): Database {
 export function jobQueue(): Queue {
   if (!_queue) {
     const url = new URL(process.env.REDIS_URL ?? "redis://127.0.0.1:6379");
-    _queue = new Queue(QUEUE_NAME, { connection: { host: url.hostname, port: Number(url.port || 6379) } });
+    const connection = { host: url.hostname, port: Number(url.port || 6379) };
+    _queue = new Queue(QUEUE_NAME, defaultQueueOptions(connection));
   }
   return _queue;
 }
