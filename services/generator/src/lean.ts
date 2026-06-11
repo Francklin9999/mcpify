@@ -1,10 +1,9 @@
 /**
- * Lean entry point for EMBEDDING the generator core in a self-contained build (e.g. the standalone
- * `mcp-forge-local` npx package). Deliberately excludes the server-only surface that the main index re-exports
- * - `worker.js` (BullMQ/Redis), `adapters/postgres.js` (drizzle + @mcp/db), enqueue/regenerate/discover - so a
- * bundler can inline this without dragging heavy infra libraries into a single-file CLI artifact.
+ * Lean entry point for EMBEDDING the generator core in the self-contained `anymcp` npx package.
+ * This is the exact surface `forge-mcp-local` imports, kept minimal so esbuild inlines it into one file.
  *
  * Only the pure pipeline is here: scrape port + inference + codegen + the LLM clients + HTML analysis.
+ * The broader `./index` entry additionally exposes the self-heal / versioning helpers used by the tests.
  */
 export { generate } from "./generate.js";
 export type { GenerateDeps, GenerateOutcome, Scraper, GeneratePersistence } from "./generate.js";

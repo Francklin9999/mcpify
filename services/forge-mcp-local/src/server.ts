@@ -74,7 +74,7 @@ async function validateToolTargets(tools: ToolDefinition[]): Promise<string[]> {
 }
 
 export function createServer(): McpServer {
-  const server = new McpServer({ name: "anymcp", version: "0.3.1" });
+  const server = new McpServer({ name: "anymcp", version: "0.3.2" });
   const register = server.registerTool.bind(server) as unknown as Register;
   const inference = selectInference();
 

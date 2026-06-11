@@ -6,8 +6,8 @@ backend, no Postgres, no Redis, no Docker. One `npx`, like Playwright MCP.
 It scrapes a URL, figures out the tools, and writes a runnable MCP server to disk that you can install into
 your MCP clients.
 
-> Part of the MCP Forge multi-product repo. The hosted web platform + microservices and the Chrome extension
-> are separate products; **this** is the standalone, install-and-go MCP server.
+> This package **is** the repo's product. See the [root README](../../README.md) for the project overview;
+> this file is the deep reference for every environment variable and behavior.
 
 ---
 
@@ -118,9 +118,13 @@ tools, `{ "tools": [...] }`, or a JSON string of the same.
 | `FORGE_NO_BROWSER_INSTALL` | *(off)* | Set `1` to never auto-download Chromium (capture stays static unless a browser is already present). |
 | `SCRAPER_DISCOVERY_MODE` | `1` | Escalate to the browser even on server-rendered pages so their API traffic is captured into tools. `0` keeps the static result when it's sufficient. |
 | `SCRAPER_INTERACT` | `1` | During a browser capture, scroll / submit a search / click "load more" to surface action-only XHR. |
-| `MCP_BROWSER_CHANNEL` | *(unset)* | Drive your real installed Chrome (`chrome`) instead of bundled Chromium — stronger stealth. |
-| `MCP_BROWSER_DRIVER` | *(unset)* | Use a stealth-patched Playwright drop-in (`patchright` / `rebrowser-playwright`, install it yourself) for hard bot walls. |
-| `SCRAPER_URL` | *(unset)* | If set, use the remote Python scraper service instead of the in-process browser (its 4-tier stealth incl. Camoufox + nodriver). |
+| `FORGE_BROWSER_ESCALATE` | `1` | Auto-climb the stealth ladder (real Chrome → stealth driver → headful) when a capture looks blocked. `0` = single attempt. |
+| `MCP_BROWSER_CHANNEL` | *(auto)* | Force a real-browser channel (`chrome` / `msedge`). Auto-detected from your installed browsers when unset. |
+| `MCP_BROWSER_DRIVER` | *(auto)* | Force a stealth-patched Playwright drop-in (`patchright` / `rebrowser-playwright`). `rebrowser-playwright-core` ships as an optional dependency and is used automatically. |
+| `MCP_BROWSER_HEADLESS` | `1` | Set `0` to always run headful (strongest stealth; needs a display). The ladder also goes headful on its own when escalating. |
+| `MCP_BROWSER_PATH` | *(unset)* | Absolute path to a specific browser executable to drive. |
+| `MCP_BROWSER_TZ` | `America/New_York` | Timezone presented to pages during capture. |
+| `SCRAPER_URL` | *(unset)* | If set, use a remote Playwright scraper service instead of the in-process browser. |
 | `FORGE_MODEL` | per-provider | Override the model for the selected provider. |
 | `FORGE_MAX_TOKENS` | `8192` | Max output tokens for OpenAI-compatible inference. Lower it for small-context local models. |
 | `FORGE_INFERENCE_HEADERS` | *(unset)* | JSON object of extra headers for the `http` inference endpoint (e.g. auth). |
@@ -133,9 +137,15 @@ tools, `{ "tools": [...] }`, or a JSON string of the same.
 ## Develop
 
 ```bash
-npm run build   # build @mcp/generator + this package
-npm test        # 4 suites: provider resolution, stdio boot, emit-server e2e, full local pipeline (no key, no network)
+npm run build            # build @mcp/generator + this package
+npm test                 # provider resolution, stdio boot, emit-server e2e, full local pipeline,
+                         # dynamic-site backward-compat (captured XHR -> tools) + RCE/SSRF security (no key, no network)
+npm run test:live-browser # drives a REAL Chromium against a local SPA: JS render + XHR capture + dynamic->tool
 ```
+
+The dynamic-website backward-compat suite (`test/dynamic-backcompat.mjs`) is hermetic and always runs — it pins
+"captured SPA/AJAX traffic still becomes tools" against real captured-site fixtures. The live browser test
+(`test/dynamic-live.mjs`) self-skips unless `FORGE_TEST_LIVE_BROWSER=1`, so `npm test` stays fast and offline.
 
 ## Install footprint
 
@@ -147,18 +157,27 @@ rendered sites need no browser at all.
 
 ## Dynamic / bot-walled sites
 
-By default the server captures with an **in-process stealth browser**: it renders client-side JS and captures
-the page's XHR/fetch traffic, so it builds tools for SPAs and anti-bot-protected sites with **no backend** and
-**no manual setup** — Chromium auto-installs on first use.
+The server captures with an **in-process stealth browser** that renders client-side JS and captures the page's
+XHR/fetch traffic — so it builds tools for SPAs and anti-bot-protected sites with **no backend** and **no manual
+setup**. The full high-stealth engine is baked in and runs **automatically**:
 
-Stealth mirrors the generated servers (AutomationControlled off, `navigator.webdriver` stripped). For hard
-walls, set `MCP_BROWSER_CHANNEL=chrome` to drive your real Chrome, or `MCP_BROWSER_DRIVER=patchright`. Set
-`FORGE_BROWSER=0` to skip the browser entirely (static-only), or `FORGE_NO_BROWSER_INSTALL=1` to never
-auto-download. If the browser is unavailable, capture falls back to the static fetch.
+1. **Real-browser fingerprint** — `navigator.webdriver` stripped, `--enable-automation` removed,
+   AutomationControlled off, `plugins`/`languages`/WebGL-vendor/permissions patched, clean (non-Headless) UA.
+2. **Auto-prefers your real Chrome / Edge** when installed (driven via a Playwright channel — strongest
+   fingerprint, no download); falls back to bundled Chromium.
+3. **Bundled CDP-stealth driver** — `rebrowser-playwright-core` (optional dependency, no extra browser download)
+   patches leaks plain Playwright can't (`Runtime.enable`, etc.) and is used automatically when present.
+4. **Auto-escalation** — a cheap headless attempt first; if the render looks blocked (CAPTCHA / challenge /
+   empty shell) it climbs real Chrome → stealth driver → **headful** and keeps the best result.
+
+This cracks Amazon / Skyscanner / Booking-class sites out of the box on a normal desktop. Force any rung with
+`MCP_BROWSER_CHANNEL` / `MCP_BROWSER_DRIVER` / `MCP_BROWSER_HEADLESS=0`; disable climbing with
+`FORGE_BROWSER_ESCALATE=0`; skip the browser with `FORGE_BROWSER=0`. If no browser is available, capture falls
+back to the static fetch.
 
 ## Limitations (honest)
 
-- The in-process browser handles most dynamic sites, but the hardest anti-bot walls also score IP reputation:
-  from a datacenter IP some sites still block regardless of stealth. Use `MCP_BROWSER_CHANNEL=chrome` /
-  `MCP_BROWSER_DRIVER=patchright`, or point `SCRAPER_URL` at the full Python scraper (4-tier, Camoufox + nodriver).
+- The hardest anti-bot walls also score IP reputation. From a pure datacenter IP **with no display** (a headless
+  server — so the headful rung can't run), the very hardest sites can still block. On a normal desktop the
+  headful escalation handles them; otherwise point `SCRAPER_URL` at an even heavier scraper.
 - `forge_generate` quality depends on the model you pick; the keyless heuristic is a floor, not a ceiling.

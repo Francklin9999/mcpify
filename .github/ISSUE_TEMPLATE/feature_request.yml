@@ -1,20 +1,8 @@
 name: Feature request
-description: Suggest an idea or improvement for MCP Forge
+description: Suggest an idea or improvement for anymcp
 title: "[Feature]: "
 labels: ["enhancement", "triage"]
 body:
-  - type: dropdown
-    id: component
-    attributes:
-      label: Which component?
-      options:
-        - "Standalone MCP server (mcp-forge / npx)"
-        - "Web app + backend"
-        - "Chrome extension"
-        - "Shared packages"
-        - "Cross-cutting"
-    validations:
-      required: true
   - type: textarea
     id: problem
     attributes:

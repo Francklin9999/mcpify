@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   build-and-test:
-    name: Build & test (Node)
+    name: Build & test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,15 +22,30 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Build all workspaces
+      - name: Build (bundle the server)
         run: npm run build
-      - name: Test standalone MCP server (mcp-forge)
-        run: npm test --workspace=mcp-forge
-      - name: Typecheck Chrome extension
-        run: npm run typecheck --workspace=@mcp/extension
+      - name: Test the MCP server
+        run: npm test --workspace=anymcp
+
+  dynamic-browser:
+    name: Dynamic-website test (real Chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Install Chromium for playwright-core
+        run: npx --yes playwright-core install --with-deps chromium
+      - name: Build the server
+        run: npm run build
+      - name: Drive a real browser against a local SPA (render + XHR capture + dynamic->tool)
+        run: FORGE_TEST_LIVE_BROWSER=1 node services/forge-mcp-local/test/dynamic-live.mjs
 
   package-smoke:
-    name: Verify mcp-forge installs clean (npx-ready)
+    name: Verify anymcp installs clean (npx-ready)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,12 +56,12 @@ jobs:
       - run: npm ci
       - name: Bundle + pack
         run: |
-          npm run bundle --workspace=mcp-forge
-          npm pack --workspace=mcp-forge --pack-destination /tmp
+          npm run bundle --workspace=anymcp
+          npm pack --workspace=anymcp --pack-destination /tmp
       - name: Install the tarball into a clean project (no workspace deps)
         run: |
           mkdir -p /tmp/smoke && cd /tmp/smoke && npm init -y >/dev/null
-          npm install /tmp/mcp-forge-*.tgz
+          npm install /tmp/anymcp-*.tgz
       - name: Boot the installed server over stdio and assert its tools
         run: |
           cd /tmp/smoke
@@ -54,6 +69,6 @@ jobs:
             '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
             '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
             '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-            | timeout 20 node node_modules/.bin/mcp-forge > out.txt 2>/dev/null || true
+            | timeout 20 node node_modules/.bin/anymcp > out.txt 2>/dev/null || true
           grep -q forge_scrape out.txt && grep -q forge_emit_server out.txt && grep -q forge_generate out.txt
-          echo "OK: mcp-forge installs clean and serves its tools."
+          echo "OK: anymcp installs clean and serves its tools."

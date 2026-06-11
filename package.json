@@ -1,40 +1,27 @@
 {
-  "name": "mcp-platform",
+  "name": "anymcp-workspace",
   "private": true,
   "version": "0.0.0",
+  "description": "Monorepo for anymcp — the self-contained MCP server that turns any website into a runnable MCP server.",
   "workspaces": [
-    "packages/*",
-    "apps/*",
-    "services/*"
+    "packages/types",
+    "services/generator",
+    "services/forge-mcp-local"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "sync:extension-config": "node scripts/sync-extension-config.mjs",
-    "seed:catalog": "node scripts/seed-catalog.mjs",
-    "build": "npm run build --workspaces --if-present",
-    "build:phase0": "npm run build --workspace=@mcp/types && npm run build --workspace=@mcp/db",
-    "pretest": "npm run build:phase0",
-    "test": "npm run test --workspaces --if-present",
-    "vercel-build": "npm run build --workspace=@mcp/web",
-    "deploy:build": "docker compose -f infra/compose.prod.yml build",
-    "deploy:up": "docker compose -f infra/compose.prod.yml up -d --build",
-    "deploy:down": "docker compose -f infra/compose.prod.yml down",
-    "deploy:logs": "docker compose -f infra/compose.prod.yml logs -f load-balancer web generator scraper monitor",
-    "deploy:ps": "docker compose -f infra/compose.prod.yml ps",
-    "changeset": "changeset",
-    "changeset:version": "changeset version",
-    "release": "changeset publish"
+    "build": "npm run bundle --workspace=anymcp",
+    "test": "npm run test --workspace=anymcp",
+    "test:all": "npm run test --workspaces --if-present",
+    "start": "node services/forge-mcp-local/dist/main.bundle.mjs"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.27.0",
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0"
   },
   "overrides": {
-    "esbuild": "^0.25.12",
-    "postcss": "^8.5.15",
-    "uuid": "^11.1.1"
+    "esbuild": "^0.25.12"
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "anymcp",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Self-contained MCP server that turns any website into a runnable MCP server, in-process. Host-as-brain by default (no API key); optional OpenAI/Anthropic/Gemini/Groq/Ollama/... or a custom inference URL.",
   "type": "module",
   "license": "MIT",
@@ -39,14 +39,16 @@
     "access": "public"
   },
   "scripts": {
-    "build": "npm run build --workspace=@mcp/generator && tsc -p tsconfig.json",
+    "build": "rm -rf dist && npm run build --workspace=@mcp/generator && tsc -p tsconfig.json",
     "bundle": "npm run build && esbuild src/main.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/main.bundle.mjs --external:playwright --external:playwright-core",
     "start": "node dist/src/main.js",
     "prepublishOnly": "npm run bundle",
-    "test": "npm run build && node test/providers.mjs && node test/scraper-select.mjs && node test/persistence.mjs && node test/smoke.mjs && node test/emit.mjs && node test/local-e2e.mjs && node test/security.mjs"
+    "test": "npm run build && node test/providers.mjs && node test/scraper-select.mjs && node test/stealth-ladder.mjs && node test/persistence.mjs && node test/smoke.mjs && node test/emit.mjs && node test/local-e2e.mjs && node test/dynamic-backcompat.mjs && node test/dynamic-live.mjs && node test/security.mjs",
+    "test:live-browser": "npm run build && FORGE_TEST_LIVE_BROWSER=1 node test/dynamic-live.mjs"
   },
   "optionalDependencies": {
-    "playwright-core": "^1.54.2"
+    "playwright-core": "^1.54.2",
+    "rebrowser-playwright-core": "^1.52.0"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.104.0",
@@ -57,6 +59,7 @@
     "@types/node": "^22.0.0",
     "esbuild": "^0.25.12",
     "openai": "^6.42.0",
+    "standardwebhooks": "^1.0.0",
     "typescript": "^5.7.0",
     "zod": "^3.25.0"
   }

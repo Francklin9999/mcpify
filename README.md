@@ -1,198 +1,203 @@
-<div align="center">
+# anymcp
 
-# MCP Forge
+**Turn any website into a runnable MCP server — in one `npx`, with no backend.**
 
-**Turn any website into a runnable MCP server.**
+`anymcp` is a self-contained [Model Context Protocol](https://modelcontextprotocol.io) server. Point it at a
+URL; it scrapes the page, figures out the useful tools (search, lookups, list endpoints, actions), and writes a
+runnable MCP server to disk that you can install into Claude, Cursor, VS Code, or any MCP client.
 
-Capture a page's real structure and network traffic, infer action-capable tools, and emit a standalone MCP
-server you run locally — so an LLM can actually *act* on that site, using your machine and your creds.
-
-> Generate, don't integrate.
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![npm](https://img.shields.io/npm/v/anymcp?label=anymcp)](https://www.npmjs.com/package/anymcp)
-[![Node](https://img.shields.io/badge/node-%3E%3D20-43853d.svg)](https://nodejs.org)
-[![CI](https://github.com/Francklin9999/mcpify/actions/workflows/ci.yml/badge.svg)](https://github.com/Francklin9999/mcpify/actions/workflows/ci.yml)
-
-</div>
-
----
-
-## Three ways to use it
-
-MCP Forge is **one shared core, three products** — pick the one that fits:
-
-| | Product | Best for | Run it |
-|---|---------|----------|--------|
-| 🧩 | **`anymcp` — standalone MCP server** | Devs who want it inside Claude Code / Codex / Cursor with **zero backend, no API key** | `npx -y anymcp` ([guide](./services/forge-mcp-local/README.md)) |
-| 🌐 | **Web app + backend microservices** | A hosted product: queue, catalog, self-healing servers, monitoring | `./run.sh` ([below](#-web-app--backend)) |
-| 🧭 | **Chrome extension (MV3)** | Driving the page you're on, as your signed-in session | Load unpacked ([below](#-chrome-extension)) |
-
----
-
-## 🧩 Standalone MCP server (`anymcp`)
-
-A **self-contained** MCP server — no backend, no Postgres, no Redis, no Docker. One `npx`, like Playwright MCP.
-By default the **host model you're already running** does the inference (no API key); optionally point it at
-any provider, a local model (Ollama/LM Studio/vLLM), or your own endpoint.
+No Postgres, no Redis, no Docker, no API key required. It runs in-process like Playwright MCP — a single bundled
+file whose only dependency is a headless browser engine.
 
 ```jsonc
-// claude_desktop_config.json / .mcp.json / cursor settings
 {
   "mcpServers": {
     "anymcp": {
       "command": "npx",
       "args": ["-y", "anymcp"]
-      // No env needed by default. See the package README for provider/local/custom options.
     }
   }
 }
 ```
 
-Then: *"Build me an MCP server for https://rubygems.org"* → `forge_scrape` → your model designs the tools →
-`forge_emit_server` writes a runnable server to disk. **Full docs:** [`services/forge-mcp-local/README.md`](./services/forge-mcp-local/README.md).
+Then ask your agent: *"Build me an MCP server for https://rubygems.org."*
 
 ---
 
-## 🌐 Web app + backend
+## How it works
 
-The hosted product: paste a URL in the web UI, a worker pipeline generates the server, a catalog stores it,
-and a Go monitor keeps generated servers healthy.
+By default the **brain is the model you're already running**. The agent that called the tool (Claude Code,
+Cursor, …) does the inference itself — exactly like Playwright MCP just drives a browser. So the default config
+needs **no API key and no external service**.
 
-**Pipeline:** `web → BullMQ → generator worker → scraper (real browser) → codegen → Postgres + artifact store → download`. The monitor feeds the same queue for self-heal.
+The pipeline is three tools:
 
-```bash
-cp .env.example .env      # add a provider key (optional; keyless heuristic works without one)
-./run.sh                  # brings up infra → migrations → scraper → worker → web
-# open the API base printed at the end (default http://localhost:3001)
-```
+| Tool | Needs an LLM? | What it does |
+|------|---------------|--------------|
+| `forge_scrape` | No | Scrape a URL → structured page analysis (forms, links, candidate endpoints, captured XHR/fetch traffic, DOM sample). |
+| `forge_emit_server` | No | Take the tool definitions your agent designed → deterministic codegen → writes a runnable MCP server to disk. |
+| `forge_generate` | Configurable | One-shot scrape → infer → build, using a server-side model. For non-agentic clients or when you want a specific model. |
 
-<details><summary>Manual / step-by-step</summary>
+The recommended path is **`forge_scrape` → (your agent designs tools) → `forge_emit_server`**: no key, and your
+agent is usually the smartest model in the room. `forge_generate` exists for clients that can't do multi-step
+tool calls.
 
-```bash
-npm install
-npm run build:phase0                         # build @mcp/types + @mcp/db
-docker compose -f infra/docker-compose.yml up -d
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/mcp \
-  node packages/db/scripts/apply-migrations.mjs
-
-cd services/scraper && python3 -m venv .venv && .venv/bin/pip install -e '.[dev]' && \
-  .venv/bin/python -m playwright install chromium && \
-  .venv/bin/uvicorn scraper.service:app --port 8000 &
-
-cd ../generator && npm run build && \
-  DATABASE_URL=postgres://postgres:postgres@localhost:5432/mcp REDIS_URL=redis://127.0.0.1:6379 \
-  SCRAPER_URL=http://127.0.0.1:8000 ARTIFACT_ROOT=/tmp/mcp-artifacts npm run worker &
-
-cd ../../apps/web && npm run build && \
-  DATABASE_URL=... REDIS_URL=... ARTIFACT_ROOT=/tmp/mcp-artifacts npm start
-```
-
-</details>
-
-**Production stack** (web, generator, scraper, monitor, nginx LB, Postgres, Redis, migrations, shared artifact
-volume) is in `infra/compose.prod.yml`:
-
-```bash
-npm run deploy:up        # open http://localhost:8080
-docker compose -f infra/compose.prod.yml up -d --scale web=3 --scale generator=2 --scale scraper=2
-```
-
-The Next frontend/API also deploys to Vercel (`npm run vercel-build`); long-running services need the
-container stack or managed equivalents. See [`DEPLOY.md`](./DEPLOY.md).
-
-### LLM providers (web/worker)
-
-| `LLM_PROVIDER` | Key | Default model |
-|----------------|-----|---------------|
-| `openai` (default) | `OPENAI_API_KEY` | `gpt-5.4` |
-| `claude` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` |
-| `gemini` | `GEMINI_API_KEY` | `gemini-3.1-pro-preview` |
-| *(none)* | — | keyless heuristic |
+Generated servers are written to `~/.mcp-forge/servers/<name>/` with an `install.sh` / `install.ps1` and a
+`mcp-register.mjs` helper, so they build and register into your MCP client in one step.
 
 ---
 
-## 🧭 Chrome extension
+## Quickstart
 
-A **static MV3 extension — no build step**, run locally (it talks to your running backend):
+1. Add the config block above to your MCP client.
+2. Ask: *"Make an MCP server for https://news.ycombinator.com and install it."*
+3. Your agent calls `forge_scrape`, designs the tools, calls `forge_emit_server`. The new server lands in
+   `~/.mcp-forge/servers/`.
+4. Run its `install.sh` (the agent can do this for you) and the new server appears in your client.
 
-`chrome://extensions` → enable **Developer mode** → **Load unpacked** → select `apps/extension`. Set the API
-base URL in the extension settings.
-
-Its side-panel chat does two things against the tab you're on:
-
-- **Drives the live page** — an in-browser agent reads the page, clicks, types, and navigates as your real
-  signed-in session. Every page-changing action and off-origin navigation **asks you to confirm first**.
-- **Turns the page into an MCP server** — generate, then copy/download `server.ts` + a client config snippet
-  straight from the chat.
+No keys, no services. Static and server-rendered sites need no browser; the first time you scrape a *dynamic*
+site, a single Chromium downloads automatically (one-time, ~20–40s) and is cached.
 
 ---
 
-## How generation works
+## Dynamic & bot-walled sites
 
-1. **Capture** — a 3-tier scraper loads the page in a real browser and records its live network calls
-   (XHR/fetch), DOM, and forms into a `CaptureBundle`. (The standalone `anymcp` uses a zero-dependency
-   static-fetch capture by default, or a Playwright scraper via `SCRAPER_URL`.)
-2. **Infer** — a pluggable brain reads the bundle and proposes **action-capable** tools, validated against a
-   strict contract. With no key, a **keyless heuristic** is the floor. Every server also gets a
-   `fetch_page_content` baseline, so even pure content sites yield something usable.
-3. **Generate** — deterministic codegen emits a **standalone installable project**: `server.ts` (MCP SDK),
-   pinned `package.json`, `tsconfig.json`, a client config snippet, and install scripts.
-4. **Drive** — every generated server ships a **persistent-session browsing toolkit** (`browser_navigate /
-   snapshot / click / type / select / extract`) holding one Chromium session across tool calls.
-5. **Keep alive** (web product) — the Go monitor health-checks servers and detects drift; the worker
-   **self-heals** (rewrites only the broken tool) or **regenerates** and bumps the version.
+`anymcp` captures with an **in-process stealth browser** — it renders client-side JS and captures the page's
+XHR/fetch traffic, so it builds real tools for SPAs and anti-bot-protected sites with no backend and no setup.
+The full high-stealth engine is baked in and **everything is automatic**:
 
-## Legal modes
+- **Real fingerprint:** `navigator.webdriver` stripped, `--enable-automation` removed, AutomationControlled off,
+  and `plugins` / `languages` / WebGL vendor / permissions patched, with a clean (non-"HeadlessChrome") UA.
+- **Auto-prefers your real Chrome.** If Google Chrome (or Edge) is installed, it drives that via a Playwright
+  channel — the strongest fingerprint, no download. Otherwise it uses bundled Chromium.
+- **Bundled CDP-stealth driver.** Ships `rebrowser-playwright-core` (an optional dependency, no extra browser
+  download) which patches the leaks plain Playwright can't, e.g. `Runtime.enable`.
+- **Auto-escalation on block.** A cheap headless attempt runs first; if the result looks blocked (a CAPTCHA /
+  challenge / empty shell), it automatically climbs — real Chrome → stealth driver → **headful** — and keeps the
+  best render. Easy sites stay fast; hard sites get the heavy stealth without you touching a knob.
 
-Generated code runs **locally** — this is a user-automation tool, not a server-side scraper.
+This combination cracks Amazon, Skyscanner, Booking, and similar anti-bot sites out of the box on a normal
+desktop (where a display is available for the headful rung).
 
-| Mode | Behavior | Enforced in |
-|------|----------|-------------|
-| `safe` (default) | Respects robots.txt, public pages, no session | scraper |
-| `full_scrape` | Ignores robots.txt, public pages, user acknowledges ToS risk | scraper |
-| `session` | Acts inside your own logged-in browser session | extension |
+Overrides (rarely needed): `MCP_BROWSER_CHANNEL=chrome|msedge` (force a channel), `MCP_BROWSER_DRIVER=patchright`
+(force a specific stealth driver), `MCP_BROWSER_HEADLESS=0` (always headful), `FORGE_BROWSER_ESCALATE=0` (single
+attempt), `FORGE_BROWSER=0` (skip the browser — static-only).
 
-Never: store credentials server-side, scrape behind a login server-side, or bypass auth-wall CAPTCHAs.
+> **Honest caveat:** the hardest walls also score IP reputation. From a pure datacenter IP with no display (a
+> headless server, so no headful rung), the very hardest sites can still block. On a normal desktop, or by
+> pointing `SCRAPER_URL` at an even heavier scraper, those are handled too.
 
-## Monorepo layout
+---
 
-| Package | Stack | What it is |
-|---------|-------|-----------|
-| `packages/types` | TS + zod | **Keystone contracts** — every cross-component shape, one source |
-| `packages/db` | Drizzle / Postgres | Registry schema + migrations |
-| `services/scraper` | Python / Scrapling | 3-tier fetch → `CaptureBundle` (real-Chromium XHR capture) |
-| `services/generator` | Node | LLM factory + codegen + self-heal + BullMQ worker (`/lean` = pure, infra-free core) |
-| `services/forge-mcp-local` | Node | **`anymcp`** — the standalone, self-contained npx MCP server |
-| `services/forge-mcp` | Node | Thin MCP client to a hosted Forge backend (`mcp-forge-remote`) |
-| `services/monitor` | Go | Health + drift detection → enqueue jobs |
-| `apps/web` | Next.js | Landing + library / generate / monitor + API |
-| `apps/extension` | Static MV3 | Side-panel chat: drive the tab + generate a server from it |
+## Optional: server-side inference for `forge_generate`
 
-## Configure
+Set **`FORGE_INFERENCE`** to make the server itself do inference. It accepts a provider name or the LiteLLM-style
+`provider/model` form (e.g. `groq/llama-3.3-70b-versatile`). Hosted and local options all go through one
+OpenAI-compatible client, so a key just uses that provider's conventional env var.
 
-```bash
-cp .env.example .env
+| `FORGE_INFERENCE` | Needs | Notes |
+|-------------------|-------|-------|
+| *(unset)* / `host` | nothing | **Default.** Host-as-brain; `forge_generate` falls back to the keyless heuristic. |
+| `heuristic` | nothing | Keyless, rule-based. No LLM, no network. |
+| `openai` | `OPENAI_API_KEY` | Pin a model with `openai/<model>`. |
+| `claude` | `ANTHROPIC_API_KEY` | Native Anthropic client. |
+| `gemini` | `GEMINI_API_KEY` | Native Google client. |
+| `groq` / `together` / `openrouter` / `deepseek` / `mistral` / `fireworks` / `xai` | that provider's `*_API_KEY` | All OpenAI-compatible. |
+| `ollama` / `lmstudio` / `vllm` | nothing | **Fully local.** Runs against your local server; no key, nothing leaves your machine. |
+| `openai-compatible` | `FORGE_OPENAI_BASE_URL` | Any other OpenAI-compatible endpoint. `FORGE_API_KEY` optional. |
+| `http` | `FORGE_INFERENCE_URL` | **Bring your own logic** — POSTs the scraped page to your endpoint; you return the tool list. |
+
+```jsonc
+// Fully local, no key, nothing leaves your machine:
+{ "mcpServers": { "anymcp": {
+  "command": "npx", "args": ["-y", "anymcp"],
+  "env": { "FORGE_INFERENCE": "ollama", "OLLAMA_MODEL": "llama3.1" }
+} } }
 ```
 
-Everything is optional except (optionally) a provider key. See `.env.example` for the annotated list and
-[`DEPLOY.md`](./DEPLOY.md) for multi-platform deploys.
-
-## Test
-
-```bash
-npm test                                                       # all Node unit suites
-npm test --workspace=anymcp                                 # standalone MCP: providers + stdio + e2e (no key, no network)
-cd services/scraper && .venv/bin/python -m pytest              # scraper (tier-2 needs Chromium, else skips)
-cd services/monitor && go test ./internal/...                  # monitor logic
-bash services/generator/test/integration/run.sh               # worker (needs Redis + Postgres)
+```jsonc
+// A hosted provider — swap the name + key:
+{ "mcpServers": { "anymcp": {
+  "command": "npx", "args": ["-y", "anymcp"],
+  "env": { "FORGE_INFERENCE": "groq/llama-3.3-70b-versatile", "GROQ_API_KEY": "gsk_..." }
+} } }
 ```
 
-## Contributing & security
+---
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) and [SECURITY.md](./SECURITY.md). Releases are managed with
-[Changesets](https://github.com/changesets/changesets).
+## Environment variables
+
+| Var | Default | Meaning |
+|-----|---------|---------|
+| `FORGE_INFERENCE` | `host` | Server-side inference provider for `forge_generate` (see table above). |
+| `FORGE_MODEL` | per-provider | Override the model for the selected provider. |
+| `MCP_FORGE_HOME` | `~/.mcp-forge` | Where generated servers + `registry.json` are written. |
+| `FORGE_BROWSER` | *(on)* | In-process stealth browser capture for dynamic sites. Set `0` to force static-only fetch. |
+| `FORGE_NO_BROWSER_INSTALL` | *(off)* | Set `1` to never auto-download Chromium. |
+| `SCRAPER_DISCOVERY_MODE` | `1` | Escalate to the browser even on server-rendered pages to capture their API traffic as tools. |
+| `SCRAPER_INTERACT` | `1` | During capture, scroll / search / click "load more" to surface action-only XHR. |
+| `MCP_BROWSER_CHANNEL` | *(auto)* | Force a real-browser channel (`chrome` / `msedge`). Auto-detected when unset. |
+| `MCP_BROWSER_DRIVER` | *(auto)* | Force a stealth driver (`patchright` / `rebrowser-playwright`). `rebrowser-playwright-core` ships by default. |
+| `MCP_BROWSER_HEADLESS` | `1` | Set `0` to always run headful (strongest stealth; needs a display). |
+| `FORGE_BROWSER_ESCALATE` | `1` | Auto-climb the stealth ladder when a capture looks blocked. Set `0` for a single attempt. |
+| `SCRAPER_URL` | *(unset)* | Use a remote Playwright scraper service instead of the in-process browser. |
+| `FORGE_MAX_TOKENS` | `8192` | Max output tokens for OpenAI-compatible inference. |
+| `FORGE_FETCH_TIMEOUT_MS` | `20000` | Timeout for the built-in static page fetch. |
+| `FORGE_BROWSER_TIMEOUT_MS` | `30000` | Navigation timeout for the in-process browser capture. |
+
+The full list (custom inference headers, byte limits, local-model URLs) is in
+[`services/forge-mcp-local/README.md`](services/forge-mcp-local/README.md).
+
+---
+
+## Install footprint
+
+`npx -y anymcp` is tiny: the server is a single bundled file and the only runtime dependency is
+**`playwright-core`** (the browser engine — **no bundled browsers**). Install is roughly **2s / 14MB**; there is
+no 500MB browser download at install time. Chromium downloads lazily, once, on the first dynamic scrape.
+
+---
+
+## Repository layout
+
+This repo builds and publishes the single `anymcp` package. It's a small npm workspace:
+
+```
+services/forge-mcp-local/   the published `anymcp` server (stdio MCP, the three tools, in-process scraper)
+services/generator/         core pipeline: scrape analysis + tool inference + deterministic codegen
+packages/types/             shared zod contracts
+scripts/opencli-bridge.mjs  optional bridge for driving a user's real Chrome (opencli backend)
+docs/                       design notes
+```
+
+`forge-mcp-local` bundles `generator` and `types` into one file via esbuild, so the published package has no
+workspace dependencies at runtime.
+
+---
+
+## Develop
+
+```bash
+npm install        # install the three workspaces
+npm run build      # build generator + types, bundle the server to dist/main.bundle.mjs
+npm test           # run the server's test suites (no key, no network) — incl. dynamic-site backward-compat
+```
+
+The dynamic-website pipeline (render JS → capture XHR → build tools) has two guards: a hermetic backward-compat
+suite that always runs against real captured-site fixtures, and a live test that drives a real browser against a
+local SPA (`npm run test:live-browser --workspace=anymcp`, or set `FORGE_TEST_LIVE_BROWSER=1`).
+
+Run the bundled server directly over stdio:
+
+```bash
+npm start          # node services/forge-mcp-local/dist/main.bundle.mjs
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and [SECURITY.md](SECURITY.md) for
+reporting vulnerabilities.
+
+---
 
 ## License
 
-[MIT](./LICENSE) © Franck Fongang
+[MIT](LICENSE) © Franck Fongang

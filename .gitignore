@@ -14,6 +14,7 @@ services/.gen-test-manual/
 .claude/scheduled_tasks.lock
 .claude/*.lock
 .claude/settings.local.json
+.claude/settings.json
 
 # Playwright MCP session artifacts (snapshots, console logs) - never commit
 .playwright-mcp/

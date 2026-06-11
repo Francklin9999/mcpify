@@ -1,73 +1,54 @@
-# Contributing to MCP Forge
+# Contributing to anymcp
 
-Thanks for your interest in contributing! This is a monorepo with three products sharing one core. This guide
+Thanks for your interest! `anymcp` is a single published package built from a small npm workspace. This guide
 gets you productive fast and keeps the bar high.
 
 ## Repo layout
 
-See the [monorepo layout](./README.md#monorepo-layout) in the README. The short version:
+See the [repository layout](./README.md#repository-layout) in the README. The short version:
 
-- `packages/*` — shared contracts (`@mcp/types`) and DB (`@mcp/db`).
-- `services/*` — generator (Node), scraper (Python), monitor (Go), and the two MCP servers (`mcp-forge`
-  standalone + `mcp-forge-remote` thin client).
-- `apps/*` — the Next.js web app and the static MV3 Chrome extension.
+- `services/forge-mcp-local/` — the published `anymcp` server (stdio MCP, the three tools, in-process scraper).
+- `services/generator/` — the core pipeline: scrape analysis + tool inference + deterministic codegen.
+- `packages/types/` — shared zod contracts (`@mcp/types`), the single source of truth for cross-module shapes.
 
 ## Prerequisites
 
-- **Node.js >= 20** (npm workspaces)
-- Python 3.11+ (only for `services/scraper`)
-- Go 1.22+ (only for `services/monitor`)
-- Docker (only for the full backend stack)
+- **Node.js >= 20** (npm workspaces).
 
 ## Getting started
 
 ```bash
 git clone https://github.com/Francklin9999/mcpify.git
-cd mcp-forge
+cd mcpify
 npm install
-npm run build            # build all workspaces
-npm test                 # run the Node test suites
+npm run build            # build generator + types, bundle the server
+npm test                 # run the server test suites (no key, no network)
 ```
 
-To work on just the standalone MCP server:
+To iterate on just the server package:
 
 ```bash
-npm run build --workspace=mcp-forge
-npm test  --workspace=mcp-forge   # provider resolution + stdio boot + e2e (no key, no network)
+npm run bundle --workspace=anymcp
+npm test    --workspace=anymcp
 ```
 
 ## Development workflow
 
 1. **Branch** off `main`: `git checkout -b feat/short-description`.
 2. **Make focused changes.** Match the surrounding code's style, naming, and comment density.
-3. **Keep contracts in `@mcp/types`.** Cross-component shapes have exactly one source of truth there. Changing
-   an `execution_kind` or a DB-backed enum requires a migration — see `packages/db`.
-4. **Test what you change.** Prefer real-infra/honest tests that *skip loudly* when a dependency (browser,
-   Docker, Postgres) is unavailable rather than faking success.
-5. **Add a changeset** (see below) if your change affects a published package.
-6. **Open a PR** using the template. CI must be green.
+3. **Keep contracts in `@mcp/types`.** Cross-module shapes have exactly one source of truth there. The execution
+   contract (`ExecutionStrategy = http | browser`) is frozen — new capabilities go in the runtime layer or as
+   new discovery sources, never as contract changes.
+4. **Test what you change.** Prefer honest tests that *skip loudly* when a dependency (e.g. a browser) is
+   unavailable rather than faking success.
+5. **Open a PR** using the template. CI must be green.
 
 ## Tests
 
 ```bash
-npm test                                          # all Node unit suites
-npm test --workspace=mcp-forge                    # standalone MCP server
-cd services/scraper && .venv/bin/python -m pytest # scraper (Chromium tier skips if unavailable)
-cd services/monitor && go test ./internal/...     # monitor logic
+npm test                            # the server's suites: provider resolution, stdio boot, emit e2e, full local pipeline
+npm run test:all                    # every workspace's tests
 ```
-
-## Changesets & releases
-
-We use [Changesets](https://github.com/changesets/changesets). If your change should ship in a published
-package (currently `mcp-forge`), run:
-
-```bash
-npx changeset
-```
-
-Pick the affected package(s) and a bump (patch / minor / major), and write a short, user-facing summary. Commit
-the generated file in `.changeset/`. On merge to `main`, the release workflow opens/updates a "Version Packages"
-PR; merging that publishes to npm (with provenance, via trusted publishing).
 
 ## Commit & PR conventions
 

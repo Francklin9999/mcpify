@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a problem with MCP Forge
+description: Report a problem with anymcp
 title: "[Bug]: "
 labels: ["bug", "triage"]
 body:
@@ -8,18 +8,6 @@ body:
       value: |
         Thanks for taking the time to file a bug! Please search existing issues first.
         For security vulnerabilities, **do not** file a public issue — see [SECURITY.md](../blob/main/SECURITY.md).
-  - type: dropdown
-    id: component
-    attributes:
-      label: Which component?
-      options:
-        - "Standalone MCP server (mcp-forge / npx)"
-        - "Web app + backend (generator / scraper / monitor / web)"
-        - "Chrome extension"
-        - "Shared packages (@mcp/types, @mcp/db)"
-        - "Not sure"
-    validations:
-      required: true
   - type: textarea
     id: what-happened
     attributes:
@@ -32,7 +20,7 @@ body:
     attributes:
       label: Steps to reproduce
       placeholder: |
-        1. Configure mcp-forge with ...
+        1. Configure anymcp with ...
         2. Ask the agent to ...
         3. See error ...
     validations:
@@ -47,7 +35,7 @@ body:
     id: version
     attributes:
       label: Version / commit
-      placeholder: "mcp-forge 0.1.0 / commit abc1234"
+      placeholder: "anymcp 0.3.1 / commit abc1234"
     validations:
       required: true
   - type: input
