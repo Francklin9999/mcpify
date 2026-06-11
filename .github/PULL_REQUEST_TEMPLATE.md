@@ -1,4 +1,4 @@
-<!-- Thanks for contributing to anymcp! Please fill this out. -->
+<!-- Thanks for contributing to urlmcp! Please fill this out. -->
 
 ## What & why
 

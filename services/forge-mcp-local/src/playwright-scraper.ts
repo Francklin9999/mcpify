@@ -187,13 +187,13 @@ async function ensureChromiumInstalled(chromium: any): Promise<void> {
       }
     }
     if (!cliPath) return;
-    console.error("[anymcp] Installing Chromium for browser capture (one-time, ~20-40s)...");
+    console.error("[urlmcp] Installing Chromium for browser capture (one-time, ~20-40s)...");
     await new Promise<void>((resolve) => {
       const child = cp.spawn(process.execPath, [cliPath, "install", "chromium"], { stdio: ["ignore", "inherit", "inherit"], timeout: 180_000 });
       child.on("close", () => resolve());
       child.on("error", () => resolve());
     });
-    console.error("[anymcp] Chromium install finished.");
+    console.error("[urlmcp] Chromium install finished.");
   } catch {
     /* best-effort: if install fails, capture falls back to static */
   }

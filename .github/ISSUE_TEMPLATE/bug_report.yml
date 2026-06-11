@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a problem with anymcp
+description: Report a problem with urlmcp
 title: "[Bug]: "
 labels: ["bug", "triage"]
 body:
@@ -20,7 +20,7 @@ body:
     attributes:
       label: Steps to reproduce
       placeholder: |
-        1. Configure anymcp with ...
+        1. Configure urlmcp with ...
         2. Ask the agent to ...
         3. See error ...
     validations:
@@ -35,7 +35,7 @@ body:
     id: version
     attributes:
       label: Version / commit
-      placeholder: "anymcp 0.3.1 / commit abc1234"
+      placeholder: "urlmcp 0.4.0 / commit abc1234"
     validations:
       required: true
   - type: input

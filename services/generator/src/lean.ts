@@ -1,5 +1,5 @@
 /**
- * Lean entry point for EMBEDDING the generator core in the self-contained `anymcp` npx package.
+ * Lean entry point for EMBEDDING the generator core in the self-contained `urlmcp` npx package.
  * This is the exact surface `forge-mcp-local` imports, kept minimal so esbuild inlines it into one file.
  *
  * Only the pure pipeline is here: scrape port + inference + codegen + the LLM clients + HTML analysis.

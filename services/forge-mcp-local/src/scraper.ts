@@ -4,7 +4,7 @@ import { assertPublicHttpUrl, readResponseTextWithLimit, type Scraper, HttpScrap
 import { NodePlaywrightScraper, playwrightAvailable } from "./playwright-scraper.js";
 
 const UA =
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 mcp-forge";
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 urlmcp";
 
 /** Hang protection + memory bound for the in-process fetch (overridable for unusual pages). */
 const FETCH_TIMEOUT_MS = Number(process.env["FORGE_FETCH_TIMEOUT_MS"]) || 20_000;

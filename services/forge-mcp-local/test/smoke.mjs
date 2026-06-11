@@ -17,7 +17,7 @@ try {
   const ok = expected.every((n) => names.includes(n));
   if (!ok) throw new Error(`missing tools. got: ${names.join(", ")}`);
 
-  console.log(`PASS: mcp-forge booted; tools = [${names.join(", ")}]`);
+  console.log(`PASS: urlmcp booted; tools = [${names.join(", ")}]`);
   await client.close();
   await server.close();
   process.exit(0);

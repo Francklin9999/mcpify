@@ -1,8 +1,8 @@
 {
-  "name": "anymcp-workspace",
+  "name": "urlmcp-workspace",
   "private": true,
   "version": "0.0.0",
-  "description": "Monorepo for anymcp — the self-contained MCP server that turns any website into a runnable MCP server.",
+  "description": "Monorepo for urlmcp — the self-contained MCP server that turns any website into a runnable MCP server.",
   "workspaces": [
     "packages/types",
     "services/generator",
@@ -12,8 +12,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "npm run bundle --workspace=anymcp",
-    "test": "npm run test --workspace=anymcp",
+    "build": "npm run bundle --workspace=urlmcp",
+    "test": "npm run test --workspace=urlmcp",
     "test:all": "npm run test --workspaces --if-present",
     "start": "node services/forge-mcp-local/dist/main.bundle.mjs"
   },

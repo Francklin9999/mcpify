@@ -1,4 +1,4 @@
-# anymcp
+# urlmcp
 
 A **self-contained** MCP server that turns any website into a runnable MCP server — entirely in-process. No
 backend, no Postgres, no Redis, no Docker. One `npx`, like Playwright MCP.
@@ -20,9 +20,9 @@ default config needs **no API key and no external service**:
 ```jsonc
 {
   "mcpServers": {
-    "anymcp": {
+    "urlmcp": {
       "command": "npx",
-      "args": ["-y", "anymcp"]
+      "args": ["-y", "urlmcp"]
       // No env needed. By default inference is done by the model you're already using (host-as-brain):
       // forge_scrape returns the page, your model designs the tools, forge_emit_server writes the server.
     }
@@ -80,8 +80,8 @@ provider is trivial and a key uses that provider's conventional env var.
 Local model, no key, nothing leaves your machine:
 
 ```jsonc
-{ "mcpServers": { "anymcp": {
-  "command": "npx", "args": ["-y", "anymcp"],
+{ "mcpServers": { "urlmcp": {
+  "command": "npx", "args": ["-y", "urlmcp"],
   "env": { "FORGE_INFERENCE": "ollama", "OLLAMA_MODEL": "llama3.1" }
 } } }
 ```
@@ -89,8 +89,8 @@ Local model, no key, nothing leaves your machine:
 A hosted provider (any big one — swap the name + key):
 
 ```jsonc
-{ "mcpServers": { "anymcp": {
-  "command": "npx", "args": ["-y", "anymcp"],
+{ "mcpServers": { "urlmcp": {
+  "command": "npx", "args": ["-y", "urlmcp"],
   "env": { "FORGE_INFERENCE": "groq/llama-3.3-70b-versatile", "GROQ_API_KEY": "gsk_..." }
 } } }
 ```
@@ -98,8 +98,8 @@ A hosted provider (any big one — swap the name + key):
 Your own inference logic (a script, a router, anything that speaks back tool JSON):
 
 ```jsonc
-{ "mcpServers": { "anymcp": {
-  "command": "npx", "args": ["-y", "anymcp"],
+{ "mcpServers": { "urlmcp": {
+  "command": "npx", "args": ["-y", "urlmcp"],
   "env": { "FORGE_INFERENCE_URL": "https://my-host/infer" }
 } } }
 ```
@@ -149,7 +149,7 @@ The dynamic-website backward-compat suite (`test/dynamic-backcompat.mjs`) is her
 
 ## Install footprint
 
-`npx -y anymcp` is tiny: the whole server is a single bundled file, and the only dependency is
+`npx -y urlmcp` is tiny: the whole server is a single bundled file, and the only dependency is
 **`playwright-core`** (the browser engine, **no bundled browsers**). Install is ~2s / ~14MB — there is **no
 500MB browser download at install time**. The first time you scrape a *dynamic* site, the server downloads
 **one** Chromium (~one-time, ~20-40s, progress shown in your client's logs), then caches it. Static / server-

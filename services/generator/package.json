@@ -2,7 +2,7 @@
   "name": "@mcp/generator",
   "version": "0.0.0",
   "private": true,
-  "description": "Core pipeline for anymcp: scrape analysis + tool inference + deterministic codegen. Embedded into the standalone server via the ./lean entry.",
+  "description": "Core pipeline for urlmcp: scrape analysis + tool inference + deterministic codegen. Embedded into the standalone server via the ./lean entry.",
   "type": "module",
   "main": "./dist/src/lean.js",
   "types": "./dist/src/lean.d.ts",

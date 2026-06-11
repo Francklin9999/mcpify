@@ -1,9 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Francklin9999/mcpify",
-  "title": "anymcp",
+  "title": "urlmcp",
   "description": "Turn any website into a runnable MCP server, in-process. Host-as-brain by default (no API key); optional OpenAI/Anthropic/Gemini/Groq/Ollama/custom inference.",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "repository": {
     "url": "https://github.com/Francklin9999/mcpify",
     "source": "github"
@@ -13,8 +13,8 @@
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
-      "identifier": "anymcp",
-      "version": "0.3.2",
+      "identifier": "urlmcp",
+      "version": "0.4.0",
       "transport": { "type": "stdio" },
       "environmentVariables": [
         {

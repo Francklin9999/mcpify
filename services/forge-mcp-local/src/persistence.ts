@@ -76,7 +76,7 @@ function readRegistry(): RegistryRow[] {
     const backup = `${file}.corrupt-${Date.now()}`;
     try {
       renameSync(file, backup);
-      console.error(`[mcp-forge] registry.json was unparseable; backed it up to ${backup} and started fresh.`);
+      console.error(`[urlmcp] registry.json was unparseable; backed it up to ${backup} and started fresh.`);
     } catch {
       /* best effort: if we can't back it up, still don't crash */
     }

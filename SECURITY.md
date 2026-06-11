@@ -2,8 +2,8 @@
 
 ## Supported versions
 
-`anymcp` is pre-1.0 and under active development. Security fixes target the latest `main` and the most recent
-published release of `anymcp` on npm.
+`urlmcp` is pre-1.0 and under active development. Security fixes target the latest `main` and the most recent
+published release of `urlmcp` on npm.
 
 | Version | Supported |
 |---------|-----------|
@@ -26,7 +26,7 @@ coordinate a fix and disclosure.
 
 ## Scope & threat model notes
 
-`anymcp` generates and runs code that automates websites **on the user's machine, with the user's
+`urlmcp` generates and runs code that automates websites **on the user's machine, with the user's
 credentials**. Some important boundaries:
 
 - **Generated servers run locally.** They are not a hosted scraping service. Treat generated `server.ts` as

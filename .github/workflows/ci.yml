@@ -25,7 +25,7 @@ jobs:
       - name: Build (bundle the server)
         run: npm run build
       - name: Test the MCP server
-        run: npm test --workspace=anymcp
+        run: npm test --workspace=urlmcp
 
   dynamic-browser:
     name: Dynamic-website test (real Chromium)
@@ -45,7 +45,7 @@ jobs:
         run: FORGE_TEST_LIVE_BROWSER=1 node services/forge-mcp-local/test/dynamic-live.mjs
 
   package-smoke:
-    name: Verify anymcp installs clean (npx-ready)
+    name: Verify urlmcp installs clean (npx-ready)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,12 +56,12 @@ jobs:
       - run: npm ci
       - name: Bundle + pack
         run: |
-          npm run bundle --workspace=anymcp
-          npm pack --workspace=anymcp --pack-destination /tmp
+          npm run bundle --workspace=urlmcp
+          npm pack --workspace=urlmcp --pack-destination /tmp
       - name: Install the tarball into a clean project (no workspace deps)
         run: |
           mkdir -p /tmp/smoke && cd /tmp/smoke && npm init -y >/dev/null
-          npm install /tmp/anymcp-*.tgz
+          npm install /tmp/urlmcp-*.tgz
       - name: Boot the installed server over stdio and assert its tools
         run: |
           cd /tmp/smoke
@@ -69,6 +69,6 @@ jobs:
             '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
             '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
             '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-            | timeout 20 node node_modules/.bin/anymcp > out.txt 2>/dev/null || true
+            | timeout 20 node node_modules/.bin/urlmcp > out.txt 2>/dev/null || true
           grep -q forge_scrape out.txt && grep -q forge_emit_server out.txt && grep -q forge_generate out.txt
-          echo "OK: anymcp installs clean and serves its tools."
+          echo "OK: urlmcp installs clean and serves its tools."

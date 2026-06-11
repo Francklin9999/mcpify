@@ -1,8 +1,8 @@
-# anymcp
+# urlmcp
 
 **Turn any website into a runnable MCP server — in one `npx`, with no backend.**
 
-`anymcp` is a self-contained [Model Context Protocol](https://modelcontextprotocol.io) server. Point it at a
+`urlmcp` is a self-contained [Model Context Protocol](https://modelcontextprotocol.io) server. Point it at a
 URL; it scrapes the page, figures out the useful tools (search, lookups, list endpoints, actions), and writes a
 runnable MCP server to disk that you can install into Claude, Cursor, VS Code, or any MCP client.
 
@@ -12,9 +12,9 @@ file whose only dependency is a headless browser engine.
 ```jsonc
 {
   "mcpServers": {
-    "anymcp": {
+    "urlmcp": {
       "command": "npx",
-      "args": ["-y", "anymcp"]
+      "args": ["-y", "urlmcp"]
     }
   }
 }
@@ -62,7 +62,7 @@ site, a single Chromium downloads automatically (one-time, ~20–40s) and is cac
 
 ## Dynamic & bot-walled sites
 
-`anymcp` captures with an **in-process stealth browser** — it renders client-side JS and captures the page's
+`urlmcp` captures with an **in-process stealth browser** — it renders client-side JS and captures the page's
 XHR/fetch traffic, so it builds real tools for SPAs and anti-bot-protected sites with no backend and no setup.
 The full high-stealth engine is baked in and **everything is automatic**:
 
@@ -109,16 +109,16 @@ OpenAI-compatible client, so a key just uses that provider's conventional env va
 
 ```jsonc
 // Fully local, no key, nothing leaves your machine:
-{ "mcpServers": { "anymcp": {
-  "command": "npx", "args": ["-y", "anymcp"],
+{ "mcpServers": { "urlmcp": {
+  "command": "npx", "args": ["-y", "urlmcp"],
   "env": { "FORGE_INFERENCE": "ollama", "OLLAMA_MODEL": "llama3.1" }
 } } }
 ```
 
 ```jsonc
 // A hosted provider — swap the name + key:
-{ "mcpServers": { "anymcp": {
-  "command": "npx", "args": ["-y", "anymcp"],
+{ "mcpServers": { "urlmcp": {
+  "command": "npx", "args": ["-y", "urlmcp"],
   "env": { "FORGE_INFERENCE": "groq/llama-3.3-70b-versatile", "GROQ_API_KEY": "gsk_..." }
 } } }
 ```
@@ -152,7 +152,7 @@ The full list (custom inference headers, byte limits, local-model URLs) is in
 
 ## Install footprint
 
-`npx -y anymcp` is tiny: the server is a single bundled file and the only runtime dependency is
+`npx -y urlmcp` is tiny: the server is a single bundled file and the only runtime dependency is
 **`playwright-core`** (the browser engine — **no bundled browsers**). Install is roughly **2s / 14MB**; there is
 no 500MB browser download at install time. Chromium downloads lazily, once, on the first dynamic scrape.
 
@@ -160,10 +160,10 @@ no 500MB browser download at install time. Chromium downloads lazily, once, on t
 
 ## Repository layout
 
-This repo builds and publishes the single `anymcp` package. It's a small npm workspace:
+This repo builds and publishes the single `urlmcp` package. It's a small npm workspace:
 
 ```
-services/forge-mcp-local/   the published `anymcp` server (stdio MCP, the three tools, in-process scraper)
+services/forge-mcp-local/   the published `urlmcp` server (stdio MCP, the three tools, in-process scraper)
 services/generator/         core pipeline: scrape analysis + tool inference + deterministic codegen
 packages/types/             shared zod contracts
 scripts/opencli-bridge.mjs  optional bridge for driving a user's real Chrome (opencli backend)
@@ -185,7 +185,7 @@ npm test           # run the server's test suites (no key, no network) — incl.
 
 The dynamic-website pipeline (render JS → capture XHR → build tools) has two guards: a hermetic backward-compat
 suite that always runs against real captured-site fixtures, and a live test that drives a real browser against a
-local SPA (`npm run test:live-browser --workspace=anymcp`, or set `FORGE_TEST_LIVE_BROWSER=1`).
+local SPA (`npm run test:live-browser --workspace=urlmcp`, or set `FORGE_TEST_LIVE_BROWSER=1`).
 
 Run the bundled server directly over stdio:
 

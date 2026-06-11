@@ -39,10 +39,10 @@ function parseHeaders(): Record<string, string> | undefined {
   try {
     const o: unknown = JSON.parse(raw);
     if (o && typeof o === "object") return o as Record<string, string>;
-    console.error("[mcp-forge] FORGE_INFERENCE_HEADERS must be a JSON object; ignoring it.");
+    console.error("[urlmcp] FORGE_INFERENCE_HEADERS must be a JSON object; ignoring it.");
     return undefined;
   } catch {
-    console.error("[mcp-forge] FORGE_INFERENCE_HEADERS is not valid JSON; ignoring it.");
+    console.error("[urlmcp] FORGE_INFERENCE_HEADERS is not valid JSON; ignoring it.");
     return undefined;
   }
 }

@@ -15,6 +15,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error("[mcp-forge] fatal:", err);
+  console.error("[urlmcp] fatal:", err);
   process.exit(1);
 });

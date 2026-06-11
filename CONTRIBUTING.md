@@ -1,13 +1,13 @@
-# Contributing to anymcp
+# Contributing to urlmcp
 
-Thanks for your interest! `anymcp` is a single published package built from a small npm workspace. This guide
+Thanks for your interest! `urlmcp` is a single published package built from a small npm workspace. This guide
 gets you productive fast and keeps the bar high.
 
 ## Repo layout
 
 See the [repository layout](./README.md#repository-layout) in the README. The short version:
 
-- `services/forge-mcp-local/` — the published `anymcp` server (stdio MCP, the three tools, in-process scraper).
+- `services/forge-mcp-local/` — the published `urlmcp` server (stdio MCP, the three tools, in-process scraper).
 - `services/generator/` — the core pipeline: scrape analysis + tool inference + deterministic codegen.
 - `packages/types/` — shared zod contracts (`@mcp/types`), the single source of truth for cross-module shapes.
 
@@ -28,8 +28,8 @@ npm test                 # run the server test suites (no key, no network)
 To iterate on just the server package:
 
 ```bash
-npm run bundle --workspace=anymcp
-npm test    --workspace=anymcp
+npm run bundle --workspace=urlmcp
+npm test    --workspace=urlmcp
 ```
 
 ## Development workflow
