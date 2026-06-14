@@ -120,7 +120,6 @@ tools, `{ "tools": [...] }`, or a JSON string of the same.
 | `FORGE_NO_BROWSER_INSTALL` | *(off)* | Set `1` to never auto-download Chromium (capture stays static unless a browser is already present). |
 | `SCRAPER_DISCOVERY_MODE` | `1` | Escalate to the browser even on server-rendered pages so their API traffic is captured into tools. `0` keeps the static result when it's sufficient. |
 | `SCRAPER_INTERACT` | `1` | During a browser capture, scroll / submit a search / click "load more" to surface action-only XHR. |
-| `FORGE_BROWSER_ESCALATE` | `1` | Auto-climb the stealth ladder (real Chrome → stealth driver → headful) when a capture looks blocked. `0` = single attempt. |
 | `FORGE_AUTH_HANDOFF` | `1` | After every stealth rung still hits a sign-in/CAPTCHA wall, open a VISIBLE browser, tell the user, and wait for them to sign in / solve it — then continue capturing the authenticated page in the same session. Needs a display. `0` disables. |
 | `FORGE_AUTH_HANDOFF_TIMEOUT_MS` | `300000` | How long the human handoff waits (5 min) before capturing the page as-is. |
 | `FORGE_AUTH_POLL_MS` | `2500` | How often the handoff re-checks whether the wall has been cleared. |
@@ -128,7 +127,7 @@ tools, `{ "tools": [...] }`, or a JSON string of the same.
 | `FORGE_BROWSER_PROFILE_NAME` | `Default` | Which profile sub-directory to use (e.g. `Profile 1`). |
 | `FORGE_BROWSER_PROFILE_SRC` | *(auto)* | Override the source `User Data` dir to clone/drive (default: your OS Chrome/Edge location). |
 | `FORGE_BROWSER_PROFILE_REFRESH` | `0` | `1` re-copies the clone from your live profile (otherwise cloned once and reused). |
-| `FORGE_USE_REAL_BROWSER` | *(on)* | By default, when your real Chrome/Edge + a display are present, capture auto-opens a signed-in clone of your profile with a debug port (logged-in session). Set `0` to always use the managed browser instead. Overridden by an explicit `FORGE_BROWSER_CDP`. |
+| `FORGE_USE_REAL_BROWSER` | *(on)* | **Default strategy.** When your real Chrome/Edge + a display are present, capture auto-opens a signed-in clone of your profile with a debug port (logged-in session). When a real browser isn't possible, capture falls back to a **single maximum-stealth** managed attempt — never a cheap-first ladder. Set `0` to always use the managed browser. Overridden by an explicit `FORGE_BROWSER_CDP`. |
 | `FORGE_CRAWL` | *(on)* | Site-aware capture: a given link first captures the **base domain**, explores a few same-origin pages, and includes the **given path**, merging their endpoints into one bundle. Set `0` for single-page capture. |
 | `FORGE_CRAWL_MAX_PAGES` | `4` | Total pages captured during a crawl (root + given + explored). |
 | `FORGE_CRAWL_BUDGET_MS` | `90000` | Stop exploring once this much wall-clock has elapsed. |
@@ -140,7 +139,7 @@ tools, `{ "tools": [...] }`, or a JSON string of the same.
 | `FORGE_EXT_WAIT_MS` | `20000` | How long capture waits for the extension to connect before degrading to the managed browser. |
 | `MCP_BROWSER_CHANNEL` | *(auto)* | Force a real-browser channel (`chrome` / `msedge`). Auto-detected from your installed browsers when unset. |
 | `MCP_BROWSER_DRIVER` | *(auto)* | Force a stealth-patched Playwright drop-in (`patchright` / `rebrowser-playwright`). `rebrowser-playwright-core` ships as an optional dependency and is used automatically. |
-| `MCP_BROWSER_HEADLESS` | `1` | Set `0` to always run headful (strongest stealth; needs a display). The ladder also goes headful on its own when escalating. |
+| `MCP_BROWSER_HEADLESS` | *(auto)* | Max stealth runs **headful** whenever a display exists (headless only on a display-less server). Set `1` to force headless (e.g. to avoid a window), `0` to force headful. |
 | `MCP_BROWSER_PATH` | *(unset)* | Absolute path to a specific browser executable to drive. |
 | `MCP_BROWSER_TZ` | `America/New_York` | Timezone presented to pages during capture. |
 | `SCRAPER_URL` | *(unset)* | If set, use a remote Playwright scraper service instead of the in-process browser. |
@@ -234,23 +233,30 @@ The server captures with an **in-process stealth browser** that renders client-s
 XHR/fetch traffic — so it builds tools for SPAs and anti-bot-protected sites with **no backend** and **no manual
 setup**. The full high-stealth engine is baked in and runs **automatically**:
 
-1. **Real-browser fingerprint** — `navigator.webdriver` stripped, `--enable-automation` removed,
-   AutomationControlled off, `plugins`/`languages`/WebGL-vendor/permissions patched, clean (non-Headless) UA.
-2. **Auto-prefers your real Chrome / Edge** when installed (driven via a Playwright channel — strongest
-   fingerprint, no download); falls back to bundled Chromium.
-3. **Bundled CDP-stealth driver** — `rebrowser-playwright-core` (optional dependency, no extra browser download)
-   patches leaks plain Playwright can't (`Runtime.enable`, etc.) and is used automatically when present.
-4. **Auto-escalation** — a cheap headless attempt first; if the render looks blocked (CAPTCHA / challenge /
-   empty shell) it climbs real Chrome → stealth driver → **headful** and keeps the best result.
+**One strategy, no modes or tiers — STEALTH MAX by default:**
 
-This cracks Amazon / Skyscanner / Booking-class sites out of the box on a normal desktop. Force any rung with
-`MCP_BROWSER_CHANNEL` / `MCP_BROWSER_DRIVER` / `MCP_BROWSER_HEADLESS=0`; disable climbing with
-`FORGE_BROWSER_ESCALATE=0`; skip the browser with `FORGE_BROWSER=0`. If no browser is available, capture falls
-back to the static fetch.
+1. **Your real browser first** — when your Chrome/Edge + a display are present, capture runs in your REAL,
+   signed-in session (auto-launch a profile clone with a debug port, or attach via `FORGE_BROWSER_CDP`). Strongest
+   possible fingerprint: it *is* your browser.
+2. **Otherwise, a single maximum-stealth managed attempt** (no cheap-first ladder): the bundled CDP-stealth driver
+   (`rebrowser-playwright-core`) + your real Chrome/Edge channel when installed + **headful whenever a display
+   exists** (headless only on a display-less server), with a real-browser fingerprint (`navigator.webdriver`
+   stripped, `--enable-automation` removed, AutomationControlled off, plugins/languages/WebGL/permissions patched,
+   clean UA).
+3. **Human handoff** — if even max stealth hits a sign-in/CAPTCHA wall, a visible window opens for you to clear it,
+   then capture continues in the same session.
+
+This cracks Amazon / Skyscanner / Booking-class sites out of the box on a normal desktop. Force specifics with
+`MCP_BROWSER_CHANNEL` / `MCP_BROWSER_DRIVER` / `MCP_BROWSER_HEADLESS`; opt out of the real-browser default with
+`FORGE_USE_REAL_BROWSER=0`; skip the browser entirely with `FORGE_BROWSER=0`. If no browser is available, capture
+falls back to the static fetch.
 
 ## Limitations (honest)
 
 - The hardest anti-bot walls also score IP reputation. From a pure datacenter IP **with no display** (a headless
-  server — so the headful rung can't run), the very hardest sites can still block. On a normal desktop the
-  headful escalation handles them; otherwise point `SCRAPER_URL` at an even heavier scraper.
+  server — so max stealth can't go headful), the very hardest sites can still block. On a normal desktop the
+  real-browser / headful path handles them; otherwise point `SCRAPER_URL` at an even heavier scraper.
+- Sites that gate their data APIs behind browser-issued anti-bot cookies (Akamai/PerimeterX — e.g. Expedia flight
+  search) can be **captured** in a real browser, but the generated **HTTP-replay** tools may be rejected (HTTP 429)
+  when called without those cookies. Such sites need a browser-execution tool, not HTTP replay.
 - `forge_generate` quality depends on the model you pick; the keyless heuristic is a floor, not a ceiling.

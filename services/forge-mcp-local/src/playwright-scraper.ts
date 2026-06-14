@@ -7,21 +7,24 @@ import { cdpTargetFromEnv, resolveCdpEndpoint, describeCdpTarget, type CdpTarget
 
 /**
  * In-process stealth browser capture for the standalone server. Renders JS and captures XHR/fetch traffic (via
- * CDP) so the standalone builds tools from dynamic / bot-walled sites with NO backend. Everything that the old
- * Python tier-3/4 scraper did is baked in here, in-process:
+ * CDP) so the standalone builds tools from dynamic / bot-walled sites with NO backend.
  *
+ * STRATEGY (one rule, no modes/tiers): by default capture in the user's REAL browser when possible — attach over
+ * CDP, or launch their installed Chrome/Edge against a signed-in clone (see autoRealChromeTarget / browser-connect).
+ * When a real browser isn't drivable (no display, or none installed) fall back to a SINGLE, MAXIMUM-stealth managed
+ * attempt — never a cheap-first ladder. Max stealth =
  *   - a real-browser fingerprint: navigator.webdriver stripped, --enable-automation removed, plugins/languages/
  *     WebGL vendor/permissions patched, AutomationControlled off, a clean (non-"HeadlessChrome") UA;
- *   - auto-preference for the user's REAL installed Chrome/Edge (strongest fingerprint, no download);
- *   - an optional CDP-stealth driver (rebrowser-playwright-core / patchright) that patches the leaks plain
- *     Playwright can't (e.g. Runtime.enable);
- *   - an AUTO-ESCALATION ladder: a cheap headless attempt first, and only when a capture looks blocked does it
- *     climb to real Chrome -> stealth driver -> headful. Easy sites stay fast; hard sites get the heavy stealth.
+ *   - the CDP-stealth driver (rebrowser-playwright-core / patchright) when usable — patches leaks plain Playwright
+ *     can't (e.g. Runtime.enable);
+ *   - the user's REAL Chrome/Edge channel when installed (strongest fingerprint, no download);
+ *   - HEADFUL whenever a display exists; headless only on a display-less server.
+ * If even max stealth hits a wall a human must clear, a visible sign-in/CAPTCHA handoff takes over.
  *
  * Drivers are lazy-loaded via an indirect import so the static path still works when none is installed and so the
  * bundler never hard-links them. Overrides: MCP_BROWSER_CHANNEL, MCP_BROWSER_DRIVER, MCP_BROWSER_PATH,
- * MCP_BROWSER_HEADLESS, FORGE_BROWSER_ESCALATE=0 (single attempt), MCP_BROWSER_TZ. Set FORGE_BROWSER_PROFILE
- * (clone|real|<path>) to reuse the user's real signed-in Chrome/Edge profile instead of a fresh one — see
+ * MCP_BROWSER_HEADLESS (force headless/headful), MCP_BROWSER_TZ, FORGE_USE_REAL_BROWSER=0 (skip the real-browser
+ * default). Set FORGE_BROWSER_PROFILE (clone|real|<path>) to reuse the user's real signed-in profile — see
  * ./browser-profile.ts.
  */
 
@@ -49,7 +52,7 @@ const UA_BY_OS: Record<string, string> = {
 // Anti-bot / blocked-page markers. A rendered page carrying one (or a near-empty shell with no captured API
 // traffic) is a wall, not content -> escalate to a stronger stealth attempt.
 export const BOT_MARKERS =
-  /captcha|are you (?:a )?human|verify you are human|unusual traffic|just a moment|checking your browser|enable javascript and cookies|access (?:to this page has been )?denied|attention required|sorry[!,. ]+something went wrong|cf-chl|px-captcha|akamai|please verify you are/i;
+  /captcha|are you (?:a )?human|verify you are human|unusual traffic|just a moment|checking your browser|enable javascript and cookies|access (?:to this page has been )?denied|attention required|sorry[!,. ]+something went wrong|cf-chl|px-captcha|akamai|please verify you are|bot or not|perimeterx|pardon our interruption|enable cookies to continue/i;
 
 export interface RawCall {
   method: string;
@@ -645,13 +648,18 @@ async function interactionPass(page: any): Promise<void> {
 }
 
 /**
- * Plan the escalation ladder from what's available here. Cheapest-but-strong first; each later rung adds stealth
- * (real Chrome -> CDP-stealth driver -> headful). Rungs that would be identical (no Chrome, no driver, no display)
- * collapse, so a bare headless server still gets exactly one bundled-Chromium attempt — unchanged behavior.
+ * STEALTH MAX, always. No cheap-first ladder, no tiers: the managed browser fallback (used only when the user's
+ * REAL browser isn't drivable — see autoRealChromeTarget) goes straight to the single strongest config the machine
+ * allows, in one shot:
+ *   - the CDP-stealth driver when usable (patches the leaks plain Playwright can't),
+ *   - the user's REAL Chrome/Edge channel when installed (strongest fingerprint, no download),
+ *   - HEADFUL whenever a display exists (a real window is the strongest signal); headless only on a display-less
+ *     server, where headful is impossible.
+ * Overridable for edge cases: MCP_BROWSER_HEADLESS=1 forces headless (e.g. to avoid a window), MCP_BROWSER_CHANNEL /
+ * MCP_BROWSER_DRIVER pin a browser/driver. Returns a single attempt — the caller still has the human sign-in/CAPTCHA
+ * handoff if even max stealth hits a wall a person must clear.
  */
 export async function planBrowserAttempts(): Promise<Attempt[]> {
-  const baseHeadless = process.env["MCP_BROWSER_HEADLESS"] !== "0";
-  const escalate = process.env["FORGE_BROWSER_ESCALATE"] !== "0";
   const channel = await detectChannel(); // real Chrome/Edge, or undefined -> bundled Chromium
   const stealth = await hasStealthDriver();
   const display = displayAvailable();
@@ -659,21 +667,9 @@ export async function planBrowserAttempts(): Promise<Attempt[]> {
   // A stealth driver is only paired with a real channel (avoids Chromium-revision skew vs the driver's fork);
   // when the user forces MCP_BROWSER_DRIVER we honor it regardless.
   const stealthUsable = forcedDriver || (stealth && !!channel);
-
-  const attempts: Attempt[] = [];
-  attempts.push({ driver: stealthUsable ? "stealth" : "core", channel, headless: baseHeadless });
-  if (escalate) {
-    attempts.push({ driver: stealthUsable ? "stealth" : "core", channel, headless: baseHeadless });
-    attempts.push({ driver: stealthUsable ? "stealth" : "core", channel, headless: display ? false : baseHeadless });
-  }
-  // Dedupe identical rungs (keep first occurrence / order).
-  const seen = new Set<string>();
-  return attempts.filter((a) => {
-    const key = `${a.driver}|${a.channel ?? ""}|${a.headless}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  // Max stealth = headful when we can; honor an explicit MCP_BROWSER_HEADLESS override either way.
+  const headless = process.env["MCP_BROWSER_HEADLESS"] === "1" ? true : process.env["MCP_BROWSER_HEADLESS"] === "0" ? false : !display;
+  return [{ driver: stealthUsable ? "stealth" : "core", channel, headless }];
 }
 
 /** A rendered page is "blocked" if it carries an anti-bot marker, or is a near-empty shell with no captured API. */
@@ -1075,11 +1071,10 @@ export class NodePlaywrightScraper implements Scraper {
           best = bundle;
           bestScore = s;
         }
-        // A sign-in wall won't yield to more stealth — break out to the human handoff. A CAPTCHA or a thin shell
-        // still might, so keep climbing the ladder for a stronger render before considering the handoff.
+        // Max stealth already ran; a wall a human must clear now goes to the visible handoff below.
         if (human && !looksBlocked(bundle)) break;
       } catch (err) {
-        lastErr = err; // this rung couldn't launch (e.g. headful with no display) — try the next
+        lastErr = err; // the max-stealth attempt couldn't launch (e.g. headful with no display) — fall through
       }
     }
 
