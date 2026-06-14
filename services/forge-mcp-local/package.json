@@ -1,6 +1,6 @@
 {
   "name": "urlmcp",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Self-contained MCP server that turns any website into a runnable MCP server, in-process. Host-as-brain by default (no API key); optional OpenAI/Anthropic/Gemini/Groq/Ollama/... or a custom inference URL.",
   "type": "module",
   "license": "MIT",

@@ -93,7 +93,7 @@ async function robotsGate(
 }
 
 export function createServer(): McpServer {
-  const server = new McpServer({ name: "urlmcp", version: "0.4.0" });
+  const server = new McpServer({ name: "urlmcp", version: "0.5.0" });
   const register = server.registerTool.bind(server) as unknown as Register;
   const inference = selectInference();
 

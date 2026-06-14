@@ -12,7 +12,7 @@ import { forgeHome } from "./persistence.js";
  * user loads unpacked at chrome://extensions. Keep EXTENSION_VERSION in step with the server version.
  */
 
-export const EXTENSION_VERSION = "0.4.0";
+export const EXTENSION_VERSION = "0.5.0";
 const DEFAULT_PORT = Number(process.env["FORGE_EXT_PORT"]) || 47_900;
 
 const MANIFEST = (version: string): string =>

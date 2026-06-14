@@ -3,7 +3,7 @@
   "name": "io.github.Francklin9999/mcpify",
   "title": "urlmcp",
   "description": "Turn any website into a runnable MCP server, in-process. Host-as-brain by default (no API key); optional OpenAI/Anthropic/Gemini/Groq/Ollama/custom inference.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "repository": {
     "url": "https://github.com/Francklin9999/mcpify",
     "source": "github"
@@ -14,7 +14,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "urlmcp",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "transport": { "type": "stdio" },
       "environmentVariables": [
         {
@@ -68,7 +68,7 @@
         },
         {
           "name": "FORGE_AUTH_HANDOFF",
-          "description": "When all stealth tiers still hit a sign-in/CAPTCHA wall, open a visible browser and wait for the user to sign in / solve it, then continue capturing the authenticated session (needs a display). Default on; set 0 to disable.",
+          "description": "When max stealth still hits a sign-in/CAPTCHA wall, open a visible browser and wait for the user to sign in / solve it, then continue capturing the authenticated session (needs a display). Default on; set 0 to disable.",
           "isRequired": false,
           "default": "1"
         },
