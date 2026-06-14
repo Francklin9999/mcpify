@@ -49,6 +49,8 @@ try {
 }
 
 process.env.FORGE_ALLOW_PRIVATE_HOSTS = "1"; // our own loopback test server
+process.env.FORGE_USE_REAL_BROWSER = "0";    // test the MANAGED headful handoff, not the auto real-Chrome attach
+process.env.FORGE_CRAWL = "0";               // single-page: assert the handoff on this login page, no base-domain crawl
 process.env.FORGE_BROWSER_ESCALATE = "0";    // one headless attempt -> wall -> handoff (fast + deterministic)
 process.env.FORGE_AUTH_HANDOFF = "1";
 process.env.FORGE_AUTH_HANDOFF_TIMEOUT_MS = "25000";

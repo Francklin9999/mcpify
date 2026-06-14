@@ -26,8 +26,6 @@ const NOISY_CTYPE = /(?:^|[^a-z])(video|audio|image|font)\/|beacon|analytics|tel
 const CHALLENGE_FORM = /captcha|nocaptcha|recaptcha|challenge|human.?verification|verify.?human/i;
 const LOW_VALUE_FORM_ACTION = /feedback|custom[_-]?scopes?|newsletter|subscribe|signup|sign[_-]?up|survey|report[_-]?(?:abuse|content)?/i;
 
-const SEARCH_FIELDS = new Set(["q", "query", "search", "s", "keyword", "keywords", "term", "searchterm", "find_desc", "k", "_nkw", "search_term_string", "text"]);
-
 // JSON-body request templating (POST/PUT APIs like YouTube InnerTube / LinkedIn Voyager / Algolia / GraphQL):
 // expose only the VARIABLE fields as tool params; the fixed boilerplate (a `context`, client info, etc.) stays
 // baked into the replayed body. Without this, a POST tool either drops the body (400) or asks the caller to supply
@@ -255,91 +253,6 @@ function toolsFromNetwork(bundle: CaptureBundle): unknown[] {
       confidence: hasPrimaryBodyInput ? 0.62 : 0.55,
     }];
   });
-}
-
-// HTML <form>s -> action tools (the high-signal static-page case: search boxes)
-type FormField = { name: string; required: boolean };
-
-function parseForms(html: string, pageUrl: string): unknown[] {
-  const tools: unknown[] = [];
-  const formRe = /<form\b([^>]*)>([\s\S]*?)<\/form>/gi;
-  let fm: RegExpExecArray | null;
-  let count = 0;
-  while ((fm = formRe.exec(html)) && count < 6) {
-    const attrs = fm[1] ?? "";
-    const inner = fm[2] ?? "";
-    // Skip login/auth forms - a tool needing credentials violates the session/legal stance.
-    if (/type\s*=\s*["']?password/i.test(inner)) continue;
-
-    const method = (/method\s*=\s*["']?\s*post/i.test(attrs) ? "POST" : "GET") as "GET" | "POST";
-    const actionRaw = attrs.match(/action\s*=\s*["']([^"']*)["']/i)?.[1] ?? "";
-    let action: URL;
-    try {
-      action = new URL(actionRaw || pageUrl, pageUrl);
-    } catch {
-      continue;
-    }
-    // Only http(s) actions yield a usable tool. A `javascript:`/`mailto:`/`tel:` action (common on
-    // JS-driven forms) would fetch() to nothing - skip rather than emit a broken tool.
-    if (action.protocol !== "http:" && action.protocol !== "https:") continue;
-
-    // Visible, named fields only. Exclude hidden/submit/button/image (incl. CSRF tokens the model can't supply).
-    const fields: FormField[] = [];
-    for (const im of inner.matchAll(/<(input|select|textarea)\b([^>]*)>/gi)) {
-      const tag = im[2] ?? "";
-      const name = tag.match(/name\s*=\s*["']([^"']+)["']/i)?.[1];
-      if (!name) continue;
-      const type = (tag.match(/type\s*=\s*["']([^"']+)["']/i)?.[1] ?? "text").toLowerCase();
-      if (["hidden", "submit", "button", "image", "reset", "file"].includes(type)) continue;
-      const isSearch = SEARCH_FIELDS.has(name.toLowerCase());
-      fields.push({ name, required: isSearch });
-      if (fields.length >= 8) break;
-    }
-    if (fields.length === 0) continue;
-
-    const isSearch = fields.some((f) => f.required);
-    const name = isSearch ? "search" : toolName(method, action.pathname);
-    const properties: Record<string, unknown> = {};
-    const paramMapping: Record<string, { in: string; key: string }> = {};
-    const required: string[] = [];
-    const where = method === "POST" ? "body" : "query";
-    for (const f of fields) {
-      properties[f.name] = { type: "string" };
-      paramMapping[f.name] = { in: where, key: f.name };
-      if (f.required) required.push(f.name);
-    }
-
-    tools.push({
-      name,
-      description: isSearch
-        ? `Search ${action.host} (submits the page's search form).`
-        : `Submit the ${method} form at ${action.pathname} on ${action.host}.`,
-      inputSchema: { type: "object", properties, required },
-      execution: {
-        kind: "http",
-        request: {
-          method,
-          urlPattern: action.pathname || "/",
-          rawUrl: action.toString(),
-          requestHeaders: { accept: "text/html" },
-          statusCode: 200,
-          contentType: "text/html",
-        },
-        paramMapping,
-      },
-      confidence: 0.5,
-    });
-    count++;
-  }
-  return tools;
-}
-
-function toolsFromForms(bundle: CaptureBundle): unknown[] {
-  try {
-    return parseForms(bundle.dom.html, bundle.url);
-  } catch {
-    return []; // brittle HTML parsing must never crash the worker; fall back to content/network tools
-  }
 }
 
 function toolsFromAnalyzedForms(bundle: CaptureBundle, analysis: PageAnalysis): unknown[] {

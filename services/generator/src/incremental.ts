@@ -129,19 +129,6 @@ export function computeDelta(bundle: CaptureBundle, coverage: Coverage): { delta
   return { delta, hasNew };
 }
 
-/** Merge candidates into currentTools with no model call - dedup by name and endpoint sig. */
-export function mergeCandidates(currentTools: ToolDefinition[], candidates: ToolDefinition[]): { tools: ToolDefinition[]; added: ToolDefinition[] } {
-  const coverage = coverageOf(currentTools);
-  const { tools: added } = validateCandidates(candidates, {
-    seenNames: coverage.names,
-    dropIf: (tool) => {
-      const s = toolSig(tool);
-      return s !== "" && coverage.sigs.has(s);
-    },
-  });
-  return { tools: [...currentTools, ...added], added };
-}
-
 export interface DiscoverMoreOutcome {
   /** existing tools + the newly discovered ones. */
   tools: ToolDefinition[];

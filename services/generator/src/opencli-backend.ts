@@ -67,14 +67,6 @@ export function deriveDynamicSignals(
   };
 }
 
-/** Human-readable setup note for the opencli backend, reused by the installer + README emitters. */
-export const OPENCLI_SETUP_NOTE =
-  "OpenCLI backend (real logged-in Chrome, for dynamic / bot-walled sites): " +
-  "install once with `npm i -g @jackwener/opencli`, add its Browser Bridge extension from the Chrome Web Store, " +
-  "then `opencli doctor` to confirm the bridge. Select it with MCP_BROWSER_BACKEND=opencli (or it is the baked " +
-  "default for sites detected as dynamic). Optional: MCP_OPENCLI_SESSION=<name> reuses one tab; in Chrome you " +
-  "can `opencli browser <name> bind` your current logged-in tab so tools run as you.";
-
 /**
  * Emit the OpenCliBrowsing class + the createBrowsing() factory + the DEFAULT_BROWSER_BACKEND constant as source
  * text for the generated server. `slug` seeds the default opencli session name; `defaultBackend` is baked from

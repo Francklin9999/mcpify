@@ -54,6 +54,8 @@ try {
 // localhost is SSRF-blocked by default; this is our own test server.
 process.env.FORGE_ALLOW_PRIVATE_HOSTS = "1";
 process.env.FORGE_BROWSER = "1";
+process.env.FORGE_USE_REAL_BROWSER = "0"; // test the managed stealth ladder, not the auto real-Chrome attach
+process.env.FORGE_CRAWL = "0"; // single-page capture: assertions target this one SPA, not a base-domain crawl
 process.env.SCRAPER_INTERACT = "0"; // deterministic: skip the scroll/search interaction pass
 
 let failed = 0;
