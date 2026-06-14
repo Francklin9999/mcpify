@@ -23,9 +23,9 @@ const tool = {
 };
 
 try {
-  const oldHome = process.env.MCP_FORGE_HOME;
+  const oldHome = process.env.URLMCP_HOME;
   const oldAllowPrivate = process.env.FORGE_ALLOW_PRIVATE_HOSTS;
-  process.env.MCP_FORGE_HOME = HOME;
+  process.env.URLMCP_HOME = HOME;
   process.env.FORGE_ALLOW_PRIVATE_HOSTS = "1";
   const server = createServer();
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -37,8 +37,8 @@ try {
   if (res.isError) throw new Error(`tool returned error: ${out}`);
   await client.close();
   await server.close();
-  if (oldHome === undefined) delete process.env.MCP_FORGE_HOME;
-  else process.env.MCP_FORGE_HOME = oldHome;
+  if (oldHome === undefined) delete process.env.URLMCP_HOME;
+  else process.env.URLMCP_HOME = oldHome;
   if (oldAllowPrivate === undefined) delete process.env.FORGE_ALLOW_PRIVATE_HOSTS;
   else process.env.FORGE_ALLOW_PRIVATE_HOSTS = oldAllowPrivate;
 

@@ -63,7 +63,10 @@ function zodRawShapeSource(inputSchema: unknown): string {
 /** Full templated URL for an http tool: origin(rawUrl) + urlPattern (keeps the {param} path placeholders). */
 function urlTemplate(rawUrl: string, urlPattern: string): string {
   try {
-    return new URL(rawUrl).origin + urlPattern;
+    const u = new URL(rawUrl);
+    // Keep any fixed query string from the captured URL (e.g. ?prettyPrint=false, ?alt=json, ?key=...) - these
+    // are often required by the API. urlPattern is path-only; mapped query params override these at runtime.
+    return u.origin + urlPattern + (urlPattern.includes("?") ? "" : u.search);
   } catch {
     return urlPattern;
   }
@@ -103,6 +106,7 @@ function toolRegistration(tool: ToolDefinition): string {
       urlTemplate: urlTemplate(req.rawUrl, req.urlPattern),
       headers: req.requestHeaders,
       paramMapping: tool.execution.paramMapping,
+      requestBody: req.requestBody,
       write,
       json,
     };
@@ -291,6 +295,7 @@ type HttpToolSpec = {
   urlTemplate: string;
   headers: Record<string, string>;
   paramMapping: Record<string, { in: "path" | "query" | "header" | "body"; key: string }>;
+  requestBody?: string; // captured JSON body to REPLAY (fixed boilerplate kept; body params substituted by key path)
   write?: boolean; // mutates data: gated behind MCP_ALLOW_WRITES + per-call dryRun
   json?: boolean; // JSON response: enables pretty-print + the select projection
 };
@@ -557,11 +562,28 @@ function shapeResponseBody(raw: string, ctype: string, select?: string): string 
   return raw;
 }
 
+// Set a (possibly nested, dotted) key path on an object, creating intermediate objects as needed.
+function setByPath(obj: Record<string, any>, dotted: string, value: unknown) {
+  const parts = String(dotted).split(".").filter((p) => p.length > 0);
+  if (!parts.length) return;
+  let cur: any = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const k = String(parts[i]);
+    if (cur[k] == null || typeof cur[k] !== "object") cur[k] = {};
+    cur = cur[k];
+  }
+  cur[String(parts[parts.length - 1])] = value;
+}
+
 async function callHttp(spec: HttpToolSpec, args: Record<string, unknown>) {
   let url = spec.urlTemplate;
-  const query = new URLSearchParams();
+  // Seed the query from any fixed params already in the template, so a caller-supplied value OVERRIDES the
+  // captured default (set()) instead of appending a duplicate key.
+  const tplQ = url.indexOf("?");
+  const query = new URLSearchParams(tplQ >= 0 ? url.slice(tplQ + 1) : "");
+  if (tplQ >= 0) url = url.slice(0, tplQ);
   const headers: Record<string, string> = { ...spec.headers };
-  const body: Record<string, unknown> = {};
+  const bodyEntries: Array<{ key: string; value: unknown }> = [];
   let hasBody = false;
   for (const [param, value] of Object.entries(args)) {
     const m = spec.paramMapping[param];
@@ -573,13 +595,24 @@ async function callHttp(spec: HttpToolSpec, args: Record<string, unknown>) {
     }
     else if (m.in === "query") query.set(m.key, String(value));
     else if (m.in === "header") headers[m.key] = String(value);
-    else { body[m.key] = value; hasBody = true; }
+    else { bodyEntries.push({ key: m.key, value }); hasBody = true; }
   }
   const qs = query.toString();
   if (qs) url += (url.includes("?") ? "&" : "?") + qs;
   url = applyAuthQuery(url);
   const init: RequestInit = { method: spec.method, headers };
-  if (hasBody) {
+  if (spec.requestBody !== undefined) {
+    // Replay the captured request body verbatim (keeps fixed boilerplate like an API "context"), substituting
+    // only the variable fields the caller supplied, each at its captured key path.
+    let base: Record<string, any>;
+    try { base = JSON.parse(spec.requestBody); } catch { base = {}; }
+    for (const e of bodyEntries) setByPath(base, e.key, e.value);
+    init.body = JSON.stringify(base);
+    headers["content-type"] = headers["content-type"] ?? "application/json";
+    hasBody = true;
+  } else if (hasBody) {
+    const body: Record<string, unknown> = {};
+    for (const e of bodyEntries) body[e.key] = e.value;
     headers["content-type"] = headers["content-type"] ?? "application/json";
     init.body = JSON.stringify(body);
   }

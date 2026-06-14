@@ -11,6 +11,7 @@ export const LIMITS = {
   maxHeaders: 64,
   maxHeaderValue: 2_000,
   maxNetworkCalls: 200,
+  maxRequestBody: 32_000,
   maxTools: 128,
   maxGeneratedFiles: 64,
   maxGeneratedFileBytes: 1_000_000,

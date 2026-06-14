@@ -43,8 +43,8 @@
     "bundle": "npm run build && esbuild src/main.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/main.bundle.mjs --external:playwright --external:playwright-core",
     "start": "node dist/src/main.js",
     "prepublishOnly": "npm run bundle",
-    "test": "npm run build && node test/providers.mjs && node test/scraper-select.mjs && node test/stealth-ladder.mjs && node test/persistence.mjs && node test/smoke.mjs && node test/emit.mjs && node test/local-e2e.mjs && node test/dynamic-backcompat.mjs && node test/dynamic-live.mjs && node test/security.mjs",
-    "test:live-browser": "npm run build && FORGE_TEST_LIVE_BROWSER=1 node test/dynamic-live.mjs"
+    "test": "npm run build && node test/providers.mjs && node test/scraper-select.mjs && node test/stealth-ladder.mjs && node test/robots-gate.mjs && node test/browser-connect.mjs && node test/extension-bridge.mjs && node test/credential-safety.mjs && node test/crawl-scraper.mjs && node test/persistence.mjs && node test/smoke.mjs && node test/emit.mjs && node test/local-e2e.mjs && node test/dynamic-backcompat.mjs && node test/dynamic-live.mjs && node test/auth-handoff-live.mjs && node test/cdp-attach-live.mjs && node test/security.mjs",
+    "test:live-browser": "npm run build && FORGE_TEST_LIVE_BROWSER=1 node test/dynamic-live.mjs && FORGE_TEST_LIVE_BROWSER=1 node test/auth-handoff-live.mjs && FORGE_TEST_LIVE_BROWSER=1 node test/cdp-attach-live.mjs"
   },
   "optionalDependencies": {
     "playwright-core": "^1.54.2",

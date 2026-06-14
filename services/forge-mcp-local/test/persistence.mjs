@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const HOME = mkdtempSync(join(tmpdir(), "forge-persist-"));
-process.env.MCP_FORGE_HOME = HOME;
+process.env.URLMCP_HOME = HOME;
 const { FsPersistence } = await import("../dist/src/persistence.js");
 
 let failed = 0;

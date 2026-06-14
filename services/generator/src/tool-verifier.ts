@@ -220,7 +220,7 @@ export function httpProbe(opts: { timeoutMs?: number; maxBytes?: number } = {}):
         method,
         signal: AbortSignal.timeout(timeoutMs),
         redirect: "follow",
-        headers: { accept: "text/html,application/json,*/*", "user-agent": "Mozilla/5.0 (compatible; MCPForge-verify/1.0)" },
+        headers: { accept: "text/html,application/json,*/*", "user-agent": "Mozilla/5.0 (compatible; urlmcp-verify/1.0)" },
       });
       const body = method === "HEAD" ? "" : await readResponseTextWithLimit(res, maxBytes);
       return { status: res.status, body };

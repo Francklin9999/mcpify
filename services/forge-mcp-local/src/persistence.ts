@@ -5,9 +5,20 @@ import { randomUUID } from "node:crypto";
 import type { GeneratedServerArtifact, RegistryEntry, ToolDefinition } from "@mcp/types";
 import type { GeneratePersistence } from "@mcp/generator/lean";
 
-/** Where everything lives locally. Override with MCP_FORGE_HOME (default ~/.mcp-forge). */
+/**
+ * Where everything lives locally. Override with URLMCP_HOME (default ~/.urlmcp).
+ * Backward-compat: the legacy MCP_FORGE_HOME alias and an existing ~/.mcp-forge dir from before the rename are
+ * still honored so servers generated under the old name aren't orphaned. Remove this bridge in a future major.
+ */
 export function forgeHome(): string {
-  return process.env["MCP_FORGE_HOME"]?.trim() || join(homedir(), ".mcp-forge");
+  const override = process.env["URLMCP_HOME"]?.trim() || process.env["MCP_FORGE_HOME"]?.trim();
+  if (override) return override;
+  const home = join(homedir(), ".urlmcp");
+  if (!existsSync(home)) {
+    const legacy = join(homedir(), ".mcp-forge");
+    if (existsSync(legacy)) return legacy; // pre-rename data continuity
+  }
+  return home;
 }
 function serversDir(): string {
   return join(forgeHome(), "servers");
@@ -125,7 +136,7 @@ function appendRegistryRow(row: RegistryRow): Promise<void> {
 
 /**
  * Filesystem persistence - the standalone replacement for the web product's Postgres + R2 adapters, behind the
- * same GeneratePersistence port. Writes the artifact to ~/.mcp-forge/servers/<slug>-v<n>/ + a registry.json row.
+ * same GeneratePersistence port. Writes the artifact to ~/.urlmcp/servers/<slug>-v<n>/ + a registry.json row.
  */
 export class FsPersistence implements GeneratePersistence {
   /** serverId -> the reserved dir + version for one generation, shared across nextServer/saveArtifact. */

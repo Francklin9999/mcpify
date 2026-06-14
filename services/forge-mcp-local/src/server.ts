@@ -6,6 +6,7 @@ import { chooseScraper } from "./scraper.js";
 import { selectInference } from "./select-inference.js";
 import { buildInferencePayload } from "./inference-clients.js";
 import { FsPersistence, installHint } from "./persistence.js";
+import { resolveRobotsPolicy, checkRobots, robotsBlockedMessage, robotsStatus } from "./robots-gate.js";
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
 const text = (s: string): ToolResult => ({ content: [{ type: "text", text: s }] });
@@ -73,6 +74,24 @@ async function validateToolTargets(tools: ToolDefinition[]): Promise<string[]> {
   return errors;
 }
 
+/**
+ * Robots gate run before any scrape: resolve the policy (explicit arg / FORGE_ROBOTS / user prompt / default),
+ * and in "respect" mode refuse a path the site's robots.txt Disallows. Returns a block message OR a status note.
+ */
+async function robotsGate(
+  server: McpServer,
+  url: string,
+  explicit: unknown,
+): Promise<{ blocked?: string; note: string }> {
+  const resolution = await resolveRobotsPolicy(server, { url, explicit });
+  if (resolution.policy === "respect") {
+    const decision = await checkRobots(url);
+    if (!decision.allowed) return { blocked: robotsBlockedMessage(url, decision.disallowRule), note: "" };
+    return { note: robotsStatus(resolution, decision) };
+  }
+  return { note: robotsStatus(resolution) };
+}
+
 export function createServer(): McpServer {
   const server = new McpServer({ name: "urlmcp", version: "0.4.0" });
   const register = server.registerTool.bind(server) as unknown as Register;
@@ -87,10 +106,20 @@ export function createServer(): McpServer {
         "STEP 1 of building an MCP server from a website WITHOUT any API key: scrape the URL and return its " +
         "structured analysis (page type, forms, links, candidate API endpoints, observed network, a DOM sample). " +
         "YOU (the calling model) then decide the tool set and call forge_emit_server with it. This is the " +
-        "recommended path - no LLM key needed, because you are the brain (like how Playwright MCP works).",
+        "recommended path - no LLM key needed, because you are the brain (like how Playwright MCP works). " +
+        "BEFORE scraping, the user is asked whether to respect the site's robots.txt or run in full mode " +
+        "(ignore it - only for sites they own or are authorized to access). If your client cannot show that " +
+        "prompt, ASK THE USER yourself and pass the answer as `robots` ('respect' or 'full').",
       inputSchema: {
         url: z.string().describe("The website to analyze, e.g. https://rubygems.org"),
         legalMode: z.enum(["safe", "full_scrape"]).optional().describe("Scrape mode; default 'safe'."),
+        robots: z
+          .enum(["respect", "full"])
+          .optional()
+          .describe(
+            "Robots policy: 'respect' obeys the site's robots.txt; 'full' ignores it (only for sites the user " +
+              "owns or is authorized to access). If omitted, the user is prompted (or it defaults to 'respect').",
+          ),
       },
     },
     async (args) => {
@@ -98,6 +127,8 @@ export function createServer(): McpServer {
       if (!v.ok) return errorText(v.msg);
       const url = v.url;
       const legalMode = (typeof args.legalMode === "string" ? args.legalMode : "safe") as LegalMode;
+      const gate = await robotsGate(server, url, args.robots);
+      if (gate.blocked) return errorText(gate.blocked);
       try {
         const { scraper, kind } = chooseScraper();
         const bundle = await scraper.capture(url, legalMode);
@@ -122,6 +153,7 @@ export function createServer(): McpServer {
         return text(
           [
             `Scraped ${url} (scraper: ${kind}).`,
+            gate.note,
             ``,
             `PAGE ANALYSIS (use this to design tools):`,
             JSON.stringify(analysis),
@@ -257,16 +289,26 @@ export function createServer(): McpServer {
         `One-shot: scrape a URL and build a runnable MCP server in a single call, using the server-side ` +
         `inference configured via FORGE_INFERENCE (currently: ${inference.label}). Prefer forge_scrape + ` +
         `forge_emit_server when you are an agent (no API key, higher quality). Use this for non-agentic clients ` +
-        `or when you specifically want a configured provider/local model to do the inference.`,
+        `or when you specifically want a configured provider/local model to do the inference. Before scraping, ` +
+        `the user is prompted to respect the site's robots.txt or run in full mode (pass \`robots\` to skip the prompt).`,
       inputSchema: {
         url: z.string().describe("The website to turn into an MCP server."),
         legalMode: z.enum(["safe", "full_scrape"]).optional().describe("Scrape mode; default 'safe'."),
+        robots: z
+          .enum(["respect", "full"])
+          .optional()
+          .describe(
+            "Robots policy: 'respect' obeys robots.txt; 'full' ignores it (only for sites the user owns or is " +
+              "authorized to access). If omitted, the user is prompted (or it defaults to 'respect').",
+          ),
       },
     },
     async (args) => {
       const v = await validateUrl(args.url);
       if (!v.ok) return errorText(v.msg);
       const legalMode = (typeof args.legalMode === "string" ? args.legalMode : "safe") as LegalMode;
+      const gate = await robotsGate(server, v.url, args.robots);
+      if (gate.blocked) return errorText(gate.blocked);
       // Validate (don't cast) the request against the contract - this is the only gate on legalMode's
       // full_scrape acknowledgement invariant, and gives a real error instead of a confusing downstream throw.
       const reqParsed = GenerateRequest.safeParse({
@@ -333,6 +375,7 @@ export function createServer(): McpServer {
         return text(
           [
             `Generated MCP server from ${v.url} using inference: ${inference.label}.`,
+            gate.note,
             `status: ${outcome.status}   tools: ${outcome.toolCount}   confidence: ${outcome.confidence.toFixed(2)}`,
             ``,
             toolSummary(tools),

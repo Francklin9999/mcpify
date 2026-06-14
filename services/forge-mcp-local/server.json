@@ -57,9 +57,20 @@
           "isRequired": false
         },
         {
-          "name": "MCP_FORGE_HOME",
-          "description": "Where generated servers + registry.json are written (default ~/.mcp-forge).",
+          "name": "URLMCP_HOME",
+          "description": "Where generated servers + registry.json are written (default ~/.urlmcp). Legacy MCP_FORGE_HOME / ~/.mcp-forge are still honored.",
           "isRequired": false
+        },
+        {
+          "name": "FORGE_ROBOTS",
+          "description": "Robots policy before scraping: respect (obey robots.txt) | full (ignore it; sites you own/are authorized for). Unset = the user is prompted, defaulting to respect.",
+          "isRequired": false
+        },
+        {
+          "name": "FORGE_AUTH_HANDOFF",
+          "description": "When all stealth tiers still hit a sign-in/CAPTCHA wall, open a visible browser and wait for the user to sign in / solve it, then continue capturing the authenticated session (needs a display). Default on; set 0 to disable.",
+          "isRequired": false,
+          "default": "1"
         },
         {
           "name": "SCRAPER_URL",

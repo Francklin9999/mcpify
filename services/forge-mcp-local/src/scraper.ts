@@ -2,6 +2,8 @@ import { randomUUID, createHash } from "node:crypto";
 import { CaptureBundle, LIMITS, type LegalMode } from "@mcp/types";
 import { assertPublicHttpUrl, readResponseTextWithLimit, type Scraper, HttpScraper } from "@mcp/generator/lean";
 import { NodePlaywrightScraper, playwrightAvailable } from "./playwright-scraper.js";
+import { ExtensionScraper } from "./extension-scraper.js";
+import { CrawlingScraper } from "./crawl-scraper.js";
 
 const UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 urlmcp";
@@ -103,13 +105,24 @@ class EscalatingScraper implements Scraper {
 }
 
 /**
- * Pick the capture strategy. SCRAPER_URL (remote Python scraper) wins when set. Otherwise the in-process
- * escalating scraper: static + stealth browser (renders JS, captures traffic) so the standalone handles
- * dynamic / bot-walled sites with no backend. FORGE_BROWSER=0 forces static-only.
+ * Pick the capture strategy. SCRAPER_URL (remote Python scraper) wins when set. FORGE_BROWSER_BACKEND=extension
+ * routes capture through the user's real signed-in browser via the urlmcp extension (degrading to the ladder if
+ * it isn't connected). Otherwise the in-process escalating scraper: static + stealth browser (renders JS, captures
+ * traffic) so the standalone handles dynamic / bot-walled sites with no backend. FORGE_BROWSER=0 forces static-only.
+ *
+ * The selected scraper is wrapped with CrawlingScraper (unless FORGE_CRAWL=0) so a given link first captures the
+ * base domain, explores a few same-origin pages, and includes the given path — merging their endpoints.
  */
-export function chooseScraper(): { scraper: Scraper; kind: "http-service" | "browser" | "static" } {
-  const svc = process.env["SCRAPER_URL"]?.trim();
-  if (svc) return { scraper: new HttpScraper(svc), kind: "http-service" };
-  if (process.env["FORGE_BROWSER"] === "0") return { scraper: new NodeStaticScraper(), kind: "static" };
-  return { scraper: new EscalatingScraper(), kind: "browser" };
+export function chooseScraper(): { scraper: Scraper; kind: "http-service" | "extension" | "browser" | "static" } {
+  const pick = (): { scraper: Scraper; kind: "http-service" | "extension" | "browser" | "static" } => {
+    const svc = process.env["SCRAPER_URL"]?.trim();
+    if (svc) return { scraper: new HttpScraper(svc), kind: "http-service" };
+    if (process.env["FORGE_BROWSER"] === "0") return { scraper: new NodeStaticScraper(), kind: "static" };
+    if (process.env["FORGE_BROWSER_BACKEND"] === "extension") {
+      return { scraper: new ExtensionScraper(new EscalatingScraper()), kind: "extension" };
+    }
+    return { scraper: new EscalatingScraper(), kind: "browser" };
+  };
+  const { scraper, kind } = pick();
+  return { scraper: process.env["FORGE_CRAWL"] === "0" ? scraper : new CrawlingScraper(scraper), kind };
 }

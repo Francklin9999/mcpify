@@ -28,8 +28,40 @@ const LOW_VALUE_FORM_ACTION = /feedback|custom[_-]?scopes?|newsletter|subscribe|
 
 const SEARCH_FIELDS = new Set(["q", "query", "search", "s", "keyword", "keywords", "term", "searchterm", "find_desc", "k", "_nkw", "search_term_string", "text"]);
 
+// JSON-body request templating (POST/PUT APIs like YouTube InnerTube / LinkedIn Voyager / Algolia / GraphQL):
+// expose only the VARIABLE fields as tool params; the fixed boilerplate (a `context`, client info, etc.) stays
+// baked into the replayed body. Without this, a POST tool either drops the body (400) or asks the caller to supply
+// `context`. Keys are matched case-insensitively; nesting is followed shallowly (e.g. GraphQL `variables.query`).
+const BODY_INPUT_KEY =
+  /^(q|query|search|search_?query|search_?term|search_?text|keywords?|term|text|input|prompt|message|continuation|cursor|after|before|offset|page|page_?number|page_?size|start|limit|count|first|num|video_?id|browse_?id|channel_?id|playlist_?id|slug|username|handle|user_?id|product_?id|sku|asin|lat|latitude|lng|lon|longitude|location|near|sort|sort_?by|order|filter|category|tag)$/i;
+const BODY_FIXED_KEY =
+  /^(context|client|client_?version|client_?name|client_?form_?factor|request_?metadata|internal_?experiment_?flags|consistency_?token_?jars|visitor_?data|user|csn|click_?tracking|tracking_?params|session_?index|capabilities|device_?params|gl|hl|locale|timezone|tz)$|^(x_?goog|sec_?)/i;
+const PRIMARY_INPUT_KEY = /^(q|query|search|search_?query|search_?term|search_?text|keywords?|term|text|input|prompt|message)$/i;
+
+type BodyParam = { name: string; key: string; type: "string" | "number"; required: boolean };
+
+/** Walk a parsed JSON body (shallow) collecting variable input fields as templatable params (dotted key paths). */
+function collectBodyParams(value: unknown, basePath: string, out: BodyParam[], depth: number): void {
+  if (out.length >= 6 || depth > 3 || value === null || typeof value !== "object" || Array.isArray(value)) return;
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (out.length >= 6) break;
+    const path = basePath ? `${basePath}.${k}` : k;
+    if ((typeof v === "string" || typeof v === "number") && BODY_INPUT_KEY.test(k) && !BODY_FIXED_KEY.test(k)) {
+      out.push({ name: k, key: path, type: typeof v === "number" ? "number" : "string", required: PRIMARY_INPUT_KEY.test(k) });
+    } else if (v && typeof v === "object" && !Array.isArray(v) && !BODY_FIXED_KEY.test(k) && depth < 2) {
+      collectBodyParams(v, path, out, depth + 1); // e.g. GraphQL `variables.{...}`
+    }
+  }
+}
+
+// Path segments that carry no semantic meaning in a tool name (API version + generic plumbing). Dropped so
+// `/youtubei/v1/search` -> `post_search` and `/voyager/api/graphql` keeps `voyager`/`graphql`, not `api`.
+const GENERIC_SEGMENT = /^(v\d+|\d+|api|apis|rest|restli|gql|graphql|service|services|ajax|json|data|public|internal|web|www|mobile|app|backend|gateway)$/i;
+
 function toolName(method: string, urlPattern: string): string {
-  const segs = urlPattern.split("/").filter((s) => s && !s.startsWith("{"));
+  const all = urlPattern.split("/").filter((s) => s && !s.startsWith("{"));
+  const meaningful = all.filter((s) => !GENERIC_SEGMENT.test(s));
+  const segs = meaningful.length ? meaningful : all;
   const base = (segs.slice(-2).join("_") || "endpoint").replace(/[^a-z0-9]+/gi, "_");
   const name = `${method.toLowerCase()}_${base}`.replace(/_+/g, "_").replace(/^_|_$/g, "").toLowerCase();
   return /^[a-z]/.test(name) ? name : `call_${name}`;
@@ -176,11 +208,35 @@ function toolsFromNetwork(bundle: CaptureBundle): unknown[] {
     } catch {
       /* malformed rawUrl - skip query extraction */
     }
-    const bodySchema = cap.requestBodySchema as { properties?: Record<string, unknown> } | undefined;
-    for (const key of Object.keys(bodySchema?.properties ?? {}).slice(0, 12)) {
-      if (paramMapping[key]) continue;
-      properties[key] = bodySchema?.properties?.[key] ?? { type: "string" };
-      paramMapping[key] = { in: "body", key };
+    // POST/PUT JSON body: replay the captured body, exposing only its VARIABLE fields as params (fixed
+    // boilerplate - an InnerTube/GraphQL `context`, client info - stays baked into the replayed body). Fall back
+    // to the inferred schema keys when we couldn't capture the real body (older bundles / non-JSON).
+    let hasPrimaryBodyInput = false;
+    if (cap.requestBody) {
+      let parsedBody: unknown;
+      try {
+        parsedBody = JSON.parse(cap.requestBody);
+      } catch {
+        parsedBody = undefined;
+      }
+      const found: BodyParam[] = [];
+      if (parsedBody !== undefined) collectBodyParams(parsedBody, "", found, 0);
+      for (const p of found) {
+        const name = properties[p.name] ? `body_${p.name}` : p.name;
+        properties[name] = { type: p.type };
+        paramMapping[name] = { in: "body", key: p.key };
+        if (p.required) {
+          if (!required.includes(name)) required.push(name);
+          hasPrimaryBodyInput = true;
+        }
+      }
+    } else {
+      const bodySchema = cap.requestBodySchema as { properties?: Record<string, unknown> } | undefined;
+      for (const key of Object.keys(bodySchema?.properties ?? {}).slice(0, 12)) {
+        if (paramMapping[key]) continue;
+        properties[key] = bodySchema?.properties?.[key] ?? { type: "string" };
+        paramMapping[key] = { in: "body", key };
+      }
     }
 
     const fixedNoInputRead =
@@ -191,10 +247,12 @@ function toolsFromNetwork(bundle: CaptureBundle): unknown[] {
 
     return [{
       name: toolName(cap.method, cap.urlPattern),
-      description: `${cap.method} ${cap.urlPattern} (observed API call)`,
+      description: hasPrimaryBodyInput
+        ? `${cap.method} ${cap.urlPattern} (observed API; replays the site's request with your inputs)`
+        : `${cap.method} ${cap.urlPattern} (observed API call)`,
       inputSchema: { type: "object", properties, required },
       execution: { kind: "http", request: cap, paramMapping },
-      confidence: 0.55,
+      confidence: hasPrimaryBodyInput ? 0.62 : 0.55,
     }];
   });
 }

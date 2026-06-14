@@ -76,5 +76,45 @@ await check("CaptureBundle contract still accepts the browser scraper's tier-2 d
   assert.equal(parsed.network[0].urlPattern, "/api/items/{id}", "templated network path preserved");
 });
 
+// 4) InnerTube-style JSON POST API (YouTube /youtubei/v1/search): a huge fixed `context` boilerplate + a single
+//    variable `query`. The body-replay path must expose ONLY `query` (required) and keep the captured body so the
+//    fixed context is replayed intact - never ask the caller to supply `context`. This is what makes
+//    YouTube/LinkedIn/GraphQL POST APIs into working tools.
+await check("InnerTube POST API: only the variable `query` becomes a param; fixed `context` stays in the replay body", async () => {
+  const requestBody = JSON.stringify({
+    context: { client: { clientName: "WEB", clientVersion: "2.2024", gl: "US", hl: "en" }, request: { useSsl: true }, user: {} },
+    query: "lofi",
+    webSearchboxStatsUrl: "/search",
+  });
+  const bundle = CaptureBundle.parse(
+    dynamicBundle("https://www.youtube.com/results?search_query=lofi", [
+      {
+        method: "POST",
+        urlPattern: "/youtubei/v1/search",
+        rawUrl: "https://www.youtube.com/youtubei/v1/search?prettyPrint=false",
+        requestHeaders: { "content-type": "application/json" },
+        requestBody,
+        requestBodySchema: { type: "object", properties: { context: { type: "object" }, query: { type: "string" } } },
+        responseSchema: { type: "object" },
+        statusCode: 200,
+        contentType: "application/json",
+      },
+    ]),
+  );
+  // The contract must accept + preserve the captured body verbatim.
+  assert.equal(bundle.network[0].requestBody, requestBody, "captured request body preserved through the contract");
+
+  const { result } = await inferTools(bundle, new HeuristicInferenceClient());
+  const search = httpTools(result.tools).find((t) => /youtubei\/v1\/search/.test(t.execution.request.urlPattern));
+  assert.ok(search, "the InnerTube search POST became a tool");
+  assert.equal(search.execution.request.method, "POST");
+  const props = Object.keys(search.inputSchema.properties || {});
+  assert.ok(props.includes("query"), "query is exposed as an input");
+  assert.ok((search.inputSchema.required || []).includes("query"), "query is required");
+  assert.ok(!props.includes("context"), "the fixed `context` boilerplate is NOT exposed as a param");
+  assert.equal(search.execution.paramMapping.query?.in, "body", "query maps into the request body");
+  assert.equal(search.execution.request.requestBody, requestBody, "the captured body is kept for replay (context intact)");
+});
+
 console.log(failed === 0 ? "\nPASS: dynamic-website pipeline (captured XHR -> tools) + capture contract are backward-compatible." : `\nFAIL: ${failed} check(s).`);
 process.exit(failed === 0 ? 0 : 1);

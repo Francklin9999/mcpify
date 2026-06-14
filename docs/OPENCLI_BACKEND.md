@@ -1,7 +1,7 @@
 # OpenCLI browser backend (real logged-in Chrome)
 
 For dynamic, JS-only, and bot-hardened sites — flight search (Skyscanner), booking sites, anything behind
-Cloudflare/PerimeterX, or anything that needs your logged-in session — MCP Forge can drive **your real
+Cloudflare/PerimeterX, or anything that needs your logged-in session — urlmcp can drive **your real
 Chrome** instead of a bundled headless Chromium.
 
 This is powered by [opencli](https://github.com/jackwener/opencli), which exposes your browser through a local

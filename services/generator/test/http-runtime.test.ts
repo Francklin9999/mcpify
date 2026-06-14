@@ -99,13 +99,36 @@ const externalGet: ToolDefinition = {
   confidence: 0.6,
 };
 
+// A JSON POST API (YouTube InnerTube / LinkedIn Voyager / GraphQL shape): a captured `requestBody` with fixed
+// boilerplate (`context`) the caller must NOT supply, plus a variable `query` mapped at its body key path. The
+// generated runtime must replay the captured body, keeping `context` and substituting only `query`.
+const replaySearch: ToolDefinition = {
+  name: "replay_search",
+  description: "Replays the site's search API with your query.",
+  inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+  execution: {
+    kind: "http",
+    request: {
+      method: "POST",
+      urlPattern: "/v1/search",
+      rawUrl: "https://api.example.com/v1/search?prettyPrint=false",
+      requestHeaders: { accept: "application/json", "content-type": "application/json" },
+      requestBody: JSON.stringify({ context: { client: { clientName: "WEB", clientVersion: "2.2024" } }, query: "seed-term" }),
+      statusCode: 200,
+      contentType: "application/json",
+    },
+    paramMapping: { query: { in: "body", key: "query" } },
+  },
+  confidence: 0.7,
+};
+
 function compile(): string {
   const serverTs = generateServer({
     serverId: "55555555-5555-4555-8555-555555555555",
     version: 1,
     url: SITE,
     title: "API",
-    tools: [authedGet, createThing, searchThings, externalGet],
+    tools: [authedGet, createThing, searchThings, externalGet, replaySearch],
   }).files.find((f) => f.path === "server.ts")!.content;
   rmSync(genDir, { recursive: true, force: true });
   mkdirSync(genDir, { recursive: true });
@@ -294,6 +317,29 @@ test("idempotent GET retries on 429 then succeeds; binary responses are summariz
       const pdf: any = await client.callTool({ name: "get_thing", arguments: { id: "2" } });
       assert.match(pdf.content[0].text, /\[binary response: application\/pdf/);
       assert.ok(!pdf.content[0].text.includes("%PDF-1.7 binary"), "binary bytes must not be dumped");
+    });
+  } finally {
+    process.env = saved;
+  }
+});
+
+test("captured JSON body is replayed: fixed `context` kept, only the variable field substituted (YouTube/LinkedIn POST APIs)", async () => {
+  const saved = { ...process.env };
+  process.env.MCP_ALLOW_PRIVATE_HOSTS = "1";
+  try {
+    await withServer(async (client, { calls }) => {
+      const r: any = await client.callTool({ name: "replay_search", arguments: { query: "never gonna give you up" } });
+      assert.notEqual(r.isError, true);
+      const sent = calls.at(-1)!;
+      assert.equal(sent.url, "https://api.example.com/v1/search?prettyPrint=false");
+      assert.equal(String(sent.method).toUpperCase(), "POST");
+      const body = JSON.parse(String(sent.body));
+      // The caller's value replaced the seed query...
+      assert.equal(body.query, "never gonna give you up", "the variable field was substituted");
+      // ...while the fixed boilerplate the caller never supplied is replayed intact.
+      assert.equal(body.context?.client?.clientName, "WEB", "fixed `context` boilerplate is preserved");
+      assert.equal(body.context?.client?.clientVersion, "2.2024", "fixed `context` values are preserved");
+      assert.equal(sent.headers!["content-type"], "application/json", "JSON content-type set for the replayed body");
     });
   } finally {
     process.env = saved;

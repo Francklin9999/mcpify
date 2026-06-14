@@ -42,7 +42,7 @@ The recommended path is **`forge_scrape` → (your agent designs tools) → `for
 agent is usually the smartest model in the room. `forge_generate` exists for clients that can't do multi-step
 tool calls.
 
-Generated servers are written to `~/.mcp-forge/servers/<name>/` with an `install.sh` / `install.ps1` and a
+Generated servers are written to `~/.urlmcp/servers/<name>/` with an `install.sh` / `install.ps1` and a
 `mcp-register.mjs` helper, so they build and register into your MCP client in one step.
 
 ---
@@ -52,7 +52,7 @@ Generated servers are written to `~/.mcp-forge/servers/<name>/` with an `install
 1. Add the config block above to your MCP client.
 2. Ask: *"Make an MCP server for https://news.ycombinator.com and install it."*
 3. Your agent calls `forge_scrape`, designs the tools, calls `forge_emit_server`. The new server lands in
-   `~/.mcp-forge/servers/`.
+   `~/.urlmcp/servers/`.
 4. Run its `install.sh` (the agent can do this for you) and the new server appears in your client.
 
 No keys, no services. Static and server-rendered sites need no browser; the first time you scrape a *dynamic*
@@ -79,6 +79,14 @@ The full high-stealth engine is baked in and **everything is automatic**:
 This combination cracks Amazon, Skyscanner, Booking, and similar anti-bot sites out of the box on a normal
 desktop (where a display is available for the headful rung).
 
+**JSON POST APIs (YouTube, LinkedIn, GraphQL).** Modern apps talk to their backend with `POST` + a JSON body
+(YouTube's InnerTube, LinkedIn's Voyager, Algolia, GraphQL). `urlmcp` captures that request body — even when the
+browser **gzip/brotli-compresses** it — and turns the call into a tool by **replaying the real request**: the
+fixed boilerplate the API requires (a big `context` object, client info) is kept intact, and only the *variable*
+fields (`query`, `videoId`, a continuation cursor…) are exposed as tool inputs. So a YouTube capture yields a
+working `search` tool you call with just `{ "query": "lofi" }`, not a broken empty POST. Secrets in bodies are
+redacted before anything is written to disk.
+
 Overrides (rarely needed): `MCP_BROWSER_CHANNEL=chrome|msedge` (force a channel), `MCP_BROWSER_DRIVER=patchright`
 (force a specific stealth driver), `MCP_BROWSER_HEADLESS=0` (always headful), `FORGE_BROWSER_ESCALATE=0` (single
 attempt), `FORGE_BROWSER=0` (skip the browser — static-only).
@@ -86,6 +94,42 @@ attempt), `FORGE_BROWSER=0` (skip the browser — static-only).
 > **Honest caveat:** the hardest walls also score IP reputation. From a pure datacenter IP with no display (a
 > headless server, so no headful rung), the very hardest sites can still block. On a normal desktop, or by
 > pointing `SCRAPER_URL` at an even heavier scraper, those are handled too.
+
+### Sites that need sign-in or a CAPTCHA (human handoff)
+
+Some sites can't be passed by any automated stealth — they need a real login, or a CAPTCHA only a person can
+solve. This covers password forms **and** the "sign in to continue / join to view" interstitials that
+LinkedIn, X, Instagram, and Reddit show logged-out users. When **every** stealth rung still hits such a wall,
+urlmcp opens a **visible browser window**, prints what to do, and **waits for you**:
+
+```
+[urlmcp] ===================== ACTION NEEDED =====================
+[urlmcp] https://example.com is behind a sign-in / CAPTCHA wall that automated stealth couldn't pass.
+[urlmcp] A browser window is open — please SIGN IN or SOLVE THE CAPTCHA there.
+[urlmcp] urlmcp will continue automatically once you're through (waiting up to 5 min).
+```
+
+Sign in / solve the challenge in that window. The moment the wall is gone, urlmcp **continues in the same
+(still-stealthy) session** — so it captures the authenticated page *and* the API calls that only fire after
+login. It tries all stealth tiers first; the handoff is the last resort.
+
+Needs a display (the window is headful), so it runs on a desktop, not a headless server. On by default; disable
+with **`FORGE_AUTH_HANDOFF=0`**, change the wait with **`FORGE_AUTH_HANDOFF_TIMEOUT_MS`** (default `300000`).
+
+---
+
+## robots.txt: respect or full mode
+
+Before scraping a site, urlmcp asks **you** how to treat the site's `robots.txt`:
+
+- **Respect** *(recommended, default)* — obey `robots.txt`; refuse to scrape a path the site Disallows.
+- **Full mode** — ignore `robots.txt` and scrape anyway. **Only for sites you own or are authorized to access** —
+  you are responsible for that use.
+
+If your MCP client supports prompts (elicitation), urlmcp pops the choice automatically each time. If it
+doesn't, the calling model asks you and passes the answer as the `robots` argument (`"respect"` / `"full"`).
+To skip the prompt entirely, pass `robots` explicitly or set **`FORGE_ROBOTS=respect|full`** in the server env.
+A declined prompt always falls back to *respect* — urlmcp never silently ignores `robots.txt`.
 
 ---
 
@@ -131,7 +175,8 @@ OpenAI-compatible client, so a key just uses that provider's conventional env va
 |-----|---------|---------|
 | `FORGE_INFERENCE` | `host` | Server-side inference provider for `forge_generate` (see table above). |
 | `FORGE_MODEL` | per-provider | Override the model for the selected provider. |
-| `MCP_FORGE_HOME` | `~/.mcp-forge` | Where generated servers + `registry.json` are written. |
+| `URLMCP_HOME` | `~/.urlmcp` | Where generated servers + `registry.json` are written. (Legacy `MCP_FORGE_HOME` / `~/.mcp-forge` still honored.) |
+| `FORGE_ROBOTS` | *(prompt)* | Robots policy for scraping: `respect` obeys the site's `robots.txt`; `full` ignores it. When unset, the user is prompted before each scrape (and it defaults to `respect`). |
 | `FORGE_BROWSER` | *(on)* | In-process stealth browser capture for dynamic sites. Set `0` to force static-only fetch. |
 | `FORGE_NO_BROWSER_INSTALL` | *(off)* | Set `1` to never auto-download Chromium. |
 | `SCRAPER_DISCOVERY_MODE` | `1` | Escalate to the browser even on server-rendered pages to capture their API traffic as tools. |
@@ -140,6 +185,8 @@ OpenAI-compatible client, so a key just uses that provider's conventional env va
 | `MCP_BROWSER_DRIVER` | *(auto)* | Force a stealth driver (`patchright` / `rebrowser-playwright`). `rebrowser-playwright-core` ships by default. |
 | `MCP_BROWSER_HEADLESS` | `1` | Set `0` to always run headful (strongest stealth; needs a display). |
 | `FORGE_BROWSER_ESCALATE` | `1` | Auto-climb the stealth ladder when a capture looks blocked. Set `0` for a single attempt. |
+| `FORGE_AUTH_HANDOFF` | `1` | When every stealth rung still hits a sign-in/CAPTCHA wall, open a visible browser and wait for you to clear it (needs a display). Set `0` to disable. |
+| `FORGE_AUTH_HANDOFF_TIMEOUT_MS` | `300000` | How long the human handoff waits for you to sign in / solve the CAPTCHA. |
 | `SCRAPER_URL` | *(unset)* | Use a remote Playwright scraper service instead of the in-process browser. |
 | `FORGE_MAX_TOKENS` | `8192` | Max output tokens for OpenAI-compatible inference. |
 | `FORGE_FETCH_TIMEOUT_MS` | `20000` | Timeout for the built-in static page fetch. |

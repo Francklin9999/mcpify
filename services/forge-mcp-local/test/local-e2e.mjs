@@ -90,7 +90,7 @@ async function withServer(env, fn) {
 try {
   // --- default mode: heuristic, no key. Exercises NodeStaticScraper.capture + analyze + heuristic + codegen. ---
   const home1 = join(tmpdir(), "forge-e2e-heuristic"); rmSync(home1, { recursive: true, force: true });
-  await withServer({ MCP_FORGE_HOME: home1, FORGE_ALLOW_PRIVATE_HOSTS: "1" }, async (call) => {
+  await withServer({ URLMCP_HOME: home1, FORGE_ALLOW_PRIVATE_HOSTS: "1", FORGE_AUTH_HANDOFF: "0" }, async (call) => {
     const scrape = await call("forge_scrape", { url: siteUrl });
     if (scrape.isError) bad("forge_scrape returns analysis", scrape.text);
     else if (!scrape.text.includes("PAGE ANALYSIS")) bad("forge_scrape returns analysis", "no analysis section");
@@ -107,7 +107,7 @@ try {
   // --- openai-compatible against the mock: proves OpenAICompatibleInferenceClient actually CALLS and parses. ---
   const home2 = join(tmpdir(), "forge-e2e-openai"); rmSync(home2, { recursive: true, force: true });
   await withServer(
-    { MCP_FORGE_HOME: home2, FORGE_ALLOW_PRIVATE_HOSTS: "1", FORGE_INFERENCE: "openai-compatible", FORGE_OPENAI_BASE_URL: openaiBase, FORGE_API_KEY: "test", FORGE_MODEL: "mock-model" },
+    { URLMCP_HOME: home2, FORGE_ALLOW_PRIVATE_HOSTS: "1", FORGE_AUTH_HANDOFF: "0", FORGE_INFERENCE: "openai-compatible", FORGE_OPENAI_BASE_URL: openaiBase, FORGE_API_KEY: "test", FORGE_MODEL: "mock-model" },
     async (call) => {
       const gen = await call("forge_generate", { url: siteUrl });
       if (gen.isError) bad("forge_generate (openai-compatible) builds a server", gen.text);

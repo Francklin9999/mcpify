@@ -113,12 +113,31 @@ tools, `{ "tools": [...] }`, or a JSON string of the same.
 
 | Var | Default | Meaning |
 |-----|---------|---------|
-| `MCP_FORGE_HOME` | `~/.mcp-forge` | Where generated servers + `registry.json` are written. |
+| `URLMCP_HOME` | `~/.urlmcp` | Where generated servers + `registry.json` are written. (Legacy `MCP_FORGE_HOME` / `~/.mcp-forge` from before the rename are still honored.) |
+| `FORGE_ROBOTS` | *(prompt)* | Robots policy: `respect` obeys the site's `robots.txt` (refuses Disallowed paths); `full` ignores it (sites you own / are authorized for). Unset = the user is prompted before each scrape, defaulting to `respect`. Also settable per-call via the `robots` tool argument. |
+| `FORGE_ROBOTS_TIMEOUT_MS` | `6000` | Timeout for the `robots.txt` fetch in respect mode (fail-open: an unreachable `robots.txt` does not block). |
 | `FORGE_BROWSER` | *(on)* | In-process stealth browser capture (renders JS + captures XHR/fetch traffic) for dynamic / bot-walled sites. Chromium auto-installs on first use. Set `0` to force the cheap static-only fetch. |
 | `FORGE_NO_BROWSER_INSTALL` | *(off)* | Set `1` to never auto-download Chromium (capture stays static unless a browser is already present). |
 | `SCRAPER_DISCOVERY_MODE` | `1` | Escalate to the browser even on server-rendered pages so their API traffic is captured into tools. `0` keeps the static result when it's sufficient. |
 | `SCRAPER_INTERACT` | `1` | During a browser capture, scroll / submit a search / click "load more" to surface action-only XHR. |
 | `FORGE_BROWSER_ESCALATE` | `1` | Auto-climb the stealth ladder (real Chrome → stealth driver → headful) when a capture looks blocked. `0` = single attempt. |
+| `FORGE_AUTH_HANDOFF` | `1` | After every stealth rung still hits a sign-in/CAPTCHA wall, open a VISIBLE browser, tell the user, and wait for them to sign in / solve it — then continue capturing the authenticated page in the same session. Needs a display. `0` disables. |
+| `FORGE_AUTH_HANDOFF_TIMEOUT_MS` | `300000` | How long the human handoff waits (5 min) before capturing the page as-is. |
+| `FORGE_AUTH_POLL_MS` | `2500` | How often the handoff re-checks whether the wall has been cleared. |
+| `FORGE_BROWSER_PROFILE` | *(off)* | Reuse your **real signed-in** Chrome/Edge profile so capture opens already logged into Gmail/Google/etc. `clone` (recommended) copies your profile once into `~/.urlmcp/browser-profile/<channel>` and drives that — your everyday browser stays untouched and unlocked. `real` drives your live profile in place (quit Chrome first; it locks the profile). An absolute path is used as the user-data-dir directly. Needs a real channel (`MCP_BROWSER_CHANNEL`/auto-detect). *Note: driving a Google-signed-in profile via automation can trigger account-security checks.* |
+| `FORGE_BROWSER_PROFILE_NAME` | `Default` | Which profile sub-directory to use (e.g. `Profile 1`). |
+| `FORGE_BROWSER_PROFILE_SRC` | *(auto)* | Override the source `User Data` dir to clone/drive (default: your OS Chrome/Edge location). |
+| `FORGE_BROWSER_PROFILE_REFRESH` | `0` | `1` re-copies the clone from your live profile (otherwise cloned once and reused). |
+| `FORGE_USE_REAL_BROWSER` | *(on)* | By default, when your real Chrome/Edge + a display are present, capture auto-opens a signed-in clone of your profile with a debug port (logged-in session). Set `0` to always use the managed browser instead. Overridden by an explicit `FORGE_BROWSER_CDP`. |
+| `FORGE_CRAWL` | *(on)* | Site-aware capture: a given link first captures the **base domain**, explores a few same-origin pages, and includes the **given path**, merging their endpoints into one bundle. Set `0` for single-page capture. |
+| `FORGE_CRAWL_MAX_PAGES` | `4` | Total pages captured during a crawl (root + given + explored). |
+| `FORGE_CRAWL_BUDGET_MS` | `90000` | Stop exploring once this much wall-clock has elapsed. |
+| `FORGE_CRAWL_ROBOTS` | `1` | Check `robots.txt` for each auto-discovered page before exploring it (fail-open). The root + the given path are always captured. |
+| `FORGE_BROWSER_CDP` | *(off)* | **Attach** to a browser you're already running, over CDP, instead of launching a fresh one — captures in your real, signed-in session. A port/endpoint (`9222`, `host:9222`, `http://127.0.0.1:9222`, or a `ws://` DevTools URL) attaches to a Chrome you started with `--remote-debugging-port` (or another CDP browser). `launch` makes urlmcp start your real Chrome/Edge with a debugging port (pair with `FORGE_BROWSER_PROFILE=clone` to launch it already signed in). See **Logged-in sites** below. |
+| `FORGE_BROWSER_CDP_PORT` | `47800` | Port used by `FORGE_BROWSER_CDP=launch` when starting your real browser. |
+| `FORGE_BROWSER_BACKEND` | *(off)* | Set `extension` to route capture through the **urlmcp Chrome extension** running in your everyday browser (no flags, no relaunch). Run `npx urlmcp install-extension` first. Degrades to the normal browser ladder if the extension isn't connected. |
+| `FORGE_EXT_PORT` | `47900` | Loopback port for the extension bridge (must match the value baked into the extension at `install-extension`). |
+| `FORGE_EXT_WAIT_MS` | `20000` | How long capture waits for the extension to connect before degrading to the managed browser. |
 | `MCP_BROWSER_CHANNEL` | *(auto)* | Force a real-browser channel (`chrome` / `msedge`). Auto-detected from your installed browsers when unset. |
 | `MCP_BROWSER_DRIVER` | *(auto)* | Force a stealth-patched Playwright drop-in (`patchright` / `rebrowser-playwright`). `rebrowser-playwright-core` ships as an optional dependency and is used automatically. |
 | `MCP_BROWSER_HEADLESS` | `1` | Set `0` to always run headful (strongest stealth; needs a display). The ladder also goes headful on its own when escalating. |
@@ -154,6 +173,60 @@ The dynamic-website backward-compat suite (`test/dynamic-backcompat.mjs`) is her
 500MB browser download at install time**. The first time you scrape a *dynamic* site, the server downloads
 **one** Chromium (~one-time, ~20-40s, progress shown in your client's logs), then caches it. Static / server-
 rendered sites need no browser at all.
+
+## Logged-in sites (LinkedIn, Gmail, X, ...)
+
+For sites that only work when you're signed in, urlmcp captures **in your real, already-authenticated browser
+session** instead of a fresh, logged-into-nothing one. **By default**, when your real Chrome/Edge is installed and a
+display is available, urlmcp automatically opens a signed-in clone of your profile with a debugging port and captures
+there — no configuration needed. If no real browser (or no display) is available it falls back to the managed stealth
+browser. Set `FORGE_USE_REAL_BROWSER=0` to always use the managed browser. The paths, in detail:
+
+| Path | Turn on with | What happens | Best when |
+|------|--------------|--------------|-----------|
+| **Auto (default)** | *(nothing — on by default)* | When your real Chrome/Edge + a display are present, urlmcp opens a signed-in clone of your profile with a debug port and captures there; otherwise falls back to the managed browser. | The common case — you just want logged-in capture to work. Disable with `FORGE_USE_REAL_BROWSER=0`. |
+| **Attach over CDP** | `FORGE_BROWSER_CDP=9222` | You start Chrome with `--remote-debugging-port=9222`; urlmcp attaches to that **live** browser, captures in its session, and leaves it open. No copy, no lock, minimal bot-flagging. | You already run Chrome with a debug port, or want to attach to another CDP browser (Comet, browseros, …). |
+| **Launch + attach** | `FORGE_BROWSER_CDP=launch FORGE_BROWSER_PROFILE=clone` | urlmcp opens your real Chrome (signed in, via a one-time profile clone) with a debugging port and drives it, leaving the window open for you. | You want one command, no manual flags, and the launched browser already logged in. |
+| **Browser extension** | `npx urlmcp install-extension`, then `FORGE_BROWSER_BACKEND=extension` | A tiny extension runs inside your **everyday** Chrome and captures the page in your current session via `chrome.debugger` — no relaunch, no flags, no profile copy. | Your normal browser is already open and signed in and you don't want to restart it. |
+| **Profile reuse** | `FORGE_BROWSER_PROFILE=clone` | urlmcp launches its own (managed) browser against a copy of your signed-in profile. | You want a self-contained managed launch that's already logged in. |
+| **Human handoff** | *(on by default)* | If automated stealth still hits a sign-in/CAPTCHA wall, a visible window opens and waits for you to sign in, then continues. | Anything else — the catch-all fallback. |
+
+**Attaching** to a browser you (or another tool) already run is the lightest and least-detectable option — it *is*
+your real browser, so there's no profile to copy or lock and far less to trip account-security checks. The
+**extension** is the same idea without needing to start Chrome with a flag (Chrome will show *"urlmcp connector
+started debugging this browser"* while a capture runs — that's expected). To start Chrome with a debug port yourself:
+
+```bash
+# macOS
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222
+# Linux
+google-chrome --remote-debugging-port=9222
+# then run urlmcp with FORGE_BROWSER_CDP=9222
+```
+
+**Sign-in / CAPTCHA pause.** On *every* logged-in path (attach, launch, extension, managed) if a capture lands on a
+sign-in or CAPTCHA wall, urlmcp **pauses and waits for you to complete it** in the open window — showing a banner —
+then continues capturing the now-authenticated page in the same session (up to `FORGE_AUTH_HANDOFF_TIMEOUT_MS`,
+`FORGE_AUTH_HANDOFF=0` disables). The pause only fires on a real wall (a login page or a *thin* CAPTCHA page), so an
+already-logged-in content page is never interrupted.
+
+**Your password is never captured.** While you sign in, urlmcp only ever checks *whether the wall is gone* — it never
+reads what you type. Captured DOM has credential input values (password / OTP / card / security-code fields) redacted
+to `__redacted__`, JSON request bodies have secret-named fields scrubbed, and login forms (URL-encoded posts) aren't
+recorded at all.
+
+Everything stays on your machine: the extension bridge binds to `127.0.0.1` only, and no credentials are ever sent
+anywhere. Driving a Google-signed-in session via automation can still trip account-security checks — attaching to
+your real browser minimizes that, but it's the same account.
+
+## Site-aware crawl
+
+Given a link, urlmcp doesn't just capture that one page — it **starts at the base domain**, captures it (which also
+warms the logged-in session and surfaces the site's own links), **explores a few same-origin pages**, and **always
+includes the complete path you gave it**. Every page's XHR/fetch endpoints are merged into one bundle, so the
+generated tools cover the site, not just the landing page. Cross-origin links, assets, and sign-out/login links are
+never followed. Bounded by `FORGE_CRAWL_MAX_PAGES` (default 4) and `FORGE_CRAWL_BUDGET_MS` (default 90s); set
+`FORGE_CRAWL=0` for old single-page behavior.
 
 ## Dynamic / bot-walled sites
 

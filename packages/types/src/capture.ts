@@ -64,6 +64,10 @@ export const NetworkCapture = z
     rawUrl: z.string().url().max(4_000),
     requestHeaders: z.record(z.string().max(256), z.string().max(LIMITS.maxHeaderValue)),
     requestBodySchema: JsonSchema.optional(),
+    // The raw request body (JSON), gunzipped + secret-scrubbed + bounded, so a POST/PUT API can be REPLAYED with
+    // its fixed boilerplate (e.g. an InnerTube/GraphQL `context`) intact while only the variable fields are
+    // substituted from tool params. Optional + backward-compatible: absent for GETs and pre-existing bundles.
+    requestBody: z.string().max(LIMITS.maxRequestBody).optional(),
     responseSchema: JsonSchema.optional(),
     statusCode: z.number().int(),
     contentType: z.string(),
