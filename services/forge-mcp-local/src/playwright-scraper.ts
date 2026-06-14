@@ -117,6 +117,25 @@ function scrubJsonSecrets(value: unknown, depth = 0): unknown {
   return out;
 }
 
+/**
+ * Build the body that a generated tool will REPLAY. A scrubbed body marks secret fields as the string
+ * "__redacted__" (good for a schema/preview), but replaying that placeholder corrupts structured request bodies —
+ * e.g. YouTube InnerTube rejects a replay with `"consistencyTokenJars":"__redacted__"` as HTTP 400 "Invalid value".
+ * So for the replay copy we OMIT scrubbed fields entirely: the credential is still gone (strictly safer than sending
+ * a placeholder), and the remaining boilerplate replays cleanly. Returns undefined if nothing replayable is left.
+ */
+function replayBodyFromScrubbed(scrubbed: unknown): unknown {
+  if (scrubbed === "__redacted__") return undefined;
+  if (Array.isArray(scrubbed)) return scrubbed.map(replayBodyFromScrubbed).filter((v) => v !== undefined);
+  if (scrubbed === null || typeof scrubbed !== "object") return scrubbed;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(scrubbed as Record<string, unknown>)) {
+    const stripped = replayBodyFromScrubbed(v);
+    if (stripped !== undefined) out[k] = stripped;
+  }
+  return out;
+}
+
 // One launch configuration in the escalation ladder. tier in the bundle reflects the stealth level reached.
 interface Attempt {
   driver: "core" | "stealth";
@@ -436,8 +455,9 @@ function attachNetworkCapture(page: any, calls: RawCall[]): void {
           if (decoded && decoded.length <= MAX_JSON_BODY) {
             const scrubbed = scrubJsonSecrets(JSON.parse(decoded));
             requestBodySchema = inferSchema(scrubbed);
-            // Keep the real (scrubbed) body so a POST/PUT API can be replayed with its fixed boilerplate intact.
-            const serialized = JSON.stringify(scrubbed);
+            // Keep the body so a POST/PUT API can be replayed with its fixed boilerplate intact, but OMIT scrubbed
+            // secret fields (a "__redacted__" placeholder would corrupt structured bodies; see replayBodyFromScrubbed).
+            const serialized = JSON.stringify(replayBodyFromScrubbed(scrubbed));
             if (serialized.length <= MAX_REQUEST_BODY) requestBody = serialized;
           }
         }
@@ -489,7 +509,8 @@ export function extNetworkToRaw(items: ExtNetItem[]): RawCall[] {
       try {
         const scrubbed = scrubJsonSecrets(JSON.parse(it.requestPostData));
         requestBodySchema = inferSchema(scrubbed);
-        const serialized = JSON.stringify(scrubbed);
+        // Replay copy omits scrubbed secret fields (a "__redacted__" placeholder corrupts structured bodies).
+        const serialized = JSON.stringify(replayBodyFromScrubbed(scrubbed));
         if (serialized.length <= MAX_REQUEST_BODY) requestBody = serialized;
       } catch {
         /* non-json / unreadable body */

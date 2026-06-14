@@ -88,8 +88,12 @@ await check("end-to-end: ExtensionScraper capture round-trips through the bridge
   assert.strictEqual(call.urlPattern, "/api/users/{id}/graphql", "id segment templated");
   assert.ok(call.responseSchema, "response schema inferred");
   assert.deepStrictEqual(call.responseSchema.properties.items, { type: "array" }, "array field typed");
-  assert.ok(call.requestBody && call.requestBody.includes("__redacted__"), "secret request field scrubbed");
-  assert.ok(!call.requestBody.includes("hunter2"), "raw secret not present");
+  // The replay body OMITS secret fields entirely (no "__redacted__" placeholder, which would corrupt a replayed
+  // structured body); the non-secret field is preserved so the API still replays.
+  assert.ok(call.requestBody && !call.requestBody.includes("hunter2"), "raw secret not present");
+  assert.ok(!call.requestBody.includes("password"), "secret field omitted from the replay body");
+  assert.ok(!call.requestBody.includes("__redacted__"), "no corrupting placeholder in the replay body");
+  assert.ok(JSON.parse(call.requestBody).query === "feed", "non-secret field preserved for replay");
   assert.ok(!("authorization" in call.requestHeaders), "auth header scrubbed");
 });
 
