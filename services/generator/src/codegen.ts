@@ -1,4 +1,4 @@
-import type { ToolDefinition, GeneratedServerArtifact } from "@mcp/types";
+import { isSecretField, type ToolDefinition, type GeneratedServerArtifact } from "@mcp/types";
 import { emitGateRuntime } from "./browser-gate.js";
 import { emitOpenCliBrowsingRuntime, type BrowserBackend } from "./opencli-backend.js";
 import { emitPopupRuntime } from "./popups.js";
@@ -38,6 +38,15 @@ function slugFromUrl(url: string): string {
   }
 }
 
+/**
+ * JSON.stringify for embedding a value as a JS string/object literal in generated code, additionally escaping
+ * U+2028/U+2029. Those are valid in JSON but are LINE TERMINATORS in JS source, so a raw one inside an emitted
+ * string literal could (on some engines) break the literal - this keeps generated code safe across runtimes.
+ */
+function jsLiteral(value: unknown): string {
+  return JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+}
+
 /** JSON Schema (object) -> a zod raw-shape source string, e.g. `{ "id": z.string(), "limit": z.number().optional() }`. */
 function zodRawShapeSource(inputSchema: unknown): string {
   const schema = (inputSchema ?? {}) as { properties?: Record<string, { type?: string }>; required?: string[] };
@@ -55,20 +64,43 @@ function zodRawShapeSource(inputSchema: unknown): string {
       default: zod = "z.unknown()"; break;
     }
     if (!required.has(key)) zod += ".optional()";
-    return `${JSON.stringify(key)}: ${zod}`;
+    return `${jsLiteral(key)}: ${zod}`;
   });
   return `{ ${entries.join(", ")} }`;
 }
 
+const SECRET_QUERY_NAMES = new Set(["api_key", "apikey", "access_token", "token", "sig", "signature", "key"]);
+
+function scrubFixedQuery(search: string): string {
+  if (!search) return "";
+  const params = new URLSearchParams(search);
+  for (const key of [...params.keys()]) {
+    const normalized = key.trim().toLowerCase();
+    if (SECRET_QUERY_NAMES.has(normalized) || isSecretField(key)) params.delete(key);
+  }
+  const kept = params.toString();
+  return kept ? `?${kept}` : "";
+}
+
+function scrubTemplateQuery(urlPattern: string): string {
+  const hashAt = urlPattern.indexOf("#");
+  const beforeHash = hashAt >= 0 ? urlPattern.slice(0, hashAt) : urlPattern;
+  const hash = hashAt >= 0 ? urlPattern.slice(hashAt) : "";
+  const queryAt = beforeHash.indexOf("?");
+  if (queryAt < 0) return urlPattern;
+  return beforeHash.slice(0, queryAt) + scrubFixedQuery(beforeHash.slice(queryAt)) + hash;
+}
+
 /** Full templated URL for an http tool: origin(rawUrl) + urlPattern (keeps the {param} path placeholders). */
 function urlTemplate(rawUrl: string, urlPattern: string): string {
+  const cleanPattern = scrubTemplateQuery(urlPattern);
   try {
     const u = new URL(rawUrl);
-    // Keep any fixed query string from the captured URL (e.g. ?prettyPrint=false, ?alt=json, ?key=...) - these
-    // are often required by the API. urlPattern is path-only; mapped query params override these at runtime.
-    return u.origin + urlPattern + (urlPattern.includes("?") ? "" : u.search);
+    // Keep non-secret fixed query params from the captured URL (e.g. ?prettyPrint=false, ?alt=json), but never
+    // persist captured credentials/signatures such as key/token/sig/access_token into the emitted server.
+    return u.origin + cleanPattern + (cleanPattern.includes("?") ? "" : scrubFixedQuery(u.search));
   } catch {
-    return urlPattern;
+    return cleanPattern;
   }
 }
 
@@ -90,7 +122,7 @@ function mergeShape(baseShape: string, extras: Array<{ key: string; entry: strin
   if (!extras.length) return baseShape;
   const inner = baseShape.trim().replace(/^\{/, "").replace(/\}$/, "").trim();
   const have = new Set([...inner.matchAll(/"([^"]+)"\s*:/g)].map((m) => m[1]));
-  const additions = extras.filter((e) => !have.has(e.key)).map((e) => `${JSON.stringify(e.key)}: ${e.entry}`);
+  const additions = extras.filter((e) => !have.has(e.key)).map((e) => `${jsLiteral(e.key)}: ${e.entry}`);
   const parts = [inner, ...additions].filter((p) => p && p.length);
   return `{ ${parts.join(", ")} }`;
 }
@@ -116,17 +148,17 @@ function toolRegistration(tool: ToolDefinition): string {
     else if (json) extras.push({ key: "select", entry: 'z.string().optional().describe("Comma-separated dot-paths to project from the JSON response, e.g. \\"id,name,owner.login\\". Omit for the full response.")' });
     const shape = mergeShape(baseShape, extras);
     return `  register(
-    ${JSON.stringify(tool.name)},
-    { description: ${JSON.stringify(tool.description)}, inputSchema: ${shape} },
-    async (args) => callHttp(${JSON.stringify(spec)}, args),
+    ${jsLiteral(tool.name)},
+    { description: ${jsLiteral(tool.description)}, inputSchema: ${shape} },
+    async (args) => callHttp(${jsLiteral(spec)}, args),
   );`;
   }
   const shape = baseShape;
   const spec = { steps: tool.execution.steps };
   return `  register(
-    ${JSON.stringify(tool.name)},
-    { description: ${JSON.stringify(tool.description)}, inputSchema: ${shape} },
-    async (args) => callBrowser(${JSON.stringify(spec)}, args, browsing),
+    ${jsLiteral(tool.name)},
+    { description: ${jsLiteral(tool.description)}, inputSchema: ${shape} },
+    async (args) => callBrowser(${jsLiteral(spec)}, args, browsing),
   );`;
 }
 
@@ -242,8 +274,8 @@ function browsingToolkitRegistrations(input: CodegenInput): string {
     .filter((d) => !inferred.has(d.name))
     .map(
       (d) => `  register(
-    ${JSON.stringify(d.name)},
-    { description: ${JSON.stringify(d.description)}, inputSchema: ${d.shape} },
+    ${jsLiteral(d.name)},
+    { description: ${jsLiteral(d.description)}, inputSchema: ${d.shape} },
     async (args) => guardBrowsing(() => ${d.call}),
   );`,
     )
@@ -265,15 +297,6 @@ function commentSafe(s: string): string {
     out += (c < 0x20 || c === 0x7f || c === 0x2028 || c === 0x2029) ? " " : ch;
   }
   return out.trim();
-}
-
-/**
- * JSON.stringify for embedding a value as a JS string/object literal in generated code, additionally escaping
- * U+2028/U+2029. Those are valid in JSON but are LINE TERMINATORS in JS source, so a raw one inside an emitted
- * string literal could (on some engines) break the literal - this keeps generated code safe across runtimes.
- */
-function jsLiteral(value: unknown): string {
-  return JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
 }
 
 export function generateServerSource(input: CodegenInput): string {
@@ -511,7 +534,7 @@ async function fetchWithRetry(url: string, init: RequestInit): Promise<Response>
   let attempt = 0;
   for (;;) {
     try {
-      const res = await fetch(url, { ...init, redirect: "follow", signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+      const res = await fetchPublicHttpUrl(url, { ...init, signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
       if (idempotent && attempt < HTTP_MAX_RETRIES && (res.status === 429 || res.status >= 500)) {
         const wait = retryAfterMs(res) ?? backoffMs(attempt);
         try { await (res.body as any)?.cancel?.(); } catch { /* free the socket before retrying */ }
@@ -524,6 +547,29 @@ async function fetchWithRetry(url: string, init: RequestInit): Promise<Response>
       if (idempotent && attempt < HTTP_MAX_RETRIES) { await sleep(backoffMs(attempt)); attempt++; continue; }
       throw err;
     }
+  }
+}
+
+async function fetchPublicHttpUrl(rawUrl: string, init: RequestInit): Promise<Response> {
+  let url = rawUrl;
+  let requestInit: RequestInit = { ...init, redirect: "manual" };
+  for (let redirects = 0; ; redirects++) {
+    await assertPublicHttpUrl(url);
+    const res = await fetch(url, requestInit);
+    if (res.status < 300 || res.status >= 400) return res;
+    const location = res.headers.get("location");
+    if (!location) return res;
+    if (redirects >= 10) throw new Error("too many redirects; max 10");
+    const next = new URL(location, url).toString();
+    await assertPublicHttpUrl(next);
+    try { await (res.body as any)?.cancel?.(); } catch { /* ignore */ }
+    const method = String(requestInit.method || "GET").toUpperCase();
+    if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === "POST")) {
+      const rest: RequestInit = { ...requestInit };
+      delete rest.body;
+      requestInit = { ...rest, method: "GET", redirect: "manual" };
+    }
+    url = next;
   }
 }
 
@@ -741,6 +787,31 @@ function sameUrl(a: string, b: string): boolean {
   }
 }
 
+const browserPublicOriginCache = new Map<string, Promise<void>>();
+
+async function assertPublicBrowserRequest(rawUrl: string): Promise<void> {
+  if (!/^https?:\\/\\//i.test(rawUrl)) return;
+  let key = rawUrl;
+  try { key = new URL(rawUrl).origin; } catch { await assertPublicHttpUrl(rawUrl); return; }
+  let cached = browserPublicOriginCache.get(key);
+  if (!cached) {
+    cached = assertPublicHttpUrl(key + "/");
+    browserPublicOriginCache.set(key, cached);
+  }
+  await cached;
+}
+
+async function installPublicUrlGuard(page: any): Promise<void> {
+  await page.route("**/*", async (route: any) => {
+    try {
+      await assertPublicBrowserRequest(String(route.request().url() || ""));
+      await route.continue();
+    } catch {
+      try { await route.abort("blockedbyclient"); } catch { /* ignore */ }
+    }
+  });
+}
+
 ${emitGateRuntime()}
 
 ${emitPopupRuntime()}
@@ -832,7 +903,8 @@ class PlaywrightBrowsing implements Browsing {
     const existing = (context.pages && context.pages()) || [];
     const page = existing.length ? existing[0] : await context.newPage();
     page.setDefaultTimeout(20000);
-    if (SITE_URL) { try { await page.goto(SITE_URL, { waitUntil: "domcontentloaded" }); } catch { /* first snapshot still works */ } }
+    try { await installPublicUrlGuard(page); } catch { /* a guarded goto below will still validate the target */ }
+    if (SITE_URL) { try { await assertPublicHttpUrl(SITE_URL); await page.goto(SITE_URL, { waitUntil: "domcontentloaded" }); } catch { /* first snapshot still works */ } }
     return { browser, context, page };
   }
 
@@ -922,7 +994,9 @@ class PlaywrightBrowsing implements Browsing {
         if (templateMissingPathParam(step.value, args)) continue;
         const targetUrl = interpolateUrl(step.value, args, SITE_URL || page.url());
         if (!sameUrl(targetUrl, page.url())) {
+          await assertPublicHttpUrl(targetUrl);
           await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+          try { await assertPublicHttpUrl(page.url()); } catch { /* route guard blocks unsafe hops before dispatch */ }
         }
         continue;
       }
@@ -980,7 +1054,9 @@ class PlaywrightBrowsing implements Browsing {
     let target = url;
     try { target = /^https?:/i.test(url) ? url : new URL(url, SITE_URL || page.url()).toString(); } catch { /* use raw */ }
     if (!sameUrl(target, page.url())) {
+      await assertPublicHttpUrl(target);
       await page.goto(target, { waitUntil: "domcontentloaded" });
+      try { await assertPublicHttpUrl(page.url()); } catch { /* route guard blocks unsafe hops before dispatch */ }
     }
     const gate = await this.checkGate(target);
     if (gate.kind !== "ok") return this.raiseHandoff(gate, target, () => this.navigate(url));

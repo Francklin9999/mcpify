@@ -1,6 +1,6 @@
 import type { ToolDefinition } from "@mcp/types";
 import { readResponseTextWithLimit } from "./http-limits.js";
-import { assertPublicHttpUrl } from "./url-safety.js";
+import { fetchPublicHttpUrl } from "./url-safety.js";
 
 /**
  * Sub-page discovery from a site's own URL inventory (robots.txt Sitemap:/Disallow: + sitemap.xml). More
@@ -18,8 +18,7 @@ export function httpFetchText(opts: { timeoutMs?: number; maxBytes?: number } = 
   const maxBytes = opts.maxBytes ?? 5_000_000;
   return async (url: string): Promise<string | null> => {
     try {
-      await assertPublicHttpUrl(url);
-      const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), headers: { accept: "text/plain, application/xml, text/xml" } });
+      const res = await fetchPublicHttpUrl(url, { signal: AbortSignal.timeout(timeoutMs), headers: { accept: "text/plain, application/xml, text/xml" } });
       if (!res.ok) return null;
       return await readResponseTextWithLimit(res, maxBytes);
     } catch {

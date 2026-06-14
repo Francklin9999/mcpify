@@ -1,6 +1,6 @@
 import type { ToolDefinition } from "@mcp/types";
 import { readResponseTextWithLimit } from "./http-limits.js";
-import { assertPublicHttpUrl } from "./url-safety.js";
+import { fetchPublicHttpUrl } from "./url-safety.js";
 
 /**
  * Live tool verification: probe each tool against the real site to prove it works, not just that it's
@@ -215,11 +215,9 @@ export function httpProbe(opts: { timeoutMs?: number; maxBytes?: number } = {}):
   return async (url, method) => {
     if (!/^https?:\/\//i.test(url) || (method !== "GET" && method !== "HEAD")) return null;
     try {
-      await assertPublicHttpUrl(url);
-      const res = await fetch(url, {
+      const res = await fetchPublicHttpUrl(url, {
         method,
         signal: AbortSignal.timeout(timeoutMs),
-        redirect: "follow",
         headers: { accept: "text/html,application/json,*/*", "user-agent": "Mozilla/5.0 (compatible; urlmcp-verify/1.0)" },
       });
       const body = method === "HEAD" ? "" : await readResponseTextWithLimit(res, maxBytes);

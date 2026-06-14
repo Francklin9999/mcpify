@@ -137,6 +137,32 @@ test("HTTP-only servers do NOT trigger a Playwright browser download", () => {
   assert.match(sh, /mcp-register\.mjs/);
 });
 
+test("codegen strips secret-looking fixed query params from emitted HTTP tools", () => {
+  const tool = {
+    ...validTool,
+    execution: {
+      ...validTool.execution,
+      request: {
+        ...validTool.execution.request,
+        rawUrl: "https://example.com/api/products/123?prettyPrint=false&api_key=LEAK&token=LEAK&sig=LEAK&signature=LEAK&key=LEAK&access_token=LEAK&apikey=LEAK",
+        urlPattern: "/api/products/{id}?alt=json&access_token=LEAK2&signature=LEAK2",
+      },
+    },
+  };
+  const src = generateServer({
+    serverId: "55555555-5555-4555-8555-555555555556",
+    version: 1,
+    url: "https://example.com/api",
+    title: "API",
+    tools: [tool],
+    browsing: false,
+  }).files.find((f) => f.path === "server.ts")!.content;
+
+  assert.match(src, /alt=json/);
+  assert.doesNotMatch(src, /LEAK/);
+  assert.doesNotMatch(src, /api_key=|access_token=|signature=|apikey=/);
+});
+
 // Claude Code registration must be idempotent, preserve existing user MCPs, remove duplicate project-scoped
 // entries, create the file/dir when absent, and write an absolute command/args. Run the real helper to prove it.
 test("mcp-register.mjs registers Claude Code user MCPs and cleans duplicate project scopes", () => {

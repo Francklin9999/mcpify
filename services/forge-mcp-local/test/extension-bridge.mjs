@@ -36,7 +36,16 @@ async function fakeExtensionOnce(makeResult) {
   return cmd;
 }
 
-const bridge = await getSharedBridge();
+let bridge;
+try {
+  bridge = await getSharedBridge();
+} catch (e) {
+  if (e?.code === "EPERM" || e?.code === "EACCES") {
+    console.log("  SKIP: extension bridge loopback listen is blocked in this sandbox.");
+    process.exit(0);
+  }
+  throw e;
+}
 
 // A sentinel fallback scraper so we can prove ExtensionScraper degrades to it when nothing is connected.
 const fallback = {

@@ -175,12 +175,13 @@ test("OpenCliBrowsing issues correct opencli commands and passes `state` through
   writeFakeOpencli(fakeBin, log, 0);
 
   const prev = {
-    bin: process.env.MCP_OPENCLI_BIN, sess: process.env.MCP_OPENCLI_SESSION, backend: process.env.MCP_BROWSER_BACKEND,
+    bin: process.env.MCP_OPENCLI_BIN, sess: process.env.MCP_OPENCLI_SESSION, backend: process.env.MCP_BROWSER_BACKEND, allow: process.env.MCP_ALLOW_PRIVATE_HOSTS,
   };
   // Module-level OPENCLI_BIN/SESSION are read at import time, so set them BEFORE importing the compiled server.
   process.env.MCP_OPENCLI_BIN = fakeBin;
   process.env.MCP_OPENCLI_SESSION = "testsess";
   process.env.MCP_BROWSER_BACKEND = "opencli";
+  process.env.MCP_ALLOW_PRIVATE_HOSTS = "1";
 
   try {
     const mod = await import(jsPath);
@@ -214,6 +215,7 @@ test("OpenCliBrowsing issues correct opencli commands and passes `state` through
     if (prev.bin === undefined) delete process.env.MCP_OPENCLI_BIN; else process.env.MCP_OPENCLI_BIN = prev.bin;
     if (prev.sess === undefined) delete process.env.MCP_OPENCLI_SESSION; else process.env.MCP_OPENCLI_SESSION = prev.sess;
     if (prev.backend === undefined) delete process.env.MCP_BROWSER_BACKEND; else process.env.MCP_BROWSER_BACKEND = prev.backend;
+    if (prev.allow === undefined) delete process.env.MCP_ALLOW_PRIVATE_HOSTS; else process.env.MCP_ALLOW_PRIVATE_HOSTS = prev.allow;
     rmSync(genDir, { recursive: true, force: true });
   }
 });
@@ -235,9 +237,10 @@ test("OpenCliBrowsing surfaces a failed opencli command as a tool error with the
   const log = `${genDir}/argv.log`;
   writeFakeOpencli(fakeBin, log, 1); // always fails
 
-  const prev = { bin: process.env.MCP_OPENCLI_BIN, backend: process.env.MCP_BROWSER_BACKEND };
+  const prev = { bin: process.env.MCP_OPENCLI_BIN, backend: process.env.MCP_BROWSER_BACKEND, allow: process.env.MCP_ALLOW_PRIVATE_HOSTS };
   process.env.MCP_OPENCLI_BIN = fakeBin;
   process.env.MCP_BROWSER_BACKEND = "opencli";
+  process.env.MCP_ALLOW_PRIVATE_HOSTS = "1";
   try {
     const mod = await import(jsPath);
     const server = mod.createServer();
@@ -257,6 +260,7 @@ test("OpenCliBrowsing surfaces a failed opencli command as a tool error with the
   } finally {
     if (prev.bin === undefined) delete process.env.MCP_OPENCLI_BIN; else process.env.MCP_OPENCLI_BIN = prev.bin;
     if (prev.backend === undefined) delete process.env.MCP_BROWSER_BACKEND; else process.env.MCP_BROWSER_BACKEND = prev.backend;
+    if (prev.allow === undefined) delete process.env.MCP_ALLOW_PRIVATE_HOSTS; else process.env.MCP_ALLOW_PRIVATE_HOSTS = prev.allow;
     rmSync(genDir, { recursive: true, force: true });
   }
 });
@@ -289,10 +293,11 @@ test("baked opencli default DEGRADES to Playwright when the bridge is unreachabl
   const fakeBin = `${genDir}/dead-opencli`;
   writeDeadOpencli(fakeBin);
 
-  const prev = { bin: process.env.MCP_OPENCLI_BIN, backend: process.env.MCP_BROWSER_BACKEND, path: process.env.MCP_BROWSER_PATH };
+  const prev = { bin: process.env.MCP_OPENCLI_BIN, backend: process.env.MCP_BROWSER_BACKEND, path: process.env.MCP_BROWSER_PATH, allow: process.env.MCP_ALLOW_PRIVATE_HOSTS };
   process.env.MCP_OPENCLI_BIN = fakeBin;
   delete process.env.MCP_BROWSER_BACKEND;          // no explicit choice => baked default => AutoBrowsing
   process.env.MCP_BROWSER_PATH = `${genDir}/no-such-chrome`; // make the Playwright fallback fail FAST (no real launch)
+  process.env.MCP_ALLOW_PRIVATE_HOSTS = "1";
   try {
     const mod = await import(jsPath);
     const server = mod.createServer();
@@ -313,6 +318,7 @@ test("baked opencli default DEGRADES to Playwright when the bridge is unreachabl
     if (prev.bin === undefined) delete process.env.MCP_OPENCLI_BIN; else process.env.MCP_OPENCLI_BIN = prev.bin;
     if (prev.backend === undefined) delete process.env.MCP_BROWSER_BACKEND; else process.env.MCP_BROWSER_BACKEND = prev.backend;
     if (prev.path === undefined) delete process.env.MCP_BROWSER_PATH; else process.env.MCP_BROWSER_PATH = prev.path;
+    if (prev.allow === undefined) delete process.env.MCP_ALLOW_PRIVATE_HOSTS; else process.env.MCP_ALLOW_PRIVATE_HOSTS = prev.allow;
     rmSync(genDir, { recursive: true, force: true });
   }
 });
@@ -324,9 +330,10 @@ test("explicit MCP_BROWSER_BACKEND=opencli is STRICT: surfaces the bridge error 
   const fakeBin = `${genDir}/dead-opencli`;
   writeDeadOpencli(fakeBin);
 
-  const prev = { bin: process.env.MCP_OPENCLI_BIN, backend: process.env.MCP_BROWSER_BACKEND };
+  const prev = { bin: process.env.MCP_OPENCLI_BIN, backend: process.env.MCP_BROWSER_BACKEND, allow: process.env.MCP_ALLOW_PRIVATE_HOSTS };
   process.env.MCP_OPENCLI_BIN = fakeBin;
   process.env.MCP_BROWSER_BACKEND = "opencli"; // EXPLICIT => strict, no fallback
+  process.env.MCP_ALLOW_PRIVATE_HOSTS = "1";
   try {
     const mod = await import(jsPath + "?strict");
     const server = mod.createServer();
@@ -345,6 +352,7 @@ test("explicit MCP_BROWSER_BACKEND=opencli is STRICT: surfaces the bridge error 
   } finally {
     if (prev.bin === undefined) delete process.env.MCP_OPENCLI_BIN; else process.env.MCP_OPENCLI_BIN = prev.bin;
     if (prev.backend === undefined) delete process.env.MCP_BROWSER_BACKEND; else process.env.MCP_BROWSER_BACKEND = prev.backend;
+    if (prev.allow === undefined) delete process.env.MCP_ALLOW_PRIVATE_HOSTS; else process.env.MCP_ALLOW_PRIVATE_HOSTS = prev.allow;
     rmSync(genDir, { recursive: true, force: true });
   }
 });
@@ -370,10 +378,11 @@ test("baked opencli default with a CONNECTED bridge drives opencli (AutoBrowsing
   const log = `${genDir}/argv.log`;
   writeConnectedOpencli(fakeBin, log);
 
-  const prev = { bin: process.env.MCP_OPENCLI_BIN, backend: process.env.MCP_BROWSER_BACKEND, sess: process.env.MCP_OPENCLI_SESSION };
+  const prev = { bin: process.env.MCP_OPENCLI_BIN, backend: process.env.MCP_BROWSER_BACKEND, sess: process.env.MCP_OPENCLI_SESSION, allow: process.env.MCP_ALLOW_PRIVATE_HOSTS };
   process.env.MCP_OPENCLI_BIN = fakeBin;
   process.env.MCP_OPENCLI_SESSION = "autosess";
   delete process.env.MCP_BROWSER_BACKEND; // no explicit choice => baked default => AutoBrowsing => healthcheck passes
+  process.env.MCP_ALLOW_PRIVATE_HOSTS = "1";
   try {
     const mod = await import(jsPath + "?autook");
     const server = mod.createServer();
@@ -396,6 +405,7 @@ test("baked opencli default with a CONNECTED bridge drives opencli (AutoBrowsing
     if (prev.bin === undefined) delete process.env.MCP_OPENCLI_BIN; else process.env.MCP_OPENCLI_BIN = prev.bin;
     if (prev.backend === undefined) delete process.env.MCP_BROWSER_BACKEND; else process.env.MCP_BROWSER_BACKEND = prev.backend;
     if (prev.sess === undefined) delete process.env.MCP_OPENCLI_SESSION; else process.env.MCP_OPENCLI_SESSION = prev.sess;
+    if (prev.allow === undefined) delete process.env.MCP_ALLOW_PRIVATE_HOSTS; else process.env.MCP_ALLOW_PRIVATE_HOSTS = prev.allow;
     rmSync(genDir, { recursive: true, force: true });
   }
 });

@@ -24,7 +24,7 @@ export type { FetchText, RobotsInfo } from "./sitemap-discovery.js";
 export { verifyAndAnnotate, verifyAndFilter, httpProbe } from "./tool-verifier.js";
 export type { ProbeFn, VerifyReport, ToolVerification } from "./tool-verifier.js";
 export * from "./llm-prompts.js";
-export { assertPublicHttpUrl } from "./url-safety.js";
+export { assertPublicHttpUrl, fetchPublicHttpUrl, isPrivateOrReservedIp } from "./url-safety.js";
 export { readResponseTextWithLimit } from "./http-limits.js";
 
 export { OpenAIInferenceClient } from "./openai-client.js";

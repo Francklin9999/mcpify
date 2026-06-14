@@ -1,6 +1,6 @@
 // Real auth/CAPTCHA-handoff test: drives the in-process stealth browser against a LOCAL sign-in wall that
 // "auto-logs-in" after a few seconds (a stand-in for a human completing the login in the open window). It proves
-// the handoff end to end: the ladder hits a wall a human must clear -> a visible browser opens -> urlmcp waits ->
+// the handoff end to end: max stealth hits a wall a human must clear -> a visible browser opens -> urlmcp waits ->
 // once the wall is gone it CONTINUES capturing the now-authenticated page (post-login content + its XHR) in the
 // SAME session.
 //

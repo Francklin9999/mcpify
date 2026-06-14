@@ -146,7 +146,7 @@ class OpenCliBrowsing implements Browsing {
   private async ensureOpen(): Promise<void> {
     if (this.opened) return;
     this.opened = true;
-    if (SITE_URL) { try { await this.run(["open", SITE_URL]); } catch { /* state still works on a bound tab */ } }
+    if (SITE_URL) { try { await assertPublicHttpUrl(SITE_URL); await this.run(["open", SITE_URL]); } catch { /* state still works on a bound tab */ } }
   }
 
   // opencli's \`state\` already prints URL + title + interactive elements with [N] indices; pass it through
@@ -157,6 +157,7 @@ class OpenCliBrowsing implements Browsing {
     await this.ensureOpen();
     let target = url;
     try { target = /^https?:/i.test(url) ? url : new URL(url, SITE_URL || undefined).toString(); } catch { /* use raw */ }
+    await assertPublicHttpUrl(target);
     await this.run(["open", target]);
     try { await this.run(["eval", DISMISS_SCRIPT]); } catch { /* best-effort consent dismissal */ }
     return this.snapshotText();
@@ -212,7 +213,9 @@ class OpenCliBrowsing implements Browsing {
     for (const step of spec.steps) {
       if (step.action === "navigate") {
         if (templateMissingPathParam(step.value, args)) continue;
-        await this.run(["open", interpolateUrl(step.value, args, SITE_URL)]);
+        const target = interpolateUrl(step.value, args, SITE_URL);
+        await assertPublicHttpUrl(target);
+        await this.run(["open", target]);
       } else if (step.action === "waitFor") {
         const sel = step.target && step.target.selector;
         if (sel) { try { await this.run(["wait", "selector", sel]); } catch { /* best-effort */ } }

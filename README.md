@@ -68,16 +68,16 @@ The full high-stealth engine is baked in and **everything is automatic**:
 
 - **Real fingerprint:** `navigator.webdriver` stripped, `--enable-automation` removed, AutomationControlled off,
   and `plugins` / `languages` / WebGL vendor / permissions patched, with a clean (non-"HeadlessChrome") UA.
-- **Auto-prefers your real Chrome.** If Google Chrome (or Edge) is installed, it drives that via a Playwright
-  channel — the strongest fingerprint, no download. Otherwise it uses bundled Chromium.
+- **Real browser first.** When Chrome/Edge and a display are present, it captures in a signed-in profile clone or
+  attached CDP session — the strongest fingerprint, because it is your browser.
 - **Bundled CDP-stealth driver.** Ships `rebrowser-playwright-core` (an optional dependency, no extra browser
   download) which patches the leaks plain Playwright can't, e.g. `Runtime.enable`.
-- **Auto-escalation on block.** A cheap headless attempt runs first; if the result looks blocked (a CAPTCHA /
-  challenge / empty shell), it automatically climbs — real Chrome → stealth driver → **headful** — and keeps the
-  best render. Easy sites stay fast; hard sites get the heavy stealth without you touching a knob.
+- **Single max-stealth fallback.** If the real-browser path is not available, it makes one strongest managed
+  attempt: CDP-stealth driver, real Chrome/Edge channel when installed, headful whenever a display exists, and
+  headless only on a display-less server.
 
 This combination cracks Amazon, Skyscanner, Booking, and similar anti-bot sites out of the box on a normal
-desktop (where a display is available for the headful rung).
+desktop (where a display is available for the headed browser).
 
 **JSON POST APIs (YouTube, LinkedIn, GraphQL).** Modern apps talk to their backend with `POST` + a JSON body
 (YouTube's InnerTube, LinkedIn's Voyager, Algolia, GraphQL). `urlmcp` captures that request body — even when the
@@ -88,18 +88,18 @@ working `search` tool you call with just `{ "query": "lofi" }`, not a broken emp
 redacted before anything is written to disk.
 
 Overrides (rarely needed): `MCP_BROWSER_CHANNEL=chrome|msedge` (force a channel), `MCP_BROWSER_DRIVER=patchright`
-(force a specific stealth driver), `MCP_BROWSER_HEADLESS=0` (always headful), `FORGE_BROWSER_ESCALATE=0` (single
-attempt), `FORGE_BROWSER=0` (skip the browser — static-only).
+(force a specific stealth driver), `MCP_BROWSER_HEADLESS=0` (always headful), `FORGE_USE_REAL_BROWSER=0` (skip the
+real-browser default), `FORGE_BROWSER=0` (skip the browser — static-only).
 
 > **Honest caveat:** the hardest walls also score IP reputation. From a pure datacenter IP with no display (a
-> headless server, so no headful rung), the very hardest sites can still block. On a normal desktop, or by
+> headless server, so no headed handoff), the very hardest sites can still block. On a normal desktop, or by
 > pointing `SCRAPER_URL` at an even heavier scraper, those are handled too.
 
 ### Sites that need sign-in or a CAPTCHA (human handoff)
 
 Some sites can't be passed by any automated stealth — they need a real login, or a CAPTCHA only a person can
 solve. This covers password forms **and** the "sign in to continue / join to view" interstitials that
-LinkedIn, X, Instagram, and Reddit show logged-out users. When **every** stealth rung still hits such a wall,
+LinkedIn, X, Instagram, and Reddit show logged-out users. When max stealth still hits such a wall,
 urlmcp opens a **visible browser window**, prints what to do, and **waits for you**:
 
 ```
@@ -111,7 +111,7 @@ urlmcp opens a **visible browser window**, prints what to do, and **waits for yo
 
 Sign in / solve the challenge in that window. The moment the wall is gone, urlmcp **continues in the same
 (still-stealthy) session** — so it captures the authenticated page *and* the API calls that only fire after
-login. It tries all stealth tiers first; the handoff is the last resort.
+login. The handoff is the last resort after the automated capture attempt.
 
 Needs a display (the window is headful), so it runs on a desktop, not a headless server. On by default; disable
 with **`FORGE_AUTH_HANDOFF=0`**, change the wait with **`FORGE_AUTH_HANDOFF_TIMEOUT_MS`** (default `300000`).
@@ -183,9 +183,9 @@ OpenAI-compatible client, so a key just uses that provider's conventional env va
 | `SCRAPER_INTERACT` | `1` | During capture, scroll / search / click "load more" to surface action-only XHR. |
 | `MCP_BROWSER_CHANNEL` | *(auto)* | Force a real-browser channel (`chrome` / `msedge`). Auto-detected when unset. |
 | `MCP_BROWSER_DRIVER` | *(auto)* | Force a stealth driver (`patchright` / `rebrowser-playwright`). `rebrowser-playwright-core` ships by default. |
-| `MCP_BROWSER_HEADLESS` | `1` | Set `0` to always run headful (strongest stealth; needs a display). |
-| `FORGE_BROWSER_ESCALATE` | `1` | Auto-climb the stealth ladder when a capture looks blocked. Set `0` for a single attempt. |
-| `FORGE_AUTH_HANDOFF` | `1` | When every stealth rung still hits a sign-in/CAPTCHA wall, open a visible browser and wait for you to clear it (needs a display). Set `0` to disable. |
+| `MCP_BROWSER_HEADLESS` | *(auto)* | Max stealth runs headful when a display exists; set `1` to force headless or `0` to force headful. |
+| `FORGE_USE_REAL_BROWSER` | *(on)* | Prefer a real Chrome/Edge signed-in profile clone or CDP attach when available. Set `0` to use the managed max-stealth browser directly. |
+| `FORGE_AUTH_HANDOFF` | `1` | When max stealth still hits a sign-in/CAPTCHA wall, open a visible browser and wait for you to clear it (needs a display). Set `0` to disable. |
 | `FORGE_AUTH_HANDOFF_TIMEOUT_MS` | `300000` | How long the human handoff waits for you to sign in / solve the CAPTCHA. |
 | `SCRAPER_URL` | *(unset)* | Use a remote Playwright scraper service instead of the in-process browser. |
 | `FORGE_MAX_TOKENS` | `8192` | Max output tokens for OpenAI-compatible inference. |

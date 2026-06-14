@@ -14,6 +14,7 @@ import {
   clampConfidence,
   aggregateConfidence,
   scrubHeaders,
+  isSecretField,
   SECRET_HEADERS,
   SECRET_FIELD_PATTERNS,
 } from "../src/index.js";
@@ -144,6 +145,12 @@ test("scrubHeaders strips exactly the secret-list headers/fields (golden fixture
   // Belt-and-suspenders: no obviously-secret key survived.
   for (const k of Object.keys(scrubbed)) {
     assert.ok(!/authorization|cookie|api-key|token|session/i.test(k), `leaked secret header: ${k}`);
+  }
+});
+
+test("secret-list recognizes credential field aliases beyond password/token", () => {
+  for (const field of ["pwd", "passcode", "otp", "cvv", "cvc", "ccv", "cardNumber", "card_number", "ssn", "securityCode", "security_code"]) {
+    assert.equal(isSecretField(field), true, `${field} should be secret`);
   }
 });
 

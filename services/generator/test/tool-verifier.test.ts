@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { verifyTools, verifyAndFilter, verificationTargets, annotateConfidence, httpProbe, type ProbeFn } from "../src/tool-verifier.js";
+import { fetchPublicHttpUrl } from "../src/url-safety.js";
 import type { ToolDefinition } from "@mcp/types";
 
 const httpTool = (name: string, method: string, urlPattern: string, rawUrl: string, paramMapping: Record<string, { in: string; key: string }> = {}): ToolDefinition => ({
@@ -134,4 +135,26 @@ test("httpProbe refuses non-idempotent methods and non-http urls (safety guard)"
   const probe = httpProbe();
   assert.equal(await probe("https://site/x", "POST" as any), null, "POST refused");
   assert.equal(await probe("ftp://site/x", "GET"), null, "non-http refused");
+});
+
+test("fetchPublicHttpUrl validates redirects before following them", async () => {
+  const realFetch = globalThis.fetch;
+  const requested: string[] = [];
+  globalThis.fetch = (async (url: any) => {
+    requested.push(String(url));
+    return {
+      status: 302,
+      headers: { get: (name: string) => name.toLowerCase() === "location" ? "http://127.0.0.1/admin" : null },
+      body: { cancel: async () => undefined },
+    } as any;
+  }) as typeof fetch;
+  try {
+    await assert.rejects(
+      () => fetchPublicHttpUrl("http://93.184.216.34/start"),
+      /private|loopback|reserved|non-public/,
+    );
+    assert.deepEqual(requested, ["http://93.184.216.34/start"], "private redirect target was not fetched");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

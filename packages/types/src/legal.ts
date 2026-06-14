@@ -8,7 +8,23 @@ export type LegalMode = z.infer<typeof LegalMode>;
 // src/secret-list.json (read by the Python scraper) via a parity test.
 const SECRET_LIST = {
   headers: ["authorization", "cookie", "set-cookie", "x-api-key", "x-auth-token", "proxy-authorization"],
-  fieldPatterns: ["*token*", "*secret*", "*password*", "*session*"],
+  fieldPatterns: [
+    "*token*",
+    "*secret*",
+    "*password*",
+    "*session*",
+    "pwd",
+    "*passcode*",
+    "*otp*",
+    "*cvv*",
+    "*cvc*",
+    "*ccv*",
+    "cardNumber",
+    "card_number",
+    "*ssn*",
+    "securityCode",
+    "security_code",
+  ],
 } as const;
 
 export const SECRET_HEADERS: readonly string[] = SECRET_LIST.headers.map((h) => h.toLowerCase());

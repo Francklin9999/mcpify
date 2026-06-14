@@ -1,4 +1,4 @@
-// Hermetic unit test (no browser) for the stealth escalation ladder + blocked-page detection.
+// Hermetic unit test (no browser) for max-stealth planning + blocked-page detection.
 // Run: node test/stealth-ladder.mjs
 import assert from "node:assert";
 import { planBrowserAttempts, looksBlocked, needsHuman, hasLoginWall, BOT_MARKERS } from "../dist/src/playwright-scraper.js";
@@ -113,8 +113,8 @@ await check("a CAPTCHA page needs a human (via looksBlocked)", () => {
   assert.ok(needsHuman(bundle("<html><body>Please verify you are human.</body></html>")));
 });
 
-await check("a thin SSR shell does NOT need a human (escalate the ladder, don't summon a person)", () => {
-  // <500 chars + no network => looksBlocked (escalate) but NOT needsHuman (no false 5-min handoff wait).
+await check("a thin SSR shell does NOT need a human", () => {
+  // <500 chars + no network => looksBlocked but NOT needsHuman (no false 5-min handoff wait).
   const thin = bundle("<html><body><div id=app></div></body></html>", []);
   assert.ok(looksBlocked(thin), "thin shell is treated as blocked (mine what we can, don't summon a person)");
   assert.ok(!needsHuman(thin), "thin shell must NOT trigger the human handoff");
@@ -144,5 +144,5 @@ await check("a CONTENT page that merely contains 'join now' in its body does NOT
   assert.ok(!needsHuman(b), "rich content page must not summon a human");
 });
 
-console.log(failed === 0 ? "\nPASS: stealth ladder plans + blocked/login-wall detection + auth-handoff triggers hold." : `\nFAIL: ${failed} check(s).`);
+console.log(failed === 0 ? "\nPASS: max-stealth planning + blocked/login-wall detection + auth-handoff triggers hold." : `\nFAIL: ${failed} check(s).`);
 process.exit(failed === 0 ? 0 : 1);

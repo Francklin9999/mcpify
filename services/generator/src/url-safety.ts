@@ -103,3 +103,34 @@ export async function assertPublicHttpUrl(rawUrl: string, opts: { allowEnv?: str
   }
   return url;
 }
+
+export async function fetchPublicHttpUrl(
+  rawUrl: string,
+  init: RequestInit = {},
+  opts: { allowEnv?: string; maxRedirects?: number } = {},
+): Promise<Response> {
+  let url = (await assertPublicHttpUrl(rawUrl, opts)).toString();
+  let requestInit: RequestInit = { ...init, redirect: "manual" };
+  const maxRedirects = opts.maxRedirects ?? 10;
+
+  for (let redirects = 0; ; redirects++) {
+    const res = await fetch(url, requestInit);
+    if (res.status < 300 || res.status >= 400) return res;
+
+    const location = res.headers.get("location");
+    if (!location) return res;
+    if (redirects >= maxRedirects) throw new Error(`too many redirects; max ${maxRedirects}`);
+
+    const next = new URL(location, url).toString();
+    await assertPublicHttpUrl(next, opts);
+    await res.body?.cancel().catch(() => {});
+
+    const method = String(requestInit.method || "GET").toUpperCase();
+    if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === "POST")) {
+      const rest: RequestInit = { ...requestInit };
+      delete rest.body;
+      requestInit = { ...rest, method: "GET", redirect: "manual" };
+    }
+    url = next;
+  }
+}

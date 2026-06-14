@@ -7,7 +7,7 @@ import { assembleBundle, extNetworkToRaw, type ExtNetItem } from "./playwright-s
  * Capture via the urlmcp Chrome extension: the page is rendered in the user's REAL, already-signed-in browser (see
  * extension-bridge.ts / extension-assets.ts), so logged-in sites work with no separate browser, no profile copy,
  * and minimal bot-flagging. If the extension isn't loaded/connected, this degrades to the supplied fallback scraper
- * (the normal static+stealth ladder) so turning the backend on never hard-breaks capture.
+ * (the normal static+managed-browser path) so turning the backend on never hard-breaks capture.
  *
  * Opt in with FORGE_BROWSER_BACKEND=extension; first run `urlmcp install-extension` and load it at chrome://extensions.
  */

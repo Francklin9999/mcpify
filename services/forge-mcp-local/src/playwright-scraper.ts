@@ -1,7 +1,7 @@
 import { randomUUID, createHash } from "node:crypto";
 import { gunzipSync, inflateSync, brotliDecompressSync } from "node:zlib";
 import { CaptureBundle, LIMITS, scrubHeaders, isSecretField, type LegalMode } from "@mcp/types";
-import { assertPublicHttpUrl, type Scraper } from "@mcp/generator/lean";
+import { assertPublicHttpUrl, isPrivateOrReservedIp, type Scraper } from "@mcp/generator/lean";
 import { resolveProfile } from "./browser-profile.js";
 import { cdpTargetFromEnv, resolveCdpEndpoint, describeCdpTarget, type CdpTarget } from "./browser-connect.js";
 
@@ -35,7 +35,7 @@ const INTERACT = process.env["SCRAPER_INTERACT"] !== "0";
 const TIMEZONE = process.env["MCP_BROWSER_TZ"] || "America/New_York";
 const VIEWPORT = { width: 1280, height: 800 };
 
-// Human auth/CAPTCHA handoff: after the whole stealth ladder still hits a wall, open a VISIBLE browser and let the
+// Human auth/CAPTCHA handoff: after max stealth still hits a wall, open a VISIBLE browser and let the
 // user sign in / solve the challenge, then continue capturing in that same (stealthy) session. Needs a display.
 const AUTH_HANDOFF = process.env["FORGE_AUTH_HANDOFF"] !== "0";
 const AUTH_HANDOFF_TIMEOUT_MS = Number(process.env["FORGE_AUTH_HANDOFF_TIMEOUT_MS"]) || 300_000;
@@ -78,6 +78,45 @@ export interface ExtNetItem {
 }
 
 const MAX_REQUEST_BODY = LIMITS.maxRequestBody;
+const publicOriginCache = new Map<string, Promise<void>>();
+
+async function assertPublicBrowserRequest(rawUrl: string): Promise<void> {
+  if (!/^https?:\/\//i.test(rawUrl)) return;
+  let key = rawUrl;
+  try {
+    key = new URL(rawUrl).origin;
+  } catch {
+    await assertPublicHttpUrl(rawUrl, { allowEnv: "FORGE_ALLOW_PRIVATE_HOSTS" });
+    return;
+  }
+  let cached = publicOriginCache.get(key);
+  if (!cached) {
+    cached = assertPublicHttpUrl(key + "/", { allowEnv: "FORGE_ALLOW_PRIVATE_HOSTS" }).then(() => undefined);
+    publicOriginCache.set(key, cached);
+  }
+  await cached;
+}
+
+async function installPublicUrlGuard(page: any): Promise<void> {
+  await page.route("**/*", async (route: any) => {
+    try {
+      await assertPublicBrowserRequest(String(route.request().url() || ""));
+      await route.continue();
+    } catch {
+      await route.abort("blockedbyclient").catch(() => {});
+    }
+  });
+}
+
+function isObviouslyUnsafeHttpUrl(rawUrl: string): boolean {
+  try {
+    const u = new URL(rawUrl);
+    const host = u.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    return !host || host === "localhost" || host.endsWith(".localhost") || isPrivateOrReservedIp(host);
+  } catch {
+    return true;
+  }
+}
 
 /**
  * Read a request's body as a UTF-8 string, transparently decompressing it. Browsers gzip/br/deflate some POST
@@ -139,7 +178,7 @@ function replayBodyFromScrubbed(scrubbed: unknown): unknown {
   return out;
 }
 
-// One launch configuration in the escalation ladder. tier in the bundle reflects the stealth level reached.
+// One launch configuration for the managed max-stealth fallback. tier is a compatibility signal in the bundle.
 interface Attempt {
   driver: "core" | "stealth";
   channel?: string;
@@ -434,6 +473,7 @@ function attachNetworkCapture(page: any, calls: RawCall[]): void {
       if (rt !== "xhr" && rt !== "fetch") return;
       const rawUrl = resp.url();
       if (!/^https?:\/\//i.test(rawUrl) || rawUrl.length > 4_000) return;
+      await assertPublicBrowserRequest(rawUrl);
       const headers = resp.headers() || {};
       const contentType = String(headers["content-type"] || "");
 
@@ -495,6 +535,7 @@ export function extNetworkToRaw(items: ExtNetItem[]): RawCall[] {
     if (out.length >= LIMITS.maxNetworkCalls) break;
     const rawUrl = String(it.url || "");
     if (!/^https?:\/\//i.test(rawUrl) || rawUrl.length > 4_000) continue;
+    if (isObviouslyUnsafeHttpUrl(rawUrl)) continue;
     const contentType = String(it.contentType || "");
 
     let responseSchema: Record<string, unknown> | undefined;
@@ -711,8 +752,8 @@ export function hasLoginWall(bundle: CaptureBundle): boolean {
 
 /**
  * A wall only a HUMAN can clear: a real anti-bot challenge/CAPTCHA, or a sign-in page. This deliberately does NOT
- * include the thin-shell heuristic looksBlocked() uses for ladder escalation - a small SSR page is a reason to try
- * more stealth, not to summon a person (that would hang an automated capture on any near-empty page).
+ * include the thin-shell heuristic looksBlocked() uses to preserve a best-effort bundle - a small SSR page is not
+ * enough reason to summon a person (that would hang an automated capture on any near-empty page).
  */
 export function needsHuman(bundle: CaptureBundle): boolean {
   const html = bundle.dom.html || "";
@@ -755,7 +796,7 @@ function scoreBundle(bundle: CaptureBundle): number {
 }
 
 /**
- * One launch+navigate+capture for a single ladder rung. Throws if the browser can't be launched for this config.
+ * One launch+navigate+capture for the managed browser config. Throws if the browser can't be launched.
  * `onLoaded` (optional) runs after the page settles and before interaction/capture - the auth handoff uses it to
  * pause the open, visible page until the human has signed in / solved the challenge.
  */
@@ -823,6 +864,7 @@ async function captureOnce(
     await context.addInitScript(stealthInit);
     const page = (profile && context.pages?.()[0]) || (await context.newPage());
     page.setDefaultTimeout(NAV_TIMEOUT_MS);
+    await installPublicUrlGuard(page);
     attachNetworkCapture(page, calls);
 
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
@@ -871,6 +913,7 @@ async function captureOverCdp(url: string, legalMode: LegalMode, target: CdpTarg
     const page = await context.newPage();
     try {
       page.setDefaultTimeout(NAV_TIMEOUT_MS);
+      await installPublicUrlGuard(page);
       attachNetworkCapture(page, calls);
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
       try {
@@ -1020,7 +1063,7 @@ async function captureWithHumanHandoff(url: string, legalMode: LegalMode): Promi
  * Default capture source when nothing is explicitly configured: prefer the person's REAL, signed-in Chrome/Edge —
  * launch a clone of their profile with a debug port and attach, so capture runs in their logged-in session — when
  * that's realistically possible (a real browser is installed AND a display exists for the visible window + sign-in
- * pause). Otherwise undefined, so capture uses the managed stealth ladder ("otherwise use the other approach").
+ * pause). Otherwise undefined, so capture uses the managed max-stealth attempt.
  * Opt out with FORGE_USE_REAL_BROWSER=0. The launched window is reused across captures (the launcher reattaches).
  */
 async function autoRealChromeTarget(): Promise<CdpTarget | undefined> {
@@ -1033,10 +1076,10 @@ async function autoRealChromeTarget(): Promise<CdpTarget | undefined> {
 }
 
 /**
- * Stealth browser capture with auto-escalation. Walks the ladder; returns the first clean render immediately,
- * otherwise keeps climbing. If EVERY stealth rung still hits a wall a human must clear (CAPTCHA or sign-in) and a
- * display is available, it opens a VISIBLE max-stealth window for the user to sign in / solve it, then continues
- * in that same session. Returns the best result so the heuristic can still try; throws only if no rung launches.
+ * Stealth browser capture: real signed-in browser first when possible, otherwise one strongest managed attempt.
+ * If max stealth still hits a wall a human must clear (CAPTCHA or sign-in) and a display is available, it opens a
+ * VISIBLE window for the user to sign in / solve it, then continues in that same session. Returns the best result
+ * so the heuristic can still try; throws only if no browser launches.
  */
 export class NodePlaywrightScraper implements Scraper {
   async capture(url: string, legalMode: LegalMode): Promise<CaptureBundle> {
@@ -1045,7 +1088,7 @@ export class NodePlaywrightScraper implements Scraper {
     // Preferred: capture in the user's real, signed-in browser. Either explicitly configured (FORGE_BROWSER_CDP), or
     // — by default — auto-preferred when their real Chrome + a display are available. This is their real session (no
     // copy beyond a one-time clone, no profile lock, minimal bot-flagging), so we return its result directly; only a
-    // hard failure to attach/drive falls through to the managed-launch stealth ladder below.
+    // hard failure to attach/drive falls through to the managed max-stealth attempt below.
     const cdp = cdpTargetFromEnv() ?? (await autoRealChromeTarget());
     if (cdp) {
       try {

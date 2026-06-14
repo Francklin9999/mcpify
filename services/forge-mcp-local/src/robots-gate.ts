@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { assertPublicHttpUrl, parseRobotsTxt, readResponseTextWithLimit } from "@mcp/generator/lean";
+import { fetchPublicHttpUrl, parseRobotsTxt, readResponseTextWithLimit } from "@mcp/generator/lean";
 
 /**
  * Robots policy gate that runs BEFORE we scrape a site to build a server.
@@ -69,12 +69,10 @@ export async function checkRobots(targetUrl: string): Promise<RobotsDecision> {
   }
   const robotsUrl = `${origin}/robots.txt`;
   try {
-    await assertPublicHttpUrl(robotsUrl, { allowEnv: "FORGE_ALLOW_PRIVATE_HOSTS" });
-    const res = await fetch(robotsUrl, {
+    const res = await fetchPublicHttpUrl(robotsUrl, {
       headers: { accept: "text/plain", "user-agent": UA },
-      redirect: "follow",
       signal: AbortSignal.timeout(ROBOTS_TIMEOUT_MS),
-    });
+    }, { allowEnv: "FORGE_ALLOW_PRIVATE_HOSTS" });
     if (!res.ok) return { allowed: true, fetched: false }; // 404 / no robots.txt => nothing disallowed
     const text = await readResponseTextWithLimit(res, ROBOTS_MAX_BYTES);
     const rule = matchDisallow(path, parseRobotsTxt(text).disallow);

@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from "node:crypto";
 import { CaptureBundle, LIMITS, type LegalMode } from "@mcp/types";
-import { assertPublicHttpUrl, readResponseTextWithLimit, type Scraper, HttpScraper } from "@mcp/generator/lean";
+import { assertPublicHttpUrl, fetchPublicHttpUrl, readResponseTextWithLimit, type Scraper, HttpScraper } from "@mcp/generator/lean";
 import { NodePlaywrightScraper, playwrightAvailable } from "./playwright-scraper.js";
 import { ExtensionScraper } from "./extension-scraper.js";
 import { CrawlingScraper } from "./crawl-scraper.js";
@@ -26,11 +26,10 @@ export class NodeStaticScraper implements Scraper {
     await assertPublicHttpUrl(url, { allowEnv: "FORGE_ALLOW_PRIVATE_HOSTS" });
     let res: Response;
     try {
-      res = await fetch(url, {
+      res = await fetchPublicHttpUrl(url, {
         headers: { accept: "text/html,application/xhtml+xml", "user-agent": UA },
-        redirect: "follow",
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      });
+      }, { allowEnv: "FORGE_ALLOW_PRIVATE_HOSTS" });
     } catch (err) {
       const why = err instanceof Error && err.name === "TimeoutError" ? `timed out after ${FETCH_TIMEOUT_MS}ms` : err instanceof Error ? err.message : String(err);
       throw new Error(`fetch ${url} failed: ${why}`);
@@ -42,7 +41,6 @@ export class NodeStaticScraper implements Scraper {
           `Use a reachable public URL, or set SCRAPER_URL to a Playwright scraper for JS-rendered / bot-protected sites.`,
       );
     }
-    if (res.url) await assertPublicHttpUrl(res.url, { allowEnv: "FORGE_ALLOW_PRIVATE_HOSTS" });
     // Reject oversized bodies up front (memory bound); also cap what we keep so downstream hashing/regex stay bounded.
     const html = (await readResponseTextWithLimit(res, FETCH_MAX_BYTES)).slice(0, LIMITS.maxHtml);
     // Validate our own construction against the keystone contract (parity with HttpScraper, which validates
@@ -106,8 +104,8 @@ class EscalatingScraper implements Scraper {
 
 /**
  * Pick the capture strategy. SCRAPER_URL (remote Python scraper) wins when set. FORGE_BROWSER_BACKEND=extension
- * routes capture through the user's real signed-in browser via the urlmcp extension (degrading to the ladder if
- * it isn't connected). Otherwise the in-process escalating scraper: static + stealth browser (renders JS, captures
+ * routes capture through the user's real signed-in browser via the urlmcp extension (degrading to the managed
+ * browser if it isn't connected). Otherwise the in-process scraper: static + stealth browser (renders JS, captures
  * traffic) so the standalone handles dynamic / bot-walled sites with no backend. FORGE_BROWSER=0 forces static-only.
  *
  * The selected scraper is wrapped with CrawlingScraper (unless FORGE_CRAWL=0) so a given link first captures the
